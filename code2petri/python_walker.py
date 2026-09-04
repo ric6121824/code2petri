@@ -56,6 +56,26 @@ def _format_statement_label(stmt: ast.stmt) -> str:
         test_str = ast.unparse(stmt.test) if hasattr(ast, "unparse") else "condition"
         return f"if {test_str}"
 
+    # While loop statement
+    if isinstance(stmt, ast.While):
+        test_str = ast.unparse(stmt.test) if hasattr(ast, "unparse") else "condition"
+        return f"while {test_str}"
+
+    # For loop statement
+    if isinstance(stmt, (ast.For, ast.AsyncFor)):
+        prefix = "async for" if isinstance(stmt, ast.AsyncFor) else "for"
+        if hasattr(ast, "unparse"):
+            target_str = ast.unparse(stmt.target)
+            iter_str = ast.unparse(stmt.iter)
+            return f"{prefix} {target_str} in {iter_str}"
+        return f"{prefix} loop"
+
+    if isinstance(stmt, ast.Break):
+        return "break"
+
+    if isinstance(stmt, ast.Continue):
+        return "continue"
+
     if hasattr(ast, "unparse"):
         summary = ast.unparse(stmt)
         # Take first line if statement is multiline
@@ -72,6 +92,7 @@ class _PythonControlFlowWalker:
         self.end_place = end_place
         self.place_counter = 0
         self.trans_counter = 0
+        self.loop_stack: List[dict] = []
 
     def new_place(
         self,
@@ -133,6 +154,28 @@ class _PythonControlFlowWalker:
                 self.net.add_arc(source=trans, target=self.end_place)
                 return None
 
+            elif isinstance(stmt, ast.Break):
+                if not self.loop_stack:
+                    raise SyntaxError(f"'break' outside loop at line {stmt.lineno}")
+                trans = self.new_transition(
+                    label=_format_statement_label(stmt),
+                    line_number=stmt.lineno,
+                )
+                self.net.add_arc(source=current_place, target=trans)
+                self.net.add_arc(source=trans, target=self.loop_stack[-1]["exit"])
+                return None
+
+            elif isinstance(stmt, ast.Continue):
+                if not self.loop_stack:
+                    raise SyntaxError(f"'continue' not properly in loop at line {stmt.lineno}")
+                trans = self.new_transition(
+                    label=_format_statement_label(stmt),
+                    line_number=stmt.lineno,
+                )
+                self.net.add_arc(source=current_place, target=trans)
+                self.net.add_arc(source=trans, target=self.loop_stack[-1]["head"])
+                return None
+
             elif isinstance(stmt, ast.If):
                 # Standard Petri net choice semantics (XOR-split):
                 # current_place acts as the decision place connecting to mutually exclusive transitions.
@@ -171,6 +214,43 @@ class _PythonControlFlowWalker:
                     return None
 
                 current_place = merge_place
+
+            elif isinstance(stmt, (ast.While, ast.For, ast.AsyncFor)):
+                loop_head = current_place
+                loop_trans = self.new_transition(
+                    label=_format_statement_label(stmt),
+                    line_number=stmt.lineno,
+                )
+                self.net.add_arc(source=loop_head, target=loop_trans)
+
+                else_lineno = stmt.orelse[0].lineno if stmt.orelse and hasattr(stmt.orelse[0], "lineno") else stmt.lineno
+                exit_trans = self.new_transition(
+                    label="else",
+                    line_number=else_lineno,
+                )
+                self.net.add_arc(source=loop_head, target=exit_trans)
+
+                if is_last:
+                    loop_exit = target_exit
+                else:
+                    loop_exit = self.new_place(label=f"exit_{loop_trans.id}", line_number=stmt.lineno)
+
+                self.loop_stack.append({"head": loop_head, "exit": loop_exit})
+                self._walk_branch(stmt.body, loop_trans, loop_head, stmt.lineno)
+                self.loop_stack.pop()
+
+                if stmt.orelse:
+                    else_exit = self._walk_branch(stmt.orelse, exit_trans, loop_exit, else_lineno)
+                else:
+                    self.net.add_arc(source=exit_trans, target=loop_exit)
+                    else_exit = loop_exit
+
+                # If loop exit is unreachable, sequential flow stops
+                has_exit_inflow = any(arc.target == loop_exit for arc in self.net.arcs)
+                if else_exit is None and not has_exit_inflow:
+                    return None
+
+                current_place = loop_exit
 
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=stmt.lineno)

@@ -4,15 +4,15 @@
 
 **Blocked by:** 02 — Python control-flow walker — sequential & return
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `ast.While` nodes produce a standard choice construct (XOR-split) at the loop head place connecting to a loop transition and an exit transition
-- [ ] The loop transition enters the body; the body's terminal transition arcs back to the loop head place, creating a cycle
-- [ ] The loop exit transition connects to the loop exit place (or else-clause entry place)
-- [ ] `ast.For` nodes are modeled identically to while (iterator-next vs exhaustion as competing transitions from loop head)
-- [ ] Loop `else` clauses produce an additional path between the exit transition and the final loop exit place
-- [ ] `break` statements produce a transition arcing directly to the loop's exit place (bypassing `else`)
-- [ ] `continue` statements produce a transition arcing back to the loop head place
-- [ ] Test fixture: `while_loop.py` — simple while; assert cycle exists in arc set
-- [ ] Test fixture: `for_loop.py` — simple for; assert same cyclic structure as while
-- [ ] Test fixture: `loop_break_continue.py` — break and continue; assert correct exit/back arcs
+- [x] `ast.While` nodes produce a standard choice construct (XOR-split) at the loop head place connecting to a loop transition and an exit transition
+- [x] The loop transition enters the body; the body's terminal transition arcs back to the loop head place, creating a cycle
+- [x] The loop exit transition connects to the loop exit place (or else-clause entry place)
+- [x] `ast.For` nodes are modeled identically to while (iterator-next vs exhaustion as competing transitions from loop head)
+- [x] Loop `else` clauses produce an additional path between the exit transition and the final loop exit place
+- [x] `break` statements produce a transition arcing directly to the loop's exit place (bypassing `else`)
+- [x] `continue` statements produce a transition arcing back to the loop head place
+- [x] Test fixture: `while_loop.py` — simple while; assert cycle exists in arc set
+- [x] Test fixture: `for_loop.py` — simple for; assert same cyclic structure as while
+- [x] Test fixture: `loop_break_continue.py` — break and continue; assert correct exit/back arcs
