@@ -28,6 +28,15 @@ class Place:
             f"line_number={self.line_number!r}, initial_tokens={self.initial_tokens!r})"
         )
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes the Place into a dictionary."""
+        return {
+            "id": self.id,
+            "label": self.label,
+            "line_number": self.line_number,
+            "initial_tokens": self.initial_tokens,
+        }
+
 
 class Transition:
     """Represents a Petri net Transition (an action or statement execution)."""
@@ -51,6 +60,14 @@ class Transition:
             f"Transition(id={self.id!r}, label={self.label!r}, "
             f"line_number={self.line_number!r})"
         )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes the Transition into a dictionary."""
+        return {
+            "id": self.id,
+            "label": self.label,
+            "line_number": self.line_number,
+        }
 
 
 class Arc:
@@ -86,6 +103,14 @@ class Arc:
             f"Arc(source={self.source.id!r}, target={self.target.id!r}, "
             f"weight={self.weight!r})"
         )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes the Arc into a dictionary."""
+        return {
+            "source": self.source.id,
+            "target": self.target.id,
+            "weight": self.weight,
+        }
 
 
 class PetriNet:
@@ -243,31 +268,9 @@ class PetriNet:
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the Petri net into a dictionary structure."""
         return {
-            "places": [
-                {
-                    "id": p.id,
-                    "label": p.label,
-                    "line_number": p.line_number,
-                    "initial_tokens": p.initial_tokens,
-                }
-                for p in self.places
-            ],
-            "transitions": [
-                {
-                    "id": t.id,
-                    "label": t.label,
-                    "line_number": t.line_number,
-                }
-                for t in self.transitions
-            ],
-            "arcs": [
-                {
-                    "source": a.source.id,
-                    "target": a.target.id,
-                    "weight": a.weight,
-                }
-                for a in self.arcs
-            ],
+            "places": [p.to_dict() for p in self.places],
+            "transitions": [t.to_dict() for t in self.transitions],
+            "arcs": [a.to_dict() for a in self.arcs],
         }
 
     def to_json(self, indent: int = 2) -> str:

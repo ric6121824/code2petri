@@ -1,6 +1,7 @@
-import unittest
-import sys
+import json
 import os
+import sys
+import unittest
 import xml.etree.ElementTree as ET
 
 # Ensure repo root is on sys.path
@@ -278,7 +279,6 @@ class TestPetriJsonSerialization(unittest.TestCase):
         self.assertEqual(d["arcs"][0]["target"], "t0")
 
     def test_to_json_valid(self):
-        import json
         raw_json = self.net.to_json()
         parsed = json.loads(raw_json)
         self.assertEqual(parsed, self.net.to_dict())

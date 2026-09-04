@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch, MagicMock
 import xml.etree.ElementTree as ET
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -186,7 +187,6 @@ class TestPetriPipeline(unittest.TestCase):
         self.assertIn("does not exist", str(ctx.exception))
 
     def test_image_output_without_dot(self):
-        from unittest.mock import patch
         with patch("code2petri.engine.is_installed", return_value=False):
             with self.assertRaises(AssertionError) as ctx:
                 code2petri(
@@ -197,7 +197,6 @@ class TestPetriPipeline(unittest.TestCase):
             self.assertIn("Graphviz", str(ctx.exception))
 
     def test_image_output_with_mocked_dot(self):
-        from unittest.mock import patch, MagicMock
         with patch("code2petri.engine.is_installed", return_value=True):
             mock_proc = MagicMock(returncode=0)
             with patch("subprocess.run", return_value=mock_proc) as mock_run:
