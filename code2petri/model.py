@@ -7,12 +7,16 @@ class Place:
 
     def __init__(
         self,
-        id: str,
-        label: str,
+        id_: Optional[str] = None,
+        label: str = "",
         line_number: Optional[int] = None,
         initial_tokens: int = 0,
+        id: Optional[str] = None,
     ) -> None:
-        self.id = str(id)
+        node_id = id if id is not None else id_
+        if node_id is None:
+            raise ValueError("Place requires an id.")
+        self.id = str(node_id)
         self.label = str(label)
         self.line_number = line_number
         self.initial_tokens = int(initial_tokens)
@@ -29,11 +33,15 @@ class Transition:
 
     def __init__(
         self,
-        id: str,
-        label: str,
+        id_: Optional[str] = None,
+        label: str = "",
         line_number: Optional[int] = None,
+        id: Optional[str] = None,
     ) -> None:
-        self.id = str(id)
+        node_id = id if id is not None else id_
+        if node_id is None:
+            raise ValueError("Transition requires an id.")
+        self.id = str(node_id)
         self.label = str(label)
         self.line_number = line_number
 
@@ -57,10 +65,10 @@ class Arc:
         target: Union[Place, Transition],
         weight: int = 1,
     ) -> None:
-        is_p2t = isinstance(source, Place) and isinstance(target, Transition)
-        is_t2p = isinstance(source, Transition) and isinstance(target, Place)
+        is_place_to_trans = isinstance(source, Place) and isinstance(target, Transition)
+        is_trans_to_place = isinstance(source, Transition) and isinstance(target, Place)
 
-        if not (is_p2t or is_t2p):
+        if not (is_place_to_trans or is_trans_to_place):
             source_type = type(source).__name__
             target_type = type(target).__name__
             raise ValueError(
@@ -89,13 +97,15 @@ class PetriNet:
 
     def add_place(
         self,
-        id: str,
-        label: str,
+        id_: Optional[str] = None,
+        label: str = "",
         line_number: Optional[int] = None,
         initial_tokens: int = 0,
+        id: Optional[str] = None,
     ) -> Place:
+        node_id = id if id is not None else id_
         place = Place(
-            id=id,
+            id=node_id,
             label=label,
             line_number=line_number,
             initial_tokens=initial_tokens,
@@ -105,12 +115,14 @@ class PetriNet:
 
     def add_transition(
         self,
-        id: str,
-        label: str,
+        id_: Optional[str] = None,
+        label: str = "",
         line_number: Optional[int] = None,
+        id: Optional[str] = None,
     ) -> Transition:
+        node_id = id if id is not None else id_
         transition = Transition(
-            id=id,
+            id=node_id,
             label=label,
             line_number=line_number,
         )
@@ -179,7 +191,12 @@ class PetriNet:
     def to_dot(self) -> str:
         """Serializes the Petri net to Graphviz DOT format."""
         def escape_dot(text: str) -> str:
-            return text.replace('\\', '\\\\').replace('"', '\\"')
+            return (
+                text.replace('\\', '\\\\')
+                .replace('"', '\\"')
+                .replace('\n', '\\n')
+                .replace('\r', '')
+            )
 
         lines = [
             "digraph PetriNet {",

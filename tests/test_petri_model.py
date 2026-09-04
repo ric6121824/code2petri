@@ -114,6 +114,19 @@ class TestPetriNetContainer(unittest.TestCase):
         self.assertEqual(len(net.transitions), 2)
         self.assertEqual(len(net.arcs), 4)
 
+        # Assert PNML is valid XML
+        pnml_str = net.to_pnml()
+        root = ET.fromstring(pnml_str)
+        self.assertIsNotNone(root)
+        self.assertTrue(root.tag.endswith("pnml"))
+
+        # Assert DOT has correct structure
+        dot_str = net.to_dot()
+        self.assertTrue(dot_str.strip().startswith("digraph"))
+        self.assertTrue(dot_str.strip().endswith("}"))
+        self.assertIn('"p_start" -> "t1";', dot_str)
+        self.assertIn('"t2" -> "p_end";', dot_str)
+
 
 
 class TestPNMLSerialization(unittest.TestCase):
@@ -234,6 +247,13 @@ class TestDOTSerialization(unittest.TestCase):
         dot = self.net.to_dot()
         # 'x = "hello"' should have quotes escaped in DOT label
         self.assertIn(r'\"hello\"', dot)
+
+        # Test newline escaping
+        net2 = PetriNet()
+        net2.add_transition("t_multi", "line1\nline2")
+        dot2 = net2.to_dot()
+        self.assertIn(r"line1\nline2", dot2)
+        self.assertNotIn("line1\nline2", dot2)
 
 
 if __name__ == '__main__':
