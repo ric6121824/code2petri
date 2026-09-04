@@ -51,6 +51,11 @@ def _format_statement_label(stmt: ast.stmt) -> str:
         target_str = ast.unparse(stmt.targets[0])
         return f"{target_str} = {_format_call_expression(stmt.value)}"
 
+    # If condition statement
+    if isinstance(stmt, ast.If):
+        test_str = ast.unparse(stmt.test) if hasattr(ast, "unparse") else "condition"
+        return f"if {test_str}"
+
     if hasattr(ast, "unparse"):
         summary = ast.unparse(stmt)
         # Take first line if statement is multiline
@@ -96,6 +101,18 @@ class _PythonControlFlowWalker:
             line_number=line_number,
         )
 
+    def _walk_branch(
+        self,
+        statements: List[ast.stmt],
+        source_transition: Transition,
+        target_exit: Place,
+        line_number: Optional[int] = None,
+    ) -> Optional[Place]:
+        """Creates an entry place from source_transition and walks statements to target_exit."""
+        entry_place = self.new_place(line_number=line_number)
+        self.net.add_arc(source=source_transition, target=entry_place)
+        return self.walk_block(statements, current_place=entry_place, target_exit=target_exit)
+
     def walk_block(
         self,
         statements: List[ast.stmt],
@@ -117,8 +134,10 @@ class _PythonControlFlowWalker:
                 return None
 
             elif isinstance(stmt, ast.If):
-                cond_label = f"if {ast.unparse(stmt.test)}" if hasattr(ast, "unparse") else "if condition"
-                cond_trans = self.new_transition(label=cond_label, line_number=stmt.lineno)
+                cond_trans = self.new_transition(
+                    label=_format_statement_label(stmt),
+                    line_number=stmt.lineno,
+                )
                 self.net.add_arc(source=current_place, target=cond_trans)
 
                 # Determine the merge place for this branching construct
@@ -128,15 +147,11 @@ class _PythonControlFlowWalker:
                     merge_place = self.new_place(label=f"merge_{cond_trans.id}", line_number=stmt.lineno)
 
                 # True branch
-                p_true = self.new_place(line_number=stmt.lineno)
-                self.net.add_arc(source=cond_trans, target=p_true)
-                true_exit = self.walk_block(stmt.body, current_place=p_true, target_exit=merge_place)
+                true_exit = self._walk_branch(stmt.body, cond_trans, merge_place, stmt.lineno)
 
                 # False branch
                 if stmt.orelse:
-                    p_false = self.new_place(line_number=stmt.lineno)
-                    self.net.add_arc(source=cond_trans, target=p_false)
-                    false_exit = self.walk_block(stmt.orelse, current_place=p_false, target_exit=merge_place)
+                    false_exit = self._walk_branch(stmt.orelse, cond_trans, merge_place, stmt.lineno)
                 else:
                     # if without else: false-branch arc skips directly to merge place
                     self.net.add_arc(source=cond_trans, target=merge_place)

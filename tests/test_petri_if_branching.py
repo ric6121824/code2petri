@@ -2,7 +2,6 @@ import unittest
 import sys
 import os
 import ast
-import xml.etree.ElementTree as ET
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
