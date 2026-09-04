@@ -76,6 +76,9 @@ def _format_statement_label(stmt: ast.stmt) -> str:
     if isinstance(stmt, ast.Continue):
         return "continue"
 
+    if isinstance(stmt, ast.Try):
+        return "try"
+
     if hasattr(ast, "unparse"):
         summary = ast.unparse(stmt)
         # Take first line if statement is multiline
@@ -84,10 +87,25 @@ def _format_statement_label(stmt: ast.stmt) -> str:
     return type(stmt).__name__
 
 
+def _format_handler_label(handler: ast.ExceptHandler) -> str:
+    """Formats an ast.ExceptHandler into a transition label."""
+    if handler.type is not None:
+        type_str = ast.unparse(handler.type) if hasattr(ast, "unparse") else "Exception"
+        if handler.name:
+            return f"except {type_str} as {handler.name}"
+        return f"except {type_str}"
+    return "except"
+
+
 class _LoopContext(NamedTuple):
     """Enclosing loop context tracking head and exit places."""
     head: Place
     exit: Place
+
+
+class _TryContext(NamedTuple):
+    """Enclosing try context tracking the exception entry place."""
+    except_entry: Place
 
 
 class _PythonControlFlowWalker:
@@ -99,6 +117,7 @@ class _PythonControlFlowWalker:
         self.place_counter = 0
         self.trans_counter = 0
         self.loop_stack: List[_LoopContext] = []
+        self.try_stack: List[_TryContext] = []
 
     def new_place(
         self,
@@ -122,11 +141,14 @@ class _PythonControlFlowWalker:
     ) -> Transition:
         self.trans_counter += 1
         t_id = f"t{self.trans_counter}"
-        return self.net.add_transition(
+        trans = self.net.add_transition(
             id_=t_id,
             label=label,
             line_number=line_number,
         )
+        if self.try_stack:
+            self.net.add_arc(source=trans, target=self.try_stack[-1].except_entry)
+        return trans
 
     def _handle_loop_jump(
         self,
@@ -258,6 +280,54 @@ class _PythonControlFlowWalker:
                     return None
 
                 current_place = loop_exit
+
+            elif isinstance(stmt, ast.Try):
+                except_entry = self.new_place(label="except_entry", line_number=stmt.lineno)
+
+                if is_last:
+                    try_exit = target_exit
+                else:
+                    try_exit = self.new_place(label="try_exit", line_number=stmt.lineno)
+
+                if stmt.finalbody:
+                    finally_lineno = stmt.finalbody[0].lineno if hasattr(stmt.finalbody[0], "lineno") else stmt.lineno
+                    finally_entry = self.new_place(label="finally_entry", line_number=finally_lineno)
+                else:
+                    finally_entry = try_exit
+
+                if stmt.orelse:
+                    else_lineno = stmt.orelse[0].lineno if hasattr(stmt.orelse[0], "lineno") else stmt.lineno
+                    else_entry = self.new_place(label="else_entry", line_number=else_lineno)
+                    try_normal_exit = else_entry
+                else:
+                    try_normal_exit = finally_entry
+
+                # Walk try body with try_stack active
+                self.try_stack.append(_TryContext(except_entry=except_entry))
+                self.walk_block(stmt.body, current_place=current_place, target_exit=try_normal_exit)
+                self.try_stack.pop()
+
+                # Walk else clause if present
+                if stmt.orelse:
+                    self.walk_block(stmt.orelse, current_place=else_entry, target_exit=finally_entry)
+
+                # Walk except handlers
+                for handler in stmt.handlers:
+                    h_label = _format_handler_label(handler)
+                    h_trans = self.new_transition(label=h_label, line_number=handler.lineno)
+                    self.net.add_arc(source=except_entry, target=h_trans)
+                    self._walk_branch(
+                        handler.body,
+                        source_transition=h_trans,
+                        target_exit=finally_entry,
+                        line_number=handler.lineno,
+                    )
+
+                # Walk finally block if present
+                if stmt.finalbody:
+                    self.walk_block(stmt.finalbody, current_place=finally_entry, target_exit=try_exit)
+
+                current_place = try_exit
 
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=stmt.lineno)
