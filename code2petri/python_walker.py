@@ -1,5 +1,5 @@
 import ast
-from typing import Optional, Union, List
+from typing import Optional, Union, List, NamedTuple
 
 from code2flow.python import Python
 from code2petri.model import PetriNet, Place, Transition, Arc
@@ -84,6 +84,12 @@ def _format_statement_label(stmt: ast.stmt) -> str:
     return type(stmt).__name__
 
 
+class _LoopContext(NamedTuple):
+    """Enclosing loop context tracking head and exit places."""
+    head: Place
+    exit: Place
+
+
 class _PythonControlFlowWalker:
     """Internal recursive walker constructing PetriNet places, transitions, and arcs."""
 
@@ -92,7 +98,7 @@ class _PythonControlFlowWalker:
         self.end_place = end_place
         self.place_counter = 0
         self.trans_counter = 0
-        self.loop_stack: List[dict] = []
+        self.loop_stack: List[_LoopContext] = []
 
     def new_place(
         self,
@@ -121,6 +127,24 @@ class _PythonControlFlowWalker:
             label=label,
             line_number=line_number,
         )
+
+    def _handle_loop_jump(
+        self,
+        stmt: Union[ast.Break, ast.Continue],
+        current_place: Place,
+    ) -> None:
+        """Handles break or continue jump statements to loop exit or head."""
+        is_break = isinstance(stmt, ast.Break)
+        keyword = "break" if is_break else "continue"
+        if not self.loop_stack:
+            raise SyntaxError(f"'{keyword}' outside loop at line {stmt.lineno}")
+        target_place = self.loop_stack[-1].exit if is_break else self.loop_stack[-1].head
+        trans = self.new_transition(
+            label=_format_statement_label(stmt),
+            line_number=stmt.lineno,
+        )
+        self.net.add_arc(source=current_place, target=trans)
+        self.net.add_arc(source=trans, target=target_place)
 
     def _walk_branch(
         self,
@@ -154,26 +178,8 @@ class _PythonControlFlowWalker:
                 self.net.add_arc(source=trans, target=self.end_place)
                 return None
 
-            elif isinstance(stmt, ast.Break):
-                if not self.loop_stack:
-                    raise SyntaxError(f"'break' outside loop at line {stmt.lineno}")
-                trans = self.new_transition(
-                    label=_format_statement_label(stmt),
-                    line_number=stmt.lineno,
-                )
-                self.net.add_arc(source=current_place, target=trans)
-                self.net.add_arc(source=trans, target=self.loop_stack[-1]["exit"])
-                return None
-
-            elif isinstance(stmt, ast.Continue):
-                if not self.loop_stack:
-                    raise SyntaxError(f"'continue' not properly in loop at line {stmt.lineno}")
-                trans = self.new_transition(
-                    label=_format_statement_label(stmt),
-                    line_number=stmt.lineno,
-                )
-                self.net.add_arc(source=current_place, target=trans)
-                self.net.add_arc(source=trans, target=self.loop_stack[-1]["head"])
+            elif isinstance(stmt, (ast.Break, ast.Continue)):
+                self._handle_loop_jump(stmt, current_place)
                 return None
 
             elif isinstance(stmt, ast.If):
@@ -224,8 +230,9 @@ class _PythonControlFlowWalker:
                 self.net.add_arc(source=loop_head, target=loop_trans)
 
                 else_lineno = stmt.orelse[0].lineno if stmt.orelse and hasattr(stmt.orelse[0], "lineno") else stmt.lineno
+                exit_label = "else" if stmt.orelse else "exit"
                 exit_trans = self.new_transition(
-                    label="else",
+                    label=exit_label,
                     line_number=else_lineno,
                 )
                 self.net.add_arc(source=loop_head, target=exit_trans)
@@ -235,7 +242,7 @@ class _PythonControlFlowWalker:
                 else:
                     loop_exit = self.new_place(label=f"exit_{loop_trans.id}", line_number=stmt.lineno)
 
-                self.loop_stack.append({"head": loop_head, "exit": loop_exit})
+                self.loop_stack.append(_LoopContext(head=loop_head, exit=loop_exit))
                 self._walk_branch(stmt.body, loop_trans, loop_head, stmt.lineno)
                 self.loop_stack.pop()
 

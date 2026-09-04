@@ -22,7 +22,7 @@ def find_directed_cycles(net: PetriNet) -> List[List[str]]:
     visited = {}  # 0 = unvisited, 1 = visiting, 2 = visited
     cycles = []
 
-    def dfs(node: str, path: List[str]):
+    def dfs(node: str, path: List[str]) -> None:
         visited[node] = 1
         path.append(node)
         for neighbor in adj.get(node, []):
@@ -79,7 +79,7 @@ class TestWhileLoop(unittest.TestCase):
         self.assertEqual(len(head_outputs), 2)
 
         t_while = next(t for t in head_outputs if "while count < 10" in t.label)
-        t_exit = next(t for t in head_outputs if t.label == "else")
+        t_exit = next(t for t in head_outputs if t.label == "exit")
 
         # Loop transition leads to body entry place
         while_outputs = [a.target for a in net.arcs if a.source == t_while]
@@ -157,7 +157,7 @@ class TestForLoop(unittest.TestCase):
         self.assertEqual(len(head_outputs), 2)
 
         t_for = next(t for t in head_outputs if "for item in items" in t.label)
-        t_exit = next(t for t in head_outputs if t.label == "else")
+        t_exit = next(t for t in head_outputs if t.label == "exit")
 
         # Loop transition leads to body entry place
         for_outputs = [a.target for a in net.arcs if a.source == t_for]
@@ -224,7 +224,7 @@ class TestLoopBreakContinue(unittest.TestCase):
         t_while = next(t for t in net.transitions if "while i < 10" in t.label)
         loop_head = [a.source for a in net.arcs if a.target == t_while][0]
 
-        t_exit = next(t for t in net.transitions if t.label == "else" and t.line_number == 3)
+        t_exit = next(t for t in net.transitions if t.label == "exit" and t.line_number == 3)
         loop_exit = [a.target for a in net.arcs if a.source == t_exit][0]
 
         # Break transition targets loop_exit directly
