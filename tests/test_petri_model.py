@@ -8,7 +8,8 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from code2petri.model import Place, Transition, Arc, PetriNet
+from code2petri.model import Place, Transition, Arc, PetriNet  # noqa: E402
+
 
 
 class TestPetriModelBasics(unittest.TestCase):
