@@ -192,3 +192,7 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
         list_functions=args.list_functions,
         level=level,
     )
+
+
+if __name__ == "__main__":
+    main()
