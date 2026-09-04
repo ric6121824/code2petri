@@ -12,14 +12,17 @@ setup(
     long_description=open('README.md', encoding='utf-8').read(),
     long_description_content_type="text/markdown",
     entry_points={
-        'console_scripts': ['code2flow=code2flow.engine:main'],
+        'console_scripts': [
+            'code2flow=code2flow.engine:main',
+            'code2petri=code2petri.engine:main',
+        ],
     },
     license='MIT',
     author='Scott Rogowski',
     author_email='scottmrogowski@gmail.com',
     url=url_base,
     download_url=download_url,
-    packages=['code2flow'],
+    packages=['code2flow', 'code2petri'],
     python_requires='>=3.6',
     include_package_data=True,
     classifiers=[

@@ -9,7 +9,12 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from code2petri.python_walker import walk_function, parse_file, find_function  # noqa: E402
+from code2petri.python_walker import (  # noqa: E402
+    walk_function,
+    parse_file,
+    find_function,
+    find_all_functions,
+)
 from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
 
 
@@ -176,9 +181,16 @@ class TestPythonWalkerEdgeCases(unittest.TestCase):
         self.assertEqual(len(net.places), 3)  # p0, p1, p_end
         self.assertEqual(len(net.transitions), 2)  # await, return
 
+    def test_find_all_functions(self):
+        code = (
+            "def alpha(): pass\n"
+            "def beta(): pass\n"
+            "async def gamma(): pass\n"
+        )
+        tree = ast.parse(code)
+        func_names = find_all_functions(tree)
+        self.assertEqual(func_names, ["alpha", "beta", "gamma"])
+
 
 if __name__ == '__main__':
     unittest.main()
-
-
-

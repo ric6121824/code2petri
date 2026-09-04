@@ -21,6 +21,16 @@ def find_function(
     return None
 
 
+def find_all_functions(tree: ast.AST) -> List[str]:
+    """Finds all function definition names within an AST ordered by line number."""
+    functions = [
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    functions.sort(key=lambda n: getattr(n, "lineno", 0))
+    return [node.name for node in functions]
+
+
 def _format_call_expression(call_node: ast.Call) -> str:
     """Formats an ast.Call node into an opaque label: call: func_name()."""
     func = call_node.func

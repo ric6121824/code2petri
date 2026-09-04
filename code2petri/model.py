@@ -1,4 +1,5 @@
-from typing import Optional, Union, List
+import json
+from typing import Optional, Union, List, Dict, Any
 import xml.etree.ElementTree as ET
 
 
@@ -239,5 +240,36 @@ class PetriNet:
         lines.append("}")
         return "\n".join(lines) + "\n"
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializes the Petri net into a dictionary structure."""
+        return {
+            "places": [
+                {
+                    "id": p.id,
+                    "label": p.label,
+                    "line_number": p.line_number,
+                    "initial_tokens": p.initial_tokens,
+                }
+                for p in self.places
+            ],
+            "transitions": [
+                {
+                    "id": t.id,
+                    "label": t.label,
+                    "line_number": t.line_number,
+                }
+                for t in self.transitions
+            ],
+            "arcs": [
+                {
+                    "source": a.source.id,
+                    "target": a.target.id,
+                    "weight": a.weight,
+                }
+                for a in self.arcs
+            ],
+        }
 
-
+    def to_json(self, indent: int = 2) -> str:
+        """Serializes the Petri net into formatted JSON."""
+        return json.dumps(self.to_dict(), indent=indent) + "\n"

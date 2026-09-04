@@ -4,16 +4,16 @@
 
 **Blocked by:** 03 — if/else/elif, 04 — while & for loops, 05 — try/except/finally
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `code2petri/engine.py` with `code2petri()` top-level function and `main()` CLI entry point using argparse
-- [ ] `--target-function` flag to select which function to analyze
-- [ ] `--output` flag with format detection by extension (`.pnml`, `.gv`/`.dot`, `.png`/`.svg`, `.json`)
-- [ ] `--list-functions` flag that prints all function names and exits
-- [ ] `--quiet` and `--verbose` flags for logging control
-- [ ] Clear error message when `--target-function` is not found in the file
-- [ ] `setup.py` updated with `code2petri` package and `console_scripts` entry point
-- [ ] `code2petri/__init__.py` exporting the `code2petri` function
-- [ ] End-to-end test: a Python file with mixed constructs (if, loop, try, sequential, return), assert the full pipeline produces correct PNML and DOT output
-- [ ] End-to-end test: `--list-functions` on a multi-function file prints expected names
-- [ ] End-to-end test: missing target function produces a clear AssertionError
+- [x] `code2petri/engine.py` with `code2petri()` top-level function and `main()` CLI entry point using argparse
+- [x] `--target-function` flag to select which function to analyze
+- [x] `--output` flag with format detection by extension (`.pnml`, `.gv`/`.dot`, `.png`/`.svg`, `.json`)
+- [x] `--list-functions` flag that prints all function names and exits
+- [x] `--quiet` and `--verbose` flags for logging control
+- [x] Clear error message when `--target-function` is not found in the file
+- [x] `setup.py` updated with `code2petri` package and `console_scripts` entry point
+- [x] `code2petri/__init__.py` exporting the `code2petri` function
+- [x] End-to-end test: a Python file with mixed constructs (if, loop, try, sequential, return), assert the full pipeline produces correct PNML and DOT output
+- [x] End-to-end test: `--list-functions` on a multi-function file prints expected names
+- [x] End-to-end test: missing target function produces a clear AssertionError

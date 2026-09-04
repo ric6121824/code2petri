@@ -257,7 +257,32 @@ class TestDOTSerialization(unittest.TestCase):
         self.assertNotIn("line1\nline2", dot2)
 
 
+class TestPetriJsonSerialization(unittest.TestCase):
+    def setUp(self):
+        self.net = PetriNet()
+        p0 = self.net.add_place(id="p0", label="start", line_number=1, initial_tokens=1)
+        p1 = self.net.add_place(id="p1", label="end", line_number=2, initial_tokens=0)
+        t0 = self.net.add_transition(id="t0", label="x = 1", line_number=1)
+        self.net.add_arc(source=p0, target=t0, weight=1)
+        self.net.add_arc(source=t0, target=p1, weight=1)
+
+    def test_to_dict_structure(self):
+        d = self.net.to_dict()
+        self.assertEqual(len(d["places"]), 2)
+        self.assertEqual(len(d["transitions"]), 1)
+        self.assertEqual(len(d["arcs"]), 2)
+        self.assertEqual(d["places"][0]["id"], "p0")
+        self.assertEqual(d["places"][0]["initial_tokens"], 1)
+        self.assertEqual(d["transitions"][0]["label"], "x = 1")
+        self.assertEqual(d["arcs"][0]["source"], "p0")
+        self.assertEqual(d["arcs"][0]["target"], "t0")
+
+    def test_to_json_valid(self):
+        import json
+        raw_json = self.net.to_json()
+        parsed = json.loads(raw_json)
+        self.assertEqual(parsed, self.net.to_dict())
+
+
 if __name__ == '__main__':
     unittest.main()
-
-

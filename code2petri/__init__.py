@@ -1,5 +1,11 @@
+from code2petri.engine import code2petri
 from code2petri.model import Place, Transition, Arc, PetriNet
-from code2petri.python_walker import walk_function, parse_file, find_function
+from code2petri.python_walker import (
+    walk_function,
+    parse_file,
+    find_function,
+    find_all_functions,
+)
 
 __all__ = [
     "Place",
@@ -9,5 +15,7 @@ __all__ = [
     "walk_function",
     "parse_file",
     "find_function",
+    "find_all_functions",
+    "code2petri",
 ]
 
