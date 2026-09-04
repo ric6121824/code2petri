@@ -100,7 +100,8 @@ class _PythonControlFlowWalker:
         self,
         statements: List[ast.stmt],
         current_place: Place,
-    ) -> Place:
+        target_exit: Place,
+    ) -> Optional[Place]:
         total_stmts = len(statements)
 
         for i, stmt in enumerate(statements):
@@ -113,37 +114,42 @@ class _PythonControlFlowWalker:
                 )
                 self.net.add_arc(source=current_place, target=trans)
                 self.net.add_arc(source=trans, target=self.end_place)
-                return self.end_place
+                return None
 
             elif isinstance(stmt, ast.If):
                 cond_label = f"if {ast.unparse(stmt.test)}" if hasattr(ast, "unparse") else "if condition"
                 cond_trans = self.new_transition(label=cond_label, line_number=stmt.lineno)
                 self.net.add_arc(source=current_place, target=cond_trans)
 
+                # Determine the merge place for this branching construct
+                if is_last:
+                    merge_place = target_exit
+                else:
+                    merge_place = self.new_place(label=f"merge_{cond_trans.id}", line_number=stmt.lineno)
+
+                # True branch
                 p_true = self.new_place(line_number=stmt.lineno)
                 self.net.add_arc(source=cond_trans, target=p_true)
+                true_exit = self.walk_block(stmt.body, current_place=p_true, target_exit=merge_place)
 
-                exit_true = self.walk_block(stmt.body, p_true)
-
-                p_false = self.new_place(line_number=stmt.lineno)
-                self.net.add_arc(source=cond_trans, target=p_false)
-
+                # False branch
                 if stmt.orelse:
-                    exit_false = self.walk_block(stmt.orelse, p_false)
+                    p_false = self.new_place(line_number=stmt.lineno)
+                    self.net.add_arc(source=cond_trans, target=p_false)
+                    false_exit = self.walk_block(stmt.orelse, current_place=p_false, target_exit=merge_place)
                 else:
-                    exit_false = p_false
+                    # if without else: false-branch arc skips directly to merge place
+                    self.net.add_arc(source=cond_trans, target=merge_place)
+                    false_exit = merge_place
 
-                if exit_true == self.end_place and exit_false == self.end_place:
-                    return self.end_place
-                elif exit_true == self.end_place:
-                    current_place = exit_false
-                elif exit_false == self.end_place:
-                    current_place = exit_true
-                else:
-                    current_place = exit_false
+                # If both branches returned, no sequential flow reaches merge_place
+                if true_exit is None and false_exit is None:
+                    return None
+
+                current_place = merge_place
 
             else:
-                next_place = self.end_place if is_last else self.new_place(line_number=stmt.lineno)
+                next_place = target_exit if is_last else self.new_place(line_number=stmt.lineno)
                 label = _format_statement_label(stmt)
                 trans = self.new_transition(
                     label=label,
@@ -180,6 +186,6 @@ def walk_function(ast_node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> Pet
     )
 
     walker = _PythonControlFlowWalker(net=net, end_place=end_place)
-    walker.walk_block(ast_node.body, current_place=start_place)
+    walker.walk_block(ast_node.body, current_place=start_place, target_exit=end_place)
 
     return net
