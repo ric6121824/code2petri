@@ -1,7 +1,7 @@
-import unittest
-import sys
+import ast
 import os
-from typing import List
+import sys
+import unittest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
@@ -225,7 +225,6 @@ class TestTryElseAndNesting(unittest.TestCase):
         self.assertEqual([a.source for a in net.arcs if a.target == t_finally], [p_finally])
 
     def test_nested_try(self):
-        import ast
         code = (
             "def nested_try_func():\n"
             "    try:\n"
@@ -262,9 +261,31 @@ class TestTryElseAndNesting(unittest.TestCase):
         self.assertIn(p_inner_exc, [a.target for a in net.arcs if a.source == t_x2])
         self.assertNotIn(p_outer_exc, [a.target for a in net.arcs if a.source == t_x2])
 
+        # Inner handler entry transition (t_except) does not arc to outer except_entry
+        t_inner_handler = next(t for t in net.transitions if t.label == "except" and any(a.source == p_inner_exc for a in net.arcs if a.target == t))
+        self.assertNotIn(p_outer_exc, [a.target for a in net.arcs if a.source == t_inner_handler])
+
+    def test_try_finally_without_except(self):
+        code = (
+            "def try_finally_func():\n"
+            "    try:\n"
+            "        a = 1\n"
+            "    finally:\n"
+            "        b = 2\n"
+            "    return b\n"
+        )
+        tree = ast.parse(code)
+        func = tree.body[0]
+        net = walk_function(func)
+
+        p_except = next(p for p in net.places if p.label == "except_entry")
+        p_finally = next(p for p in net.places if p.label == "finally_entry")
+
+        # Unhandled exception flows via 'exception' transition to finally_entry
+        t_exc = next(t for t in net.transitions if t.label == "exception")
+        self.assertIn(t_exc, [a.target for a in net.arcs if a.source == p_except])
+        self.assertIn(p_finally, [a.target for a in net.arcs if a.source == t_exc])
+
 
 if __name__ == '__main__':
     unittest.main()
-
-
-

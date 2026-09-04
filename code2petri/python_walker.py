@@ -97,6 +97,13 @@ def _format_handler_label(handler: ast.ExceptHandler) -> str:
     return "except"
 
 
+def _get_block_lineno(stmts: List[ast.AST], default: Optional[int] = None) -> Optional[int]:
+    """Returns the line number of the first statement in a block, or default."""
+    if stmts and hasattr(stmts[0], "lineno"):
+        return stmts[0].lineno
+    return default
+
+
 class _LoopContext(NamedTuple):
     """Enclosing loop context tracking head and exit places."""
     head: Place
@@ -138,6 +145,7 @@ class _PythonControlFlowWalker:
         self,
         label: str,
         line_number: Optional[int] = None,
+        hook_exception: bool = True,
     ) -> Transition:
         self.trans_counter += 1
         t_id = f"t{self.trans_counter}"
@@ -146,7 +154,7 @@ class _PythonControlFlowWalker:
             label=label,
             line_number=line_number,
         )
-        if self.try_stack:
+        if hook_exception and self.try_stack:
             self.net.add_arc(source=trans, target=self.try_stack[-1].except_entry)
         return trans
 
@@ -213,7 +221,7 @@ class _PythonControlFlowWalker:
                 )
                 self.net.add_arc(source=current_place, target=true_trans)
 
-                else_lineno = stmt.orelse[0].lineno if stmt.orelse and hasattr(stmt.orelse[0], "lineno") else stmt.lineno
+                else_lineno = _get_block_lineno(stmt.orelse, stmt.lineno)
                 false_trans = self.new_transition(
                     label="else",
                     line_number=else_lineno,
@@ -290,13 +298,13 @@ class _PythonControlFlowWalker:
                     try_exit = self.new_place(label="try_exit", line_number=stmt.lineno)
 
                 if stmt.finalbody:
-                    finally_lineno = stmt.finalbody[0].lineno if hasattr(stmt.finalbody[0], "lineno") else stmt.lineno
+                    finally_lineno = _get_block_lineno(stmt.finalbody, stmt.lineno)
                     finally_entry = self.new_place(label="finally_entry", line_number=finally_lineno)
                 else:
                     finally_entry = try_exit
 
                 if stmt.orelse:
-                    else_lineno = stmt.orelse[0].lineno if hasattr(stmt.orelse[0], "lineno") else stmt.lineno
+                    else_lineno = _get_block_lineno(stmt.orelse, stmt.lineno)
                     else_entry = self.new_place(label="else_entry", line_number=else_lineno)
                     try_normal_exit = else_entry
                 else:
@@ -312,16 +320,30 @@ class _PythonControlFlowWalker:
                     self.walk_block(stmt.orelse, current_place=else_entry, target_exit=finally_entry)
 
                 # Walk except handlers
-                for handler in stmt.handlers:
-                    h_label = _format_handler_label(handler)
-                    h_trans = self.new_transition(label=h_label, line_number=handler.lineno)
-                    self.net.add_arc(source=except_entry, target=h_trans)
-                    self._walk_branch(
-                        handler.body,
-                        source_transition=h_trans,
-                        target_exit=finally_entry,
-                        line_number=handler.lineno,
+                if stmt.handlers:
+                    for handler in stmt.handlers:
+                        h_label = _format_handler_label(handler)
+                        h_trans = self.new_transition(
+                            label=h_label,
+                            line_number=handler.lineno,
+                            hook_exception=False,
+                        )
+                        self.net.add_arc(source=except_entry, target=h_trans)
+                        self._walk_branch(
+                            handler.body,
+                            source_transition=h_trans,
+                            target_exit=finally_entry,
+                            line_number=handler.lineno,
+                        )
+                elif stmt.finalbody:
+                    # try...finally without except handlers: unhandled exception flows to finally
+                    exc_trans = self.new_transition(
+                        label="exception",
+                        line_number=stmt.lineno,
+                        hook_exception=False,
                     )
+                    self.net.add_arc(source=except_entry, target=exc_trans)
+                    self.net.add_arc(source=exc_trans, target=finally_entry)
 
                 # Walk finally block if present
                 if stmt.finalbody:
