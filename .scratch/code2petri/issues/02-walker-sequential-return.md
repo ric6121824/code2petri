@@ -4,14 +4,14 @@
 
 **Blocked by:** 01 — Petri net data model & serializers
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `python_walker.py` module with a `walk_function(ast_node) -> PetriNet` entry point
-- [ ] Sequential statements produce a place→transition→place chain, one transition per statement
-- [ ] Transitions are labeled with a summary of the statement and include the line number
-- [ ] Function calls appear as transitions labeled `call: func_name()`
-- [ ] Return statements produce a transition arcing to a single shared terminal `end` place
-- [ ] The start place has `initial_tokens=1`
-- [ ] The walker imports `Python.get_tree()` from code2flow to parse source files
-- [ ] Test fixture: `sequential.py` — a function with 5 sequential statements and a return; assert correct place/transition/arc counts and connectivity
-- [ ] Test fixture: `multi_return.py` — a function with multiple return paths; assert all returns converge on the same terminal place
+- [x] `python_walker.py` module with a `walk_function(ast_node) -> PetriNet` entry point
+- [x] Sequential statements produce a place→transition→place chain, one transition per statement
+- [x] Transitions are labeled with a summary of the statement and include the line number
+- [x] Function calls appear as transitions labeled `call: func_name()`
+- [x] Return statements produce a transition arcing to a single shared terminal `end` place
+- [x] The start place has `initial_tokens=1`
+- [x] The walker imports `Python.get_tree()` from code2flow to parse source files
+- [x] Test fixture: `sequential.py` — a function with 5 sequential statements and a return; assert correct place/transition/arc counts and connectivity
+- [x] Test fixture: `multi_return.py` — a function with multiple return paths; assert all returns converge on the same terminal place
