@@ -1,5 +1,4 @@
 import ast
-import os
 from typing import Optional, Union, List
 
 from code2flow.python import Python
@@ -28,14 +27,14 @@ def _format_call_expression(call_node: ast.Call) -> str:
     if isinstance(func, ast.Name):
         func_str = func.id
     elif isinstance(func, ast.Attribute):
-        parts = []
-        cur = func
-        while isinstance(cur, ast.Attribute):
-            parts.append(cur.attr)
-            cur = cur.value
-        if isinstance(cur, ast.Name):
-            parts.append(cur.id)
-        func_str = ".".join(reversed(parts))
+        attribute_parts = []
+        current_node = func
+        while isinstance(current_node, ast.Attribute):
+            attribute_parts.append(current_node.attr)
+            current_node = current_node.value
+        if isinstance(current_node, ast.Name):
+            attribute_parts.append(current_node.id)
+        func_str = ".".join(reversed(attribute_parts))
     else:
         func_str = ast.unparse(func) if hasattr(ast, "unparse") else "func"
     return f"call: {func_str}()"
@@ -43,17 +42,14 @@ def _format_call_expression(call_node: ast.Call) -> str:
 
 def _format_statement_label(stmt: ast.stmt) -> str:
     """Returns a readable summary of the statement for transition labeling."""
-    # Check if the statement is an expression or assignment wrapping a Call
-    call_node = None
+    # Expression statement wrapping a bare Call
     if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-        call_node = stmt.value
-    elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
-        call_node = stmt.value
-    elif isinstance(stmt, getattr(ast, "AnnAssign", ())) and isinstance(getattr(stmt, "value", None), ast.Call):
-        call_node = stmt.value
+        return _format_call_expression(stmt.value)
 
-    if call_node is not None:
-        return _format_call_expression(call_node)
+    # Assignment wrapping a Call
+    if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call) and stmt.targets:
+        target_str = ast.unparse(stmt.targets[0])
+        return f"{target_str} = {_format_call_expression(stmt.value)}"
 
     if hasattr(ast, "unparse"):
         summary = ast.unparse(stmt)

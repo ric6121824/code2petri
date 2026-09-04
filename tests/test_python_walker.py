@@ -31,10 +31,10 @@ class TestPythonWalkerSequential(unittest.TestCase):
     def test_sequential_counts(self):
         net = walk_function(self.func_node)
         self.assertIsInstance(net, PetriNet)
-        # 5 sequential statements: 5 transitions, 6 places, 10 arcs
-        self.assertEqual(len(net.transitions), 5)
-        self.assertEqual(len(net.places), 6)
-        self.assertEqual(len(net.arcs), 10)
+        # 5 sequential statements + 1 return: 6 transitions, 7 places, 12 arcs
+        self.assertEqual(len(net.transitions), 6)
+        self.assertEqual(len(net.places), 7)
+        self.assertEqual(len(net.arcs), 12)
 
     def test_start_and_end_places(self):
         net = walk_function(self.func_node)
@@ -80,14 +80,15 @@ class TestPythonWalkerSequential(unittest.TestCase):
             "a = 1",
             "b = 2",
             "c = a + b",
+            "d = c * 2",
             "call: print()",
-            "return c",
+            "return d",
         ]
         self.assertEqual(labels, expected_labels)
 
         # Verify line numbers match source lines in sequential.py
         line_numbers = [t.line_number for t in net.transitions]
-        self.assertEqual(line_numbers, [2, 3, 4, 5, 6])
+        self.assertEqual(line_numbers, [2, 3, 4, 5, 6, 7])
 
     def test_call_expression_variations(self):
         code = """def call_variations():
@@ -102,7 +103,7 @@ class TestPythonWalkerSequential(unittest.TestCase):
         labels = [t.label for t in net.transitions]
         self.assertEqual(labels[0], "call: plain_call()")
         self.assertEqual(labels[1], "call: pkg.sub.func()")
-        self.assertEqual(labels[2], "call: helper()")
+        self.assertEqual(labels[2], "res = call: helper()")
         self.assertEqual(labels[3], "return res")
 
 
