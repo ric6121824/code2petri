@@ -134,27 +134,36 @@ class _PythonControlFlowWalker:
                 return None
 
             elif isinstance(stmt, ast.If):
-                cond_trans = self.new_transition(
+                # Standard Petri net choice semantics (XOR-split):
+                # current_place acts as the decision place connecting to mutually exclusive transitions.
+                true_trans = self.new_transition(
                     label=_format_statement_label(stmt),
                     line_number=stmt.lineno,
                 )
-                self.net.add_arc(source=current_place, target=cond_trans)
+                self.net.add_arc(source=current_place, target=true_trans)
+
+                else_lineno = stmt.orelse[0].lineno if stmt.orelse and hasattr(stmt.orelse[0], "lineno") else stmt.lineno
+                false_trans = self.new_transition(
+                    label="else",
+                    line_number=else_lineno,
+                )
+                self.net.add_arc(source=current_place, target=false_trans)
 
                 # Determine the merge place for this branching construct
                 if is_last:
                     merge_place = target_exit
                 else:
-                    merge_place = self.new_place(label=f"merge_{cond_trans.id}", line_number=stmt.lineno)
+                    merge_place = self.new_place(label=f"merge_{true_trans.id}", line_number=stmt.lineno)
 
                 # True branch
-                true_exit = self._walk_branch(stmt.body, cond_trans, merge_place, stmt.lineno)
+                true_exit = self._walk_branch(stmt.body, true_trans, merge_place, stmt.lineno)
 
                 # False branch
                 if stmt.orelse:
-                    false_exit = self._walk_branch(stmt.orelse, cond_trans, merge_place, stmt.lineno)
+                    false_exit = self._walk_branch(stmt.orelse, false_trans, merge_place, else_lineno)
                 else:
-                    # if without else: false-branch arc skips directly to merge place
-                    self.net.add_arc(source=cond_trans, target=merge_place)
+                    # if without else: false transition skips directly to merge place
+                    self.net.add_arc(source=false_trans, target=merge_place)
                     false_exit = merge_place
 
                 # If both branches returned, no sequential flow reaches merge_place

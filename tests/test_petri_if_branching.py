@@ -28,42 +28,54 @@ class TestIfElseBranching(unittest.TestCase):
     def test_if_else_counts(self):
         net = walk_function(self.func_node)
         self.assertIsInstance(net, PetriNet)
-        # 4 transitions: t_cond(if), t_true(y=1), t_false(y=2), t_ret(return y)
-        self.assertEqual(len(net.transitions), 4)
-        # 5 places: p0(start), p_true, p_false, p_merge, p_end
+        # 5 transitions: t_true_cond(if x > 0), t_true_body(y = 1),
+        #                t_false_cond(else), t_false_body(y = 2), t_ret(return y)
+        self.assertEqual(len(net.transitions), 5)
+        # 5 places: p0(start/decision), p_true, p_false, p_merge, p_end
         self.assertEqual(len(net.places), 5)
-        # 9 arcs
-        self.assertEqual(len(net.arcs), 9)
+        # 10 arcs
+        self.assertEqual(len(net.arcs), 10)
 
     def test_fork_and_merge_structure(self):
         net = walk_function(self.func_node)
 
-        # Condition transition
-        cond_transitions = [t for t in net.transitions if "if" in t.label]
-        self.assertEqual(len(cond_transitions), 1)
-        cond_t = cond_transitions[0]
+        # Decision place (start place p0)
+        start_place = next(p for p in net.places if p.initial_tokens == 1)
 
-        # Condition transition forks into 2 places
-        cond_outputs = [a.target for a in net.arcs if a.source == cond_t]
-        self.assertEqual(len(cond_outputs), 2)
-        p_true, p_false = cond_outputs
-        self.assertNotEqual(p_true, p_false)
+        # Standard XOR-split: start place connects to 2 competing transitions
+        decision_outgoing_trans = [a.target for a in net.arcs if a.source == start_place]
+        self.assertEqual(len(decision_outgoing_trans), 2)
 
-        # True branch transition
-        true_trans = [a.target for a in net.arcs if a.source == p_true]
+        t_if = next(t for t in decision_outgoing_trans if "if x > 0" in t.label)
+        t_else = next(t for t in decision_outgoing_trans if t.label == "else")
+
+        # True condition transition leads to true entry place
+        t_if_outputs = [a.target for a in net.arcs if a.source == t_if]
+        self.assertEqual(len(t_if_outputs), 1)
+        p_true_entry = t_if_outputs[0]
+
+        # False/else condition transition leads to else entry place
+        t_else_outputs = [a.target for a in net.arcs if a.source == t_else]
+        self.assertEqual(len(t_else_outputs), 1)
+        p_else_entry = t_else_outputs[0]
+
+        self.assertNotEqual(p_true_entry, p_else_entry)
+
+        # True branch body transition (y = 1)
+        true_trans = [a.target for a in net.arcs if a.source == p_true_entry]
         self.assertEqual(len(true_trans), 1)
-        t_true = true_trans[0]
-        self.assertIn("y = 1", t_true.label)
+        t_true_body = true_trans[0]
+        self.assertIn("y = 1", t_true_body.label)
 
-        # False branch transition
-        false_trans = [a.target for a in net.arcs if a.source == p_false]
+        # False branch body transition (y = 2)
+        false_trans = [a.target for a in net.arcs if a.source == p_else_entry]
         self.assertEqual(len(false_trans), 1)
-        t_false = false_trans[0]
-        self.assertIn("y = 2", t_false.label)
+        t_false_body = false_trans[0]
+        self.assertIn("y = 2", t_false_body.label)
 
-        # Both branches merge into the same merge place
-        true_exit_places = [a.target for a in net.arcs if a.source == t_true]
-        false_exit_places = [a.target for a in net.arcs if a.source == t_false]
+        # Both branches merge into the same XOR-join merge place
+        true_exit_places = [a.target for a in net.arcs if a.source == t_true_body]
+        false_exit_places = [a.target for a in net.arcs if a.source == t_false_body]
         self.assertEqual(len(true_exit_places), 1)
         self.assertEqual(len(false_exit_places), 1)
         merge_place = true_exit_places[0]
@@ -80,6 +92,28 @@ class TestIfElseBranching(unittest.TestCase):
         end_places = [a.target for a in net.arcs if a.source == t_ret]
         self.assertEqual(len(end_places), 1)
         self.assertEqual(end_places[0].label, "end")
+
+    def test_choice_semantics_and_mutual_exclusion(self):
+        """Verifies standard Petri net XOR-split: 1 decision place, 2 competing transitions, each with 1 output."""
+        net = walk_function(self.func_node)
+
+        start_place = next(p for p in net.places if p.initial_tokens == 1)
+        competing_transitions = [a.target for a in net.arcs if a.source == start_place]
+
+        # The decision place must branch into exactly 2 alternative transitions (XOR-split)
+        self.assertEqual(len(competing_transitions), 2)
+
+        # Neither transition is an AND-fork: each must have exactly 1 output place
+        for t in competing_transitions:
+            outputs = [a.target for a in net.arcs if a.source == t]
+            self.assertEqual(
+                len(outputs), 1,
+                f"Transition {t.id} ({t.label}) must have exactly 1 output place (not an AND-fork)",
+            )
+            # Each competing transition has only the decision place as preset
+            inputs = [a.source for a in net.arcs if a.target == t]
+            self.assertEqual(inputs, [start_place])
+
 
 
 class TestIfNoElseBranching(unittest.TestCase):
@@ -99,40 +133,55 @@ class TestIfNoElseBranching(unittest.TestCase):
     def test_if_no_else_counts(self):
         net = walk_function(self.func_node)
         self.assertIsInstance(net, PetriNet)
-        # 4 transitions: y=0, if x > 0, y=1, return y
-        self.assertEqual(len(net.transitions), 4)
-        # 5 places: p0(start), p1(after y=0), p2(true entry), p3(merge), p_end
+        # 5 transitions: y=0, if x > 0, y=1, else, return y
+        self.assertEqual(len(net.transitions), 5)
+        # 5 places: p0(start), p1(decision after y=0), p_true, p_merge, p_end
         self.assertEqual(len(net.places), 5)
-        # 9 arcs
-        self.assertEqual(len(net.arcs), 9)
+        # 10 arcs
+        self.assertEqual(len(net.arcs), 10)
 
     def test_false_branch_skips_directly_to_merge(self):
         net = walk_function(self.func_node)
 
-        # Condition transition
-        cond_transitions = [t for t in net.transitions if "if" in t.label]
-        self.assertEqual(len(cond_transitions), 1)
-        cond_t = cond_transitions[0]
+        # Transition for y = 0 feeds the decision place
+        t_y0 = next(t for t in net.transitions if "y = 0" in t.label)
+        y0_outputs = [a.target for a in net.arcs if a.source == t_y0]
+        self.assertEqual(len(y0_outputs), 1)
+        decision_place = y0_outputs[0]
 
-        # Transition for y = 1 (true branch)
-        y1_transitions = [t for t in net.transitions if "y = 1" in t.label]
-        self.assertEqual(len(y1_transitions), 1)
-        t_y1 = y1_transitions[0]
+        # Standard XOR-split: decision place has 2 competing transitions
+        decision_outgoing = [a.target for a in net.arcs if a.source == decision_place]
+        self.assertEqual(len(decision_outgoing), 2)
 
-        # Target place of y = 1 is the merge place
+        t_if = next(t for t in decision_outgoing if "if x > 0" in t.label)
+        t_else = next(t for t in decision_outgoing if t.label == "else")
+
+        # True branch: t_if -> p_true -> t_y1 -> merge_place
+        t_if_outputs = [a.target for a in net.arcs if a.source == t_if]
+        self.assertEqual(len(t_if_outputs), 1)
+        p_true = t_if_outputs[0]
+
+        t_y1 = next(t for t in net.transitions if "y = 1" in t.label)
+        y1_inputs = [a.source for a in net.arcs if a.target == t_y1]
+        self.assertEqual(y1_inputs, [p_true])
+
         y1_outputs = [a.target for a in net.arcs if a.source == t_y1]
         self.assertEqual(len(y1_outputs), 1)
         merge_place = y1_outputs[0]
 
-        # Condition transition has 2 outputs: one to true branch entry place, one skipping directly to merge place!
-        cond_outputs = [a.target for a in net.arcs if a.source == cond_t]
-        self.assertEqual(len(cond_outputs), 2)
-        self.assertIn(merge_place, cond_outputs, "False branch arc must skip directly to the merge place")
+        # False branch (no else): t_else skips directly to the merge place!
+        else_outputs = [a.target for a in net.arcs if a.source == t_else]
+        self.assertEqual(len(else_outputs), 1)
+        self.assertIs(
+            else_outputs[0],
+            merge_place,
+            "False branch transition must skip directly to the merge place",
+        )
 
-        # The other output is the entry place to t_y1
-        true_entry = [p for p in cond_outputs if p != merge_place][0]
-        true_entry_outputs = [a.target for a in net.arcs if a.source == true_entry]
-        self.assertEqual(true_entry_outputs, [t_y1])
+        # Both paths merge before return y
+        ret_trans = next(t for t in net.transitions if "return y" in t.label)
+        ret_inputs = [a.source for a in net.arcs if a.target == ret_trans]
+        self.assertEqual(ret_inputs, [merge_place])
 
 
 class TestIfElifElseBranching(unittest.TestCase):
@@ -152,29 +201,40 @@ class TestIfElifElseBranching(unittest.TestCase):
     def test_if_elif_else_counts(self):
         net = walk_function(self.func_node)
         self.assertIsInstance(net, PetriNet)
-        # 6 transitions: if x > 0, y=1, if x < 0, y=-1, y=0, return y
-        self.assertEqual(len(net.transitions), 6)
-        # 7 places: p0(start), p1(true1), p2(false1/elif entry), p3(true2), p4(else), p5(merge), p_end
+        # 8 transitions:
+        #   Outer if: t_if1(if x > 0), t_else1(else)
+        #   Outer body: t_y1(y = 1)
+        #   Elif: t_if2(if x < 0), t_else2(else)
+        #   Elif body: t_y_neg(y = -1)
+        #   Final else body: t_y0(y = 0)
+        #   Return: t_ret(return y)
+        self.assertEqual(len(net.transitions), 8)
+        # 7 places: p0(decision1), p_true1, p_elif_decision, p_true2, p_else_body, p_merge, p_end
         self.assertEqual(len(net.places), 7)
-        # 14 arcs
-        self.assertEqual(len(net.arcs), 14)
+        # 16 arcs
+        self.assertEqual(len(net.arcs), 16)
 
     def test_cascading_elif_and_shared_merge(self):
         net = walk_function(self.func_node)
 
-        # Transition 1: outer if
-        t_if1 = next(t for t in net.transitions if "if x > 0" in t.label)
-        # Transition 2: inner if (elif)
-        t_if2 = next(t for t in net.transitions if "if x < 0" in t.label)
+        start_place = next(p for p in net.places if p.initial_tokens == 1)
 
-        # False branch of outer if feeds into the entry place of inner if (elif)
-        if1_outputs = [a.target for a in net.arcs if a.source == t_if1]
-        self.assertEqual(len(if1_outputs), 2)
+        # Outer XOR-split from start place
+        outer_transitions = [a.target for a in net.arcs if a.source == start_place]
+        self.assertEqual(len(outer_transitions), 2)
+        t_if1 = next(t for t in outer_transitions if "if x > 0" in t.label)
+        t_else1 = next(t for t in outer_transitions if t.label == "else")
 
-        if2_inputs = [a.source for a in net.arcs if a.target == t_if2]
-        self.assertEqual(len(if2_inputs), 1)
-        elif_entry_place = if2_inputs[0]
-        self.assertIn(elif_entry_place, if1_outputs, "Outer if false branch must connect to elif condition transition")
+        # Outer else transition connects to the elif decision place
+        else1_outputs = [a.target for a in net.arcs if a.source == t_else1]
+        self.assertEqual(len(else1_outputs), 1)
+        elif_decision_place = else1_outputs[0]
+
+        # Inner XOR-split from elif decision place
+        inner_transitions = [a.target for a in net.arcs if a.source == elif_decision_place]
+        self.assertEqual(len(inner_transitions), 2)
+        t_if2 = next(t for t in inner_transitions if "if x < 0" in t.label)
+        t_else2 = next(t for t in inner_transitions if t.label == "else")
 
         # The 3 branch execution transitions: y = 1, y = -1, y = 0
         t_y1 = next(t for t in net.transitions if "y = 1" in t.label)
