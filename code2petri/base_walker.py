@@ -18,6 +18,7 @@ _TryContext = TryContext
 
 
 class _BaseControlFlowWalker:
+
     """Base control flow walker managing places, transitions, stacks, and counters."""
 
     def __init__(self, net: PetriNet, end_place: Place) -> None:
@@ -82,3 +83,7 @@ class _BaseControlFlowWalker:
     ) -> Optional[Place]:
         """Subclasses must implement statement traversal."""
         raise NotImplementedError("Subclasses must implement walk_block")
+
+
+BaseControlFlowWalker = _BaseControlFlowWalker
+

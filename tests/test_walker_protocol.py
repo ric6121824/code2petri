@@ -114,6 +114,18 @@ class TestPythonWalkerProtocolAndQualifiedNames(unittest.TestCase):
         func_names = self.walker.find_all_functions(tree)
         self.assertEqual(func_names, ["Outer.Inner.nested_method"])
 
+    def test_nested_function_in_method_qualification(self):
+        code = (
+            "class Foo:\n"
+            "    def method(self):\n"
+            "        def local_helper():\n"
+            "            pass\n"
+        )
+        tree = ast.parse(code)
+        func_names = self.walker.find_all_functions(tree)
+        self.assertEqual(func_names, ["Foo.method", "Foo.method.local_helper"])
+
+
     def test_find_function_by_qualified_and_bare_name(self):
         code = (
             "class Service:\n"
@@ -162,3 +174,4 @@ class TestEngineLanguageDispatch(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+

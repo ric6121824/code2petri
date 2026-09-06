@@ -46,3 +46,4 @@ def assert_valid_petri_net(test_case: unittest.TestCase, net: PetriNet) -> tuple
     test_case.assertGreater(len(net.arcs), 0, "Net has no arcs")
     assert_bipartite(test_case, net)
     return assert_has_start_and_end(test_case, net)
+

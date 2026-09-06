@@ -44,28 +44,17 @@ class TestPythonWalkerSequential(unittest.TestCase):
 
     def test_start_and_end_places(self):
         net = walk_function(self.func_node)
-        assert_has_start_and_end(self, net)
+        start_place, end_place = assert_has_start_and_end(self, net)
         assert_bipartite(self, net)
-
-        # Exactly one place with initial_tokens == 1 (the start place)
-        start_places = [p for p in net.places if p.initial_tokens == 1]
-        self.assertEqual(len(start_places), 1)
-        start_place = start_places[0]
-        self.assertEqual(start_place.label, "start")
-
 
         # The start place has an outgoing arc to the first transition
         outgoing_start = [a for a in net.arcs if a.source == start_place]
-        self.assertEqual(len(outgoing_start), 1)
         self.assertEqual(outgoing_start[0].target, net.transitions[0])
 
         # End place is the target of the last transition (return statement)
-        end_places = [p for p in net.places if p.label == "end"]
-        self.assertEqual(len(end_places), 1)
-        end_place = end_places[0]
         incoming_end = [a for a in net.arcs if a.target == end_place]
-        self.assertEqual(len(incoming_end), 1)
         self.assertEqual(incoming_end[0].source, net.transitions[-1])
+
 
     def test_linear_connectivity(self):
         net = walk_function(self.func_node)

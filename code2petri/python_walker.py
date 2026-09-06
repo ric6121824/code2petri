@@ -22,23 +22,21 @@ def _collect_functions(tree: ast.AST) -> List[tuple[str, Union[ast.FunctionDef, 
     """Traverses tree to collect (qualified_name, node) pairs ordered by line number."""
     results: List[tuple[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]]] = []
 
-    def visit(node: ast.AST, class_stack: List[str]) -> None:
+    def visit(node: ast.AST, scope_stack: List[str]) -> None:
         for child in ast.iter_child_nodes(node):
             if isinstance(child, ast.ClassDef):
-                visit(child, class_stack + [child.name])
+                visit(child, scope_stack + [child.name])
             elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if class_stack:
-                    qual_name = f"{'.'.join(class_stack)}.{child.name}"
-                else:
-                    qual_name = child.name
+                qual_name = f"{'.'.join(scope_stack)}.{child.name}" if scope_stack else child.name
                 results.append((qual_name, child))
-                visit(child, class_stack)
+                visit(child, scope_stack + [child.name])
             else:
-                visit(child, class_stack)
+                visit(child, scope_stack)
 
     visit(tree, [])
     results.sort(key=lambda item: getattr(item[1], "lineno", 0))
     return results
+
 
 
 def find_function(
