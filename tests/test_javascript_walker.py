@@ -647,24 +647,73 @@ class TestGameOfLifeSimulatorIntegration(unittest.TestCase):
         self.assertIsNotNone(net)
         assert_valid_petri_net(self, net)
 
-        # XOR-splits in stepCpu for cellular automaton rules
-        labels = [t.label for t in net.transitions]
-        self.assertTrue(any("state === 0" in l for l in labels))
+        # Assert nested loop cycles for i and j
+        loop_transitions = [t for t in net.transitions if "for" in t.label]
+        self.assertGreaterEqual(len(loop_transitions), 2)
+        for lt in loop_transitions:
+            head = next(a.source for a in net.arcs if a.target == lt)
+            # Cycle back-arc exists targeting loop head
+            back_arcs = [a for a in net.arcs if a.target == head and a.source != head]
+            self.assertGreaterEqual(len(back_arcs), 1)
+
+        # XOR-splits in stepCpu for cellular automaton rules:
+        # false branch of if (state === 0) leads to the decision place for if (state === 1)
+        t_state0 = next(t for t in net.transitions if "state === 0" in t.label)
+        t_state1 = next(t for t in net.transitions if "state === 1" in t.label)
+        p_dec = next(a.source for a in net.arcs if a.target == t_state0)
+        t_else = next(t for t in net.transitions if t.label == "else" and any(a.source == p_dec and a.target == t for a in net.arcs))
+        p_else = next(a.target for a in net.arcs if a.source == t_else)
+        p_dec1 = next(a.source for a in net.arcs if a.target == t_state1)
+        self.assertIs(p_else, p_dec1)
+
+        # Both branches converge on the inner loop body merge
+        t_assign0 = next(t for t in net.transitions if "nextGrid[i][j] = 1" in t.label)
+        p_merge0 = next(a.target for a in net.arcs if a.source == t_assign0)
+        t_assign_else = next(t for t in net.transitions if "nextGrid[i][j] = state" in t.label)
+        p_merge_else = next(a.target for a in net.arcs if a.source == t_assign_else)
+        self.assertIs(p_merge0, p_merge_else)
 
     def test_engine_app_loop(self):
         net = code2petri(self.app_js, output_file=None, target_function="loop")
         self.assertIsNotNone(net)
         assert_valid_petri_net(self, net)
-        start_place, _ = assert_has_start_and_end(self, net)
+        start_place, end_place = assert_has_start_and_end(self, net)
         raf_trans = next(t for t in net.transitions if "requestAnimationFrame" in t.label)
         self.assertTrue(any(a.source == raf_trans and a.target == start_place for a in net.arcs))
+
+        # Early return when !isRunning reaches end_place
+        ret_trans = next(t for t in net.transitions if t.label == "return")
+        self.assertTrue(any(a.source == ret_trans and a.target == end_place for a in net.arcs))
 
     def test_engine_webgl_engine_step(self):
         net = code2petri(self.webgl_js, output_file=None, target_function="WebGLEngine.step")
         self.assertIsNotNone(net)
-        assert_valid_petri_net(self, net)
+        start_place, end_place = assert_valid_petri_net(self, net)
+
         labels = [t.label for t in net.transitions]
         self.assertIn("call: this.drawToScreen()", labels)
+        self.assertTrue(any("tempTex" in l for l in labels))
+
+        # Sequential flow reaches drawToScreen and ends cleanly
+        t_draw = next(t for t in net.transitions if "call: this.drawToScreen()" in t.label)
+        self.assertTrue(any(a.source == t_draw and a.target == end_place for a in net.arcs))
+
+    def test_engine_webgl_engine_init_shaders(self):
+        net = code2petri(self.webgl_js, output_file=None, target_function="WebGLEngine.initShaders")
+        self.assertIsNotNone(net)
+        assert_valid_petri_net(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertTrue(any("call: this.createProgram()" in l for l in labels))
+
+    def test_engine_app_setup_event_listeners(self):
+        net = code2petri(self.app_js, output_file=None, target_function="setupEventListeners")
+        self.assertIsNotNone(net)
+        assert_valid_petri_net(self, net)
+
+        # Contains loop over modeRadios
+        labels = [t.label for t in net.transitions]
+        self.assertTrue(any("modeRadios.forEach" in l or "addEventListener" in l for l in labels))
 
 
 if __name__ == '__main__':

@@ -538,12 +538,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 )
                 self.net.add_arc(source=current_place, target=trans)
                 self.net.add_arc(source=trans, target=self.start_place)
-                if is_last:
-                    return None
-                else:
-                    next_place = self.new_place(line_number=lineno)
-                    self.net.add_arc(source=trans, target=next_place)
-                    current_place = next_place
+                return None
 
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=lineno)
@@ -565,6 +560,7 @@ class JavascriptWalker(WalkerProtocol):
     def __init__(self) -> None:
         self.raw_source: str = ""
         self.tree: Optional[dict] = None
+        self._func_name_cache: dict[int, str] = {}
 
     def parse_file(self, filepath: str) -> dict:
         """Parses a JavaScript file using Acorn, caching raw source text."""
@@ -630,31 +626,11 @@ class JavascriptWalker(WalkerProtocol):
                             _traverse(val.get("body"), scope + [cls_name, key])
                     return
 
-                elif ntype == "FunctionDeclaration":
-                    name = node.get("id", {}).get("name")
+                elif ntype in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"):
+                    func_id = node.get("id")
+                    name = func_id.get("name") if func_id else None
                     lineno = node.get("loc", {}).get("start", {}).get("line", 0)
                     if name:
-                        qual_name = f"{'.'.join(scope)}.{name}" if scope else name
-                        bare_name = name
-                    else:
-                        qual_name = f"{'.'.join(scope)}.(anonymous@{lineno})" if scope else f"(anonymous@{lineno})"
-                        bare_name = f"(anonymous@{lineno})"
-
-                    results.append({
-                        "qual_name": qual_name,
-                        "bare_name": bare_name,
-                        "lineno": lineno,
-                        "node": node,
-                    })
-                    new_scope = scope + [bare_name]
-                    _traverse(node.get("body"), new_scope)
-                    return
-
-                elif ntype in ("FunctionExpression", "ArrowFunctionExpression"):
-                    lineno = node.get("loc", {}).get("start", {}).get("line", 0)
-                    func_id = node.get("id")
-                    if func_id and func_id.get("name"):
-                        name = func_id.get("name")
                         qual_name = f"{'.'.join(scope)}.{name}" if scope else name
                         bare_name = name
                     else:
@@ -711,8 +687,8 @@ class JavascriptWalker(WalkerProtocol):
                     "type": "BlockStatement",
                     "body": executable_stmts,
                 },
-                "_petri_func_name": "(global)",
             }
+            self._func_name_cache[id(wrapper)] = "(global)"
             return wrapper
 
         collected = self._collect_all_functions(tree)
@@ -720,26 +696,26 @@ class JavascriptWalker(WalkerProtocol):
         # 1. Exact match on qualified name
         for item in collected:
             if item["qual_name"] == func_name:
-                item["node"]["_petri_func_name"] = item["qual_name"]
+                self._func_name_cache[id(item["node"])] = item["qual_name"]
                 return item["node"]
 
         # 2. Exact match on bare name
         for item in collected:
             if item["bare_name"] == func_name:
-                item["node"]["_petri_func_name"] = item["qual_name"]
+                self._func_name_cache[id(item["node"])] = item["qual_name"]
                 return item["node"]
 
         # 3. Suffix match (e.g. .func_name)
         for item in collected:
             if item["qual_name"].endswith(f".{func_name}"):
-                item["node"]["_petri_func_name"] = item["qual_name"]
+                self._func_name_cache[id(item["node"])] = item["qual_name"]
                 return item["node"]
 
         # 4. Anonymous callback substring match (e.g. (anonymous@151) in qual_name)
         if "(anonymous@" in func_name:
             for item in collected:
                 if func_name in item["qual_name"] or func_name in item["bare_name"]:
-                    item["node"]["_petri_func_name"] = item["qual_name"]
+                    self._func_name_cache[id(item["node"])] = item["qual_name"]
                     return item["node"]
 
         return None
@@ -757,7 +733,7 @@ class JavascriptWalker(WalkerProtocol):
             func_node = ast_node
 
         if func_name is None:
-            func_name = func_node.get("_petri_func_name") or ast_node.get("_petri_func_name")
+            func_name = self._func_name_cache.get(id(func_node)) or self._func_name_cache.get(id(ast_node))
             if func_name is None and func_node.get("id"):
                 func_name = func_node["id"].get("name")
 
