@@ -84,8 +84,6 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
         labels = [t.label for t in net.transitions]
         self.assertEqual(labels, ["let res = call: calculate()", "return res"])
 
-
-
     def test_walk_sequential_function(self):
         tree = self.walker.parse_file(self.seq_fixture)
         node = self.walker.find_function(tree, "sequential_func")
@@ -175,41 +173,63 @@ class TestJavascriptIfBranching(unittest.TestCase):
         node = self.walker.find_function(tree, "if_else_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
+        assert_has_start_and_end(self, net)
+        assert_bipartite(self, net)
 
+        # Decision place (XOR-split): 1 place with 2 outgoing arcs
         branch_places = [p for p in net.places if len([a for a in net.arcs if a.source == p]) == 2]
         self.assertEqual(len(branch_places), 1)
+        decision_place = branch_places[0]
+        decision_outgoing = [a.target for a in net.arcs if a.source == decision_place]
+        self.assertEqual(set(t.label for t in decision_outgoing), {"if (x > 0)", "else"})
 
-        labels = [t.label for t in net.transitions]
-        self.assertIn("if (x > 0)", labels)
-        self.assertIn("else", labels)
-        self.assertIn("result = 1", labels)
-        self.assertIn("result = -1", labels)
-        self.assertIn("return result", labels)
+        # Convergence: both branches reach the same merge place before return
+        t_true_body = next(t for t in net.transitions if t.label == "result = 1")
+        t_false_body = next(t for t in net.transitions if t.label == "result = -1")
+        true_exit_places = [a.target for a in net.arcs if a.source == t_true_body]
+        false_exit_places = [a.target for a in net.arcs if a.source == t_false_body]
+        self.assertEqual(len(true_exit_places), 1)
+        self.assertEqual(len(false_exit_places), 1)
+        self.assertIs(true_exit_places[0], false_exit_places[0])
+        merge_place = true_exit_places[0]
+
+        # Merge place flows into return
+        t_ret = next(t for t in net.transitions if t.label == "return result")
+        self.assertTrue(any(a.source == merge_place and a.target == t_ret for a in net.arcs))
 
     def test_if_elif_else(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "if_elif_else.js"))
         node = self.walker.find_function(tree, "if_elif_else_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
 
-        labels = [t.label for t in net.transitions]
-        self.assertIn("if (x > 10)", labels)
-        self.assertIn("if (x > 0)", labels)
-        self.assertIn("result = 1", labels)
-        self.assertIn("result = 2", labels)
-        self.assertIn("result = 3", labels)
+        # Both outer and inner if statements have decision places (2 outgoing arcs)
+        branch_places = [p for p in net.places if len([a for a in net.arcs if a.source == p]) == 2]
+        self.assertEqual(len(branch_places), 2)
+
+        # All three branches converge to the same merge place
+        t_b1 = next(t for t in net.transitions if t.label == "result = 1")
+        t_b2 = next(t for t in net.transitions if t.label == "result = 2")
+        t_b3 = next(t for t in net.transitions if t.label == "result = 3")
+        exit_b1 = next(a.target for a in net.arcs if a.source == t_b1)
+        exit_b2 = next(a.target for a in net.arcs if a.source == t_b2)
+        exit_b3 = next(a.target for a in net.arcs if a.source == t_b3)
+        self.assertIs(exit_b1, exit_b2)
+        self.assertIs(exit_b2, exit_b3)
 
     def test_if_no_else(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "if_no_else.js"))
         node = self.walker.find_function(tree, "if_no_else_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
 
-        labels = [t.label for t in net.transitions]
-        self.assertIn("if (x > 0)", labels)
-        self.assertIn("else", labels)
-        self.assertIn("result = 1", labels)
-        self.assertIn("return result", labels)
+        # False transition (else) skips directly to the merge place of true branch
+        t_if_body = next(t for t in net.transitions if t.label == "result = 1")
+        merge_place = next(a.target for a in net.arcs if a.source == t_if_body)
+        t_else = next(t for t in net.transitions if t.label == "else")
+        self.assertTrue(any(a.source == t_else and a.target == merge_place for a in net.arcs))
 
 
 class TestJavascriptLoops(unittest.TestCase):
@@ -222,41 +242,71 @@ class TestJavascriptLoops(unittest.TestCase):
         node = self.walker.find_function(tree, "while_loop_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
 
         loop_trans = next(t for t in net.transitions if "while" in t.label)
         head_place = next(a.source for a in net.arcs if a.target == loop_trans)
-        back_arcs = [a for a in net.arcs if a.target == head_place and a.source != net.places[0]]
-        self.assertGreaterEqual(len(back_arcs), 1)
+
+        # Loop body terminal transition (count += 1) arcs back to head_place, creating a cycle
+        t_body = next(t for t in net.transitions if "count += 1" in t.label)
+        self.assertTrue(any(a.source == t_body and a.target == head_place for a in net.arcs))
+
+        # Exit transition leads out of the loop
+        exit_trans = next(t for t in net.transitions if t.label == "exit")
+        self.assertTrue(any(a.source == head_place and a.target == exit_trans for a in net.arcs))
 
     def test_for_loop(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "for_loop.js"))
         node = self.walker.find_function(tree, "for_loop_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
 
-        labels = [t.label for t in net.transitions]
-        self.assertTrue(any("for" in l for l in labels))
-        self.assertIn("exit", labels)
+        loop_trans = next(t for t in net.transitions if "for" in t.label)
+        head_place = next(a.source for a in net.arcs if a.target == loop_trans)
+
+        # Loop body terminal transition (sum += i) arcs back to head_place
+        t_body = next(t for t in net.transitions if "sum += i" in t.label)
+        self.assertTrue(any(a.source == t_body and a.target == head_place for a in net.arcs))
 
     def test_for_in_of_loops(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "for_in_of.js"))
         node = self.walker.find_function(tree, "for_in_of_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
 
-        labels = [t.label for t in net.transitions]
-        self.assertTrue(any("for" in l and "in" in l for l in labels))
-        self.assertTrue(any("for" in l and "of" in l for l in labels))
+        for_in_trans = next(t for t in net.transitions if "for" in t.label and "in" in t.label)
+        for_of_trans = next(t for t in net.transitions if "for" in t.label and "of" in t.label)
+
+        # Both loops have head places with back-arcs
+        head_in = next(a.source for a in net.arcs if a.target == for_in_trans)
+        head_of = next(a.source for a in net.arcs if a.target == for_of_trans)
+        back_arcs_in = [a for a in net.arcs if a.target == head_in and "print" in getattr(a.source, "label", "")]
+        back_arcs_of = [a for a in net.arcs if a.target == head_of and "print" in getattr(a.source, "label", "")]
+        self.assertEqual(len(back_arcs_in), 1)
+        self.assertEqual(len(back_arcs_of), 1)
 
     def test_loop_break_continue(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "loop_break_continue.js"))
         node = self.walker.find_function(tree, "loop_break_continue_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
 
-        labels = [t.label for t in net.transitions]
-        self.assertIn("continue", labels)
-        self.assertIn("break", labels)
+        while_trans = next(t for t in net.transitions if "while" in t.label)
+        head_place = next(a.source for a in net.arcs if a.target == while_trans)
+        exit_trans = next(t for t in net.transitions if t.label == "exit")
+        exit_place = next(a.target for a in net.arcs if a.source == exit_trans)
+
+        t_continue = next(t for t in net.transitions if t.label == "continue")
+        t_break = next(t for t in net.transitions if t.label == "break")
+
+        # Continue arcs back to head_place
+        self.assertTrue(any(a.source == t_continue and a.target == head_place for a in net.arcs))
+
+        # Break arcs directly to exit_place
+        self.assertTrue(any(a.source == t_break and a.target == exit_place for a in net.arcs))
 
     def test_break_outside_loop_raises_syntax_error(self):
         stmt = {"type": "BreakStatement", "loc": {"start": {"line": 1, "column": 0}}}
@@ -280,10 +330,7 @@ class TestJavascriptTryCatch(unittest.TestCase):
         node = self.walker.find_function(tree, "try_catch_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
-
-        labels = [t.label for t in net.transitions]
-        self.assertIn("catch (err)", labels)
-        self.assertIn("val = call: riskyOperation()", labels)
+        assert_bipartite(self, net)
 
         risky_trans = next(t for t in net.transitions if "riskyOperation" in t.label)
         catch_trans = next(t for t in net.transitions if "catch" in t.label)
@@ -291,26 +338,43 @@ class TestJavascriptTryCatch(unittest.TestCase):
         exc_arc = next(a for a in net.arcs if a.source == risky_trans and a.target == except_entry)
         self.assertIsNotNone(exc_arc)
 
+        # Both try normal exit and catch handler exit converge on the same try_exit place
+        t_catch_body = next(t for t in net.transitions if t.label == "val = -1")
+        try_exit_from_normal = next(a.target for a in net.arcs if a.source == risky_trans and a.target != except_entry)
+        try_exit_from_catch = next(a.target for a in net.arcs if a.source == t_catch_body)
+        self.assertIs(try_exit_from_normal, try_exit_from_catch)
+
     def test_try_catch_finally(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "try_catch_finally.js"))
         node = self.walker.find_function(tree, "try_catch_finally_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
 
-        labels = [t.label for t in net.transitions]
-        self.assertIn("catch (err)", labels)
-        self.assertIn("call: cleanup()", labels)
+        risky_trans = next(t for t in net.transitions if "riskyOperation" in t.label)
+        catch_body_trans = next(t for t in net.transitions if t.label == "val = -1")
+        cleanup_trans = next(t for t in net.transitions if "cleanup" in t.label)
+        finally_entry = next(a.source for a in net.arcs if a.target == cleanup_trans)
+
+        # Both normal try flow and catch handler converge into finally_entry
+        catch_parent = next(a.source for a in net.arcs if a.target == cleanup_trans)
+        self.assertIs(finally_entry, catch_parent)
+        self.assertTrue(any(a.source == risky_trans and a.target == finally_entry for a in net.arcs))
+        self.assertTrue(any(a.source == catch_body_trans and a.target == finally_entry for a in net.arcs))
 
     def test_try_finally(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "try_finally.js"))
         node = self.walker.find_function(tree, "try_finally_func")
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
 
-        labels = [t.label for t in net.transitions]
-        self.assertIn("val = call: riskyOperation()", labels)
-        self.assertIn("call: cleanup()", labels)
-        self.assertIn("exception", labels)
+        cleanup_trans = next(t for t in net.transitions if "cleanup" in t.label)
+        finally_entry = next(a.source for a in net.arcs if a.target == cleanup_trans)
+        exc_trans = next(t for t in net.transitions if t.label == "exception")
+
+        # Unhandled exception flows into finally_entry
+        self.assertTrue(any(a.source == exc_trans and a.target == finally_entry for a in net.arcs))
 
 
 if __name__ == '__main__':

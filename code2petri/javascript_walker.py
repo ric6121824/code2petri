@@ -63,6 +63,20 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             return f"call: {obj_str}.{prop_str}()"
         return f"call: {self._slice(callee)}()"
 
+    def _format_parenthesized_condition(self, keyword: str, test_node: Optional[dict]) -> str:
+        """Formats a condition with parentheses: e.g. if (x > 0) or while (x > 0)."""
+        test_slice = self._slice(test_node)
+        if test_slice.startswith("(") and test_slice.endswith(")"):
+            return f"{keyword} {test_slice}"
+        return f"{keyword} ({test_slice})"
+
+    def _get_loop_header_slice(self, stmt: dict) -> Optional[str]:
+        """Extracts loop header text up to the body block start from raw source."""
+        body = stmt.get("body", {})
+        if "start" in stmt and "start" in body:
+            return self.raw_source[stmt["start"]:body["start"]].strip()
+        return None
+
     def _format_statement_label(self, stmt: dict) -> str:
         """Returns a readable summary of the statement for transition labeling."""
         stmt_type = stmt.get("type")
@@ -77,36 +91,24 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
 
         # Break and Continue
         if stmt_type == "BreakStatement":
-            label = stmt.get("label")
-            if label and label.get("name"):
-                return f"break {label['name']}"
             return "break"
 
         if stmt_type == "ContinueStatement":
-            label = stmt.get("label")
-            if label and label.get("name"):
-                return f"continue {label['name']}"
             return "continue"
 
         # If statement
         if stmt_type == "IfStatement":
-            test_slice = self._slice(stmt.get("test"))
-            if test_slice.startswith("(") and test_slice.endswith(")"):
-                return f"if {test_slice}"
-            return f"if ({test_slice})"
+            return self._format_parenthesized_condition("if", stmt.get("test"))
 
         # While statement
         if stmt_type == "WhileStatement":
-            test_slice = self._slice(stmt.get("test"))
-            if test_slice.startswith("(") and test_slice.endswith(")"):
-                return f"while {test_slice}"
-            return f"while ({test_slice})"
+            return self._format_parenthesized_condition("while", stmt.get("test"))
 
         # For statement
         if stmt_type == "ForStatement":
-            body = stmt.get("body", {})
-            if "start" in stmt and "start" in body:
-                return self.raw_source[stmt["start"]:body["start"]].strip()
+            header = self._get_loop_header_slice(stmt)
+            if header:
+                return header
             init_str = self._slice(stmt.get("init")).rstrip(";")
             test_str = self._slice(stmt.get("test"))
             update_str = self._slice(stmt.get("update"))
@@ -114,9 +116,9 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
 
         # ForInStatement and ForOfStatement
         if stmt_type in ("ForInStatement", "ForOfStatement"):
-            body = stmt.get("body", {})
-            if "start" in stmt and "start" in body:
-                return self.raw_source[stmt["start"]:body["start"]].strip()
+            header = self._get_loop_header_slice(stmt)
+            if header:
+                return header
             left_str = self._slice(stmt.get("left")).rstrip(";")
             right_str = self._slice(stmt.get("right"))
             op = "in" if stmt_type == "ForInStatement" else "of"
@@ -180,7 +182,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
     ) -> None:
         """Handles break or continue jump statements to loop exit or head."""
         stmt_type = stmt.get("type")
-        is_break = (stmt_type == "BreakStatement")
+        is_break = stmt_type == "BreakStatement"
         keyword = "break" if is_break else "continue"
         lineno = self._get_lineno(stmt)
         if not self.loop_stack:
@@ -280,11 +282,6 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 self.loop_stack.pop()
 
                 self.net.add_arc(source=exit_trans, target=loop_exit)
-
-                has_exit_inflow = any(arc.target == loop_exit for arc in self.net.arcs)
-                if not has_exit_inflow:
-                    return None
-
                 current_place = loop_exit
 
             elif stmt_type == "TryStatement":
@@ -315,26 +312,26 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 # Walk catch handler if present
                 handler = stmt.get("handler")
                 if handler:
-                    h_lineno = self._get_lineno(handler, lineno)
+                    handler_lineno = self._get_lineno(handler, lineno)
                     param = handler.get("param")
                     if param:
                         param_str = self._slice(param)
-                        h_label = f"catch ({param_str})"
+                        handler_label = f"catch ({param_str})"
                     else:
-                        h_label = "catch"
+                        handler_label = "catch"
 
-                    h_trans = self.new_transition(
-                        label=h_label,
-                        line_number=h_lineno,
+                    handler_trans = self.new_transition(
+                        label=handler_label,
+                        line_number=handler_lineno,
                         hook_exception=False,
                     )
-                    self.net.add_arc(source=except_entry, target=h_trans)
+                    self.net.add_arc(source=except_entry, target=handler_trans)
                     catch_stmts = _to_stmt_list(handler.get("body"))
                     self._walk_branch(
                         catch_stmts,
-                        source_transition=h_trans,
+                        source_transition=handler_trans,
                         target_exit=finally_entry,
-                        line_number=h_lineno,
+                        line_number=handler_lineno,
                     )
                 elif finalizer:
                     # try...finally without catch: unhandled exception flows to finally
@@ -351,14 +348,6 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                     self.walk_block(finally_stmts, current_place=finally_entry, target_exit=try_exit)
 
                 current_place = try_exit
-
-            elif stmt_type == "BlockStatement":
-                block_stmts = stmt.get("body", [])
-                next_place = target_exit if is_last else self.new_place(line_number=lineno)
-                res = self.walk_block(block_stmts, current_place=current_place, target_exit=next_place)
-                if res is None:
-                    return None
-                current_place = next_place
 
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=lineno)
