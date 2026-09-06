@@ -1,15 +1,8 @@
-import os
-from typing import Optional, List, Any
-
 from code2flow.engine import LanguageParams
 from code2flow.javascript import Javascript
 from code2petri.base_walker import _BaseControlFlowWalker
 from code2petri.model import PetriNet, Place, Transition
 from code2petri.walker_protocol import WalkerProtocol
-
-# Ensure NODE_PATH contains global node_modules if not already set
-if "NODE_PATH" not in os.environ:
-    os.environ["NODE_PATH"] = "/usr/local/lib/node_modules"
 
 
 class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
@@ -31,6 +24,18 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             return node["loc"]["start"].get("line", default)
         return default
 
+    def _format_call_expression(self, expr: dict) -> str:
+        """Formats a CallExpression into call: callee()."""
+        callee = expr.get("callee", {})
+        if callee.get("type") == "Identifier":
+            return f"call: {callee.get('name')}()"
+        elif callee.get("type") == "MemberExpression":
+            obj_str = self._slice(callee.get("object"))
+            prop = callee.get("property", {})
+            prop_str = prop.get("name") or self._slice(prop)
+            return f"call: {obj_str}.{prop_str}()"
+        return f"call: {self._slice(callee)}()"
+
     def _format_statement_label(self, stmt: dict) -> str:
         """Returns a readable summary of the statement for transition labeling."""
         stmt_type = stmt.get("type")
@@ -47,21 +52,22 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         if stmt_type == "ExpressionStatement":
             expr = stmt.get("expression", {})
             if expr.get("type") == "CallExpression":
-                callee = expr.get("callee", {})
-                if callee.get("type") == "Identifier":
-                    return f"call: {callee.get('name')}()"
-                elif callee.get("type") == "MemberExpression":
-                    obj_str = self._slice(callee.get("object"))
-                    prop = callee.get("property", {})
-                    prop_str = prop.get("name") or self._slice(prop)
-                    return f"call: {obj_str}.{prop_str}()"
-                else:
-                    return f"call: {self._slice(callee)}()"
+                return self._format_call_expression(expr)
+
+        # VariableDeclaration with a CallExpression initializer (e.g. let res = calc())
+        if stmt_type == "VariableDeclaration":
+            decls = stmt.get("declarations", [])
+            if len(decls) == 1 and decls[0].get("init", {}).get("type") == "CallExpression":
+                kind = stmt.get("kind", "let")
+                var_name = self._slice(decls[0].get("id"))
+                call_str = self._format_call_expression(decls[0]["init"])
+                return f"{kind} {var_name} = {call_str}"
 
         # Default source slice
         raw = self._slice(stmt)
         first_line = raw.split("\n")[0].strip().rstrip(";")
         return first_line or stmt_type or "statement"
+
 
     def walk_block(
         self,
@@ -128,17 +134,17 @@ class JavascriptWalker(WalkerProtocol):
         self.tree = tree
         return tree
 
-    def _has_executable_global_statements(self, tree: dict) -> bool:
-        """Checks whether the program has top-level executable statements outside functions/classes."""
-        for stmt in tree.get("body", []):
-            if stmt.get("type") not in ("FunctionDeclaration", "ClassDeclaration"):
-                return True
-        return False
+    def _get_executable_statements(self, tree: dict) -> List[dict]:
+        """Returns top-level executable statements outside functions/classes."""
+        return [
+            s for s in tree.get("body", [])
+            if s.get("type") not in ("FunctionDeclaration", "ClassDeclaration")
+        ]
 
     def find_all_functions(self, tree: dict) -> List[str]:
         """Finds all function names and (global) if top-level code exists."""
         funcs = []
-        if self._has_executable_global_statements(tree):
+        if self._get_executable_statements(tree):
             funcs.append("(global)")
 
         declared_funcs = []
@@ -156,12 +162,11 @@ class JavascriptWalker(WalkerProtocol):
     def find_function(self, tree: dict, func_name: str) -> Optional[dict]:
         """Finds a function AST node by name or returns synthetic wrapper for (global)."""
         if func_name == "(global)":
-            executable_stmts = [
-                s for s in tree.get("body", [])
-                if s.get("type") not in ("FunctionDeclaration", "ClassDeclaration")
-            ]
+            executable_stmts = self._get_executable_statements(tree)
+            if not executable_stmts:
+                return None
             first_lineno = 1
-            if executable_stmts and "loc" in executable_stmts[0]:
+            if "loc" in executable_stmts[0]:
                 first_lineno = executable_stmts[0]["loc"]["start"].get("line", 1)
 
             return {
@@ -222,19 +227,3 @@ class JavascriptWalker(WalkerProtocol):
 
         return net
 
-
-# Module-level convenience functions
-def parse_file(filepath: str) -> dict:
-    return JavascriptWalker().parse_file(filepath)
-
-
-def find_function(tree: dict, func_name: str) -> Optional[dict]:
-    return JavascriptWalker().find_function(tree, func_name)
-
-
-def find_all_functions(tree: dict) -> List[str]:
-    return JavascriptWalker().find_all_functions(tree)
-
-
-def walk_function(ast_node: dict) -> PetriNet:
-    return JavascriptWalker().walk_function(ast_node)

@@ -65,6 +65,27 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
         body_stmts = global_node["body"]["body"]
         self.assertEqual(len(body_stmts), 3)
 
+    def test_find_function_global_returns_none_when_no_executable_statements(self):
+        tree = self.walker.parse_file(self.seq_fixture)
+        # sequential.js only contains function sequential_func()
+        global_node = self.walker.find_function(tree, "(global)")
+        self.assertIsNone(global_node)
+
+    def test_walk_assignment_with_call_expression(self):
+        fixture_path = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "petri_js",
+            "assign_call.js",
+        )
+        tree = self.walker.parse_file(fixture_path)
+        node = self.walker.find_function(tree, "calc_caller")
+        net = self.walker.walk_function(node)
+        labels = [t.label for t in net.transitions]
+        self.assertEqual(labels, ["let res = call: calculate()", "return res"])
+
+
+
     def test_walk_sequential_function(self):
         tree = self.walker.parse_file(self.seq_fixture)
         node = self.walker.find_function(tree, "sequential_func")
