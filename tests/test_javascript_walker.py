@@ -377,6 +377,296 @@ class TestJavascriptTryCatch(unittest.TestCase):
         self.assertTrue(any(a.source == exc_trans and a.target == finally_entry for a in net.arcs))
 
 
+class TestJavascriptSwitch(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.fixtures_dir = os.path.join(os.path.dirname(__file__), "test_code", "petri_js")
+
+    def test_switch_with_default(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "switch_case.js"))
+        node = self.walker.find_function(tree, "switch_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertIn("case 1", labels)
+        self.assertIn("case 2", labels)
+        self.assertIn("default", labels)
+        self.assertIn("result = 10", labels)
+        self.assertIn("result = 20", labels)
+        self.assertIn("result = -1", labels)
+
+        # Decision place has 3 competing transitions
+        t_c1 = next(t for t in net.transitions if t.label == "case 1")
+        t_c2 = next(t for t in net.transitions if t.label == "case 2")
+        t_def = next(t for t in net.transitions if t.label == "default")
+        p_dec1 = next(a.source for a in net.arcs if a.target == t_c1)
+        p_dec2 = next(a.source for a in net.arcs if a.target == t_c2)
+        p_dec_def = next(a.source for a in net.arcs if a.target == t_def)
+        self.assertIs(p_dec1, p_dec2)
+        self.assertIs(p_dec2, p_dec_def)
+
+        # Break transitions connect to switch_exit
+        breaks = [t for t in net.transitions if t.label == "break"]
+        self.assertEqual(len(breaks), 3)
+        break_targets = [next(a.target for a in net.arcs if a.source == b) for b in breaks]
+        self.assertEqual(len(set(break_targets)), 1)
+        switch_exit = break_targets[0]
+
+        # Switch exit leads to return result
+        t_ret = next(t for t in net.transitions if t.label == "return result")
+        self.assertTrue(any(a.source == switch_exit and a.target == t_ret for a in net.arcs))
+
+    def test_switch_no_default(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "switch_case.js"))
+        node = self.walker.find_function(tree, "switch_no_default")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+
+        # Has implicit default transition skipping directly to switch exit
+        t_c1 = next(t for t in net.transitions if t.label == "case 1")
+        t_def = next(t for t in net.transitions if t.label == "default")
+        decision_place = next(a.source for a in net.arcs if a.target == t_c1)
+        self.assertTrue(any(a.source == decision_place and a.target == t_def for a in net.arcs))
+
+
+class TestJavascriptDoWhile(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.fixtures_dir = os.path.join(os.path.dirname(__file__), "test_code", "petri_js")
+
+    def test_do_while_cycle(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "do_while.js"))
+        node = self.walker.find_function(tree, "do_while_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+
+        # Body executes before condition check
+        t_init = next(t for t in net.transitions if "let i = 0" in t.label)
+        body_head = next(a.target for a in net.arcs if a.source == t_init)
+        t_body = next(t for t in net.transitions if "i += 1" in t.label)
+        self.assertTrue(any(a.source == body_head and a.target == t_body for a in net.arcs))
+
+        # Body connects to condition check place
+        check_place = next(a.target for a in net.arcs if a.source == t_body)
+        cond_trans = next(t for t in net.transitions if "while" in t.label)
+        exit_trans = next(t for t in net.transitions if t.label == "exit")
+
+        # Condition check place branches to cond_trans (back-arc) and exit_trans
+        self.assertTrue(any(a.source == check_place and a.target == cond_trans for a in net.arcs))
+        self.assertTrue(any(a.source == check_place and a.target == exit_trans for a in net.arcs))
+        self.assertTrue(any(a.source == cond_trans and a.target == body_head for a in net.arcs))
+
+    def test_do_while_break_continue(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "do_while.js"))
+        node = self.walker.find_function(tree, "do_while_break_continue")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+
+        t_continue = next(t for t in net.transitions if t.label == "continue")
+        t_break = next(t for t in net.transitions if t.label == "break")
+        cond_trans = next(t for t in net.transitions if "while" in t.label)
+        check_place = next(a.source for a in net.arcs if a.target == cond_trans)
+        exit_trans = next(t for t in net.transitions if t.label == "exit")
+        loop_exit = next(a.target for a in net.arcs if a.source == exit_trans)
+
+        # In do...while, continue jumps to check_place, and break jumps to loop_exit
+        self.assertTrue(any(a.source == t_continue and a.target == check_place for a in net.arcs))
+        self.assertTrue(any(a.source == t_break and a.target == loop_exit for a in net.arcs))
+
+
+class TestJavascriptThrow(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.fixtures_dir = os.path.join(os.path.dirname(__file__), "test_code", "petri_js")
+
+    def test_unhandled_throw(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "throw_exception.js"))
+        node = self.walker.find_function(tree, "throw_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+
+        throw_trans = next(t for t in net.transitions if "throw" in t.label)
+        _, end_place = assert_has_start_and_end(self, net)
+
+        # Unhandled throw terminates function directly at end_place
+        self.assertTrue(any(a.source == throw_trans and a.target == end_place for a in net.arcs))
+
+    def test_throw_in_try(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "throw_exception.js"))
+        node = self.walker.find_function(tree, "throw_in_try")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+
+        throw_trans = next(t for t in net.transitions if "throw" in t.label)
+        catch_trans = next(t for t in net.transitions if "catch" in t.label)
+        except_entry = next(a.source for a in net.arcs if a.target == catch_trans)
+
+        # Throw inside try arcs to except_entry
+        self.assertTrue(any(a.source == throw_trans and a.target == except_entry for a in net.arcs))
+
+
+class TestJavascriptClassMethods(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.fixture_path = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "game_of_life",
+            "webgl-engine.js",
+        )
+
+    def test_find_all_functions_includes_class_methods(self):
+        tree = self.walker.parse_file(self.fixture_path)
+        funcs = self.walker.find_all_functions(tree)
+        expected = [
+            "WebGLEngine.constructor",
+            "WebGLEngine.initShaders",
+            "WebGLEngine.createProgram",
+            "WebGLEngine.createTexture",
+            "WebGLEngine.initBuffers",
+            "WebGLEngine.randomize",
+            "WebGLEngine.step",
+            "WebGLEngine.drawToScreen",
+        ]
+        for exp in expected:
+            self.assertIn(exp, funcs)
+
+    def test_find_function_qualified_and_bare(self):
+        tree = self.walker.parse_file(self.fixture_path)
+        node_qual = self.walker.find_function(tree, "WebGLEngine.step")
+        self.assertIsNotNone(node_qual)
+
+        node_bare = self.walker.find_function(tree, "step")
+        self.assertIsNotNone(node_bare)
+        self.assertIs(node_qual, node_bare)
+
+    def test_walk_class_method(self):
+        tree = self.walker.parse_file(self.fixture_path)
+        node = self.walker.find_function(tree, "WebGLEngine.step")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+
+
+class TestJavascriptAnonymousCallbacks(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.fixture_path = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "game_of_life",
+            "app.js",
+        )
+
+    def test_find_all_functions_discovers_callbacks(self):
+        tree = self.walker.parse_file(self.fixture_path)
+        funcs = self.walker.find_all_functions(tree)
+        self.assertTrue(any("anonymous@151" in f for f in funcs))
+        self.assertTrue(any("anonymous@160" in f for f in funcs))
+        self.assertTrue(any("anonymous@165" in f for f in funcs))
+
+    def test_find_function_anonymous_targetable(self):
+        tree = self.walker.parse_file(self.fixture_path)
+        node1 = self.walker.find_function(tree, "(anonymous@151)")
+        self.assertIsNotNone(node1)
+
+        node2 = self.walker.find_function(tree, "setupEventListeners.(anonymous@151)")
+        self.assertIsNotNone(node2)
+        self.assertIs(node1, node2)
+
+    def test_walk_anonymous_callback(self):
+        tree = self.walker.parse_file(self.fixture_path)
+        node = self.walker.find_function(tree, "(anonymous@151)")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertIn("call: stopSimulation()", labels)
+        self.assertIn("if (mode === 'gpu')", labels)
+
+
+class TestJavascriptGameLoopRAF(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.fixture_path = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "game_of_life",
+            "app.js",
+        )
+
+    def test_loop_raf_cycle(self):
+        tree = self.walker.parse_file(self.fixture_path)
+        node = self.walker.find_function(tree, "loop")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+
+        start_place, _ = assert_has_start_and_end(self, net)
+        raf_trans = next(t for t in net.transitions if "requestAnimationFrame" in t.label)
+
+        # requestAnimationFrame(loop) produces a back-arc cycle to start_place
+        self.assertTrue(
+            any(a.source == raf_trans and a.target == start_place for a in net.arcs),
+            "Expected requestAnimationFrame(loop) to have a back-arc cycle to start_place",
+        )
+
+
+class TestGameOfLifeSimulatorIntegration(unittest.TestCase):
+    def setUp(self):
+        self.app_js = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "game_of_life",
+            "app.js",
+        )
+        self.webgl_js = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "game_of_life",
+            "webgl-engine.js",
+        )
+
+    def test_engine_app_global(self):
+        net = code2petri(self.app_js, output_file=None, target_function="(global)")
+        self.assertIsNotNone(net)
+        assert_valid_petri_net(self, net)
+        labels = [t.label for t in net.transitions]
+        self.assertIn("call: init()", labels)
+
+    def test_engine_app_step_cpu(self):
+        net = code2petri(self.app_js, output_file=None, target_function="stepCpu")
+        self.assertIsNotNone(net)
+        assert_valid_petri_net(self, net)
+
+        # XOR-splits in stepCpu for cellular automaton rules
+        labels = [t.label for t in net.transitions]
+        self.assertTrue(any("state === 0" in l for l in labels))
+
+    def test_engine_app_loop(self):
+        net = code2petri(self.app_js, output_file=None, target_function="loop")
+        self.assertIsNotNone(net)
+        assert_valid_petri_net(self, net)
+        start_place, _ = assert_has_start_and_end(self, net)
+        raf_trans = next(t for t in net.transitions if "requestAnimationFrame" in t.label)
+        self.assertTrue(any(a.source == raf_trans and a.target == start_place for a in net.arcs))
+
+    def test_engine_webgl_engine_step(self):
+        net = code2petri(self.webgl_js, output_file=None, target_function="WebGLEngine.step")
+        self.assertIsNotNone(net)
+        assert_valid_petri_net(self, net)
+        labels = [t.label for t in net.transitions]
+        self.assertIn("call: this.drawToScreen()", labels)
+
+
 if __name__ == '__main__':
     unittest.main()
 

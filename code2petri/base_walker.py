@@ -4,7 +4,7 @@ from code2petri.model import PetriNet, Place, Transition
 
 class LoopContext(NamedTuple):
     """Enclosing loop context tracking head and exit places."""
-    head: Place
+    head: Optional[Place]
     exit: Place
 
 

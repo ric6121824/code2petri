@@ -35,9 +35,18 @@ def _get_block_lineno(stmts: List[dict], default: Optional[int] = None) -> Optio
 class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
     """Internal recursive walker constructing PetriNet places, transitions, and arcs for JavaScript."""
 
-    def __init__(self, net: PetriNet, end_place: Place, raw_source: str) -> None:
+    def __init__(
+        self,
+        net: PetriNet,
+        start_place: Place,
+        end_place: Place,
+        raw_source: str,
+        func_name: Optional[str] = None,
+    ) -> None:
         super().__init__(net, end_place)
+        self.start_place = start_place
         self.raw_source = raw_source
+        self.func_name = func_name
 
     def _slice(self, node: Optional[dict]) -> str:
         """Extracts source text substring for an AST node using character offsets."""
@@ -96,12 +105,28 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         if stmt_type == "ContinueStatement":
             return "continue"
 
+        # Throw statement
+        if stmt_type == "ThrowStatement":
+            arg = stmt.get("argument")
+            if arg:
+                return f"throw {self._slice(arg)}"
+            return "throw"
+
+        # Switch statement
+        if stmt_type == "SwitchStatement":
+            disc = self._slice(stmt.get("discriminant"))
+            return f"switch ({disc})"
+
         # If statement
         if stmt_type == "IfStatement":
             return self._format_parenthesized_condition("if", stmt.get("test"))
 
         # While statement
         if stmt_type == "WhileStatement":
+            return self._format_parenthesized_condition("while", stmt.get("test"))
+
+        # Do-while statement
+        if stmt_type == "DoWhileStatement":
             return self._format_parenthesized_condition("while", stmt.get("test"))
 
         # For statement
@@ -180,20 +205,84 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         stmt: dict,
         current_place: Place,
     ) -> None:
-        """Handles break or continue jump statements to loop exit or head."""
+        """Handles break or continue jump statements to loop/switch exit or loop head."""
         stmt_type = stmt.get("type")
         is_break = stmt_type == "BreakStatement"
         keyword = "break" if is_break else "continue"
         lineno = self._get_lineno(stmt)
         if not self.loop_stack:
             raise SyntaxError(f"'{keyword}' outside loop at line {lineno}")
-        target_place = self.loop_stack[-1].exit if is_break else self.loop_stack[-1].head
+        if is_break:
+            target_place = self.loop_stack[-1].exit
+        else:
+            target_place = None
+            for ctx in reversed(self.loop_stack):
+                if ctx.head is not None:
+                    target_place = ctx.head
+                    break
+            if target_place is None:
+                raise SyntaxError(f"'continue' outside loop at line {lineno}")
         trans = self.new_transition(
             label=self._format_statement_label(stmt),
             line_number=lineno,
         )
         self.net.add_arc(source=current_place, target=trans)
         self.net.add_arc(source=trans, target=target_place)
+
+    def _find_raf_call(self, stmt: dict) -> Optional[dict]:
+        """Finds a requestAnimationFrame CallExpression within a statement if present."""
+        if not stmt or not isinstance(stmt, dict):
+            return None
+        stmt_type = stmt.get("type")
+        call_expr = None
+        if stmt_type == "ExpressionStatement":
+            expr = stmt.get("expression", {})
+            if expr.get("type") == "CallExpression":
+                call_expr = expr
+            elif expr.get("type") == "AssignmentExpression":
+                right = expr.get("right", {})
+                if right.get("type") == "CallExpression":
+                    call_expr = right
+        elif stmt_type == "VariableDeclaration":
+            for decl in stmt.get("declarations", []):
+                init = decl.get("init", {})
+                if init.get("type") == "CallExpression":
+                    call_expr = init
+                    break
+        elif stmt_type == "ReturnStatement":
+            arg = stmt.get("argument", {})
+            if arg.get("type") == "CallExpression":
+                call_expr = arg
+
+        if not call_expr:
+            return None
+
+        callee = call_expr.get("callee", {})
+        callee_name = None
+        if callee.get("type") == "Identifier":
+            callee_name = callee.get("name")
+        elif callee.get("type") == "MemberExpression":
+            prop = callee.get("property", {})
+            callee_name = prop.get("name") or self._slice(prop)
+
+        if callee_name == "requestAnimationFrame":
+            return call_expr
+        return None
+
+    def _is_raf_cycle_call(self, stmt: dict) -> bool:
+        """Determines if a statement is a recursive requestAnimationFrame call to enclosing func."""
+        if not self.func_name:
+            return False
+        call_expr = self._find_raf_call(stmt)
+        if not call_expr:
+            return False
+        args = call_expr.get("arguments", [])
+        if not args:
+            return False
+        first_arg = args[0]
+        arg_name = first_arg.get("name") if first_arg.get("type") == "Identifier" else self._slice(first_arg)
+        bare_func_name = self.func_name.split(".")[-1]
+        return arg_name in (self.func_name, bare_func_name)
 
     def walk_block(
         self,
@@ -349,6 +438,113 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
 
                 current_place = try_exit
 
+            elif stmt_type == "SwitchStatement":
+                decision_place = current_place
+                if is_last:
+                    switch_exit = target_exit
+                else:
+                    switch_exit = self.new_place(label="exit_switch", line_number=lineno)
+
+                self.loop_stack.append(_LoopContext(head=None, exit=switch_exit))
+                cases = stmt.get("cases", [])
+                has_default = any(case.get("test") is None for case in cases)
+
+                for case in cases:
+                    case_test = case.get("test")
+                    case_lineno = self._get_lineno(case, lineno)
+                    if case_test:
+                        case_label = f"case {self._slice(case_test)}"
+                    else:
+                        case_label = "default"
+
+                    case_trans = self.new_transition(
+                        label=case_label,
+                        line_number=case_lineno,
+                    )
+                    self.net.add_arc(source=decision_place, target=case_trans)
+                    case_stmts = case.get("consequent", [])
+                    self._walk_branch(
+                        case_stmts,
+                        source_transition=case_trans,
+                        target_exit=switch_exit,
+                        line_number=case_lineno,
+                    )
+
+                if not has_default:
+                    default_trans = self.new_transition(
+                        label="default",
+                        line_number=lineno,
+                    )
+                    self.net.add_arc(source=decision_place, target=default_trans)
+                    self.net.add_arc(source=default_trans, target=switch_exit)
+
+                self.loop_stack.pop()
+
+                incoming_to_exit = [a for a in self.net.arcs if a.target == switch_exit]
+                if not incoming_to_exit:
+                    return None
+
+                current_place = switch_exit
+
+            elif stmt_type == "DoWhileStatement":
+                body_head = current_place
+                test_node = stmt.get("test")
+                test_lineno = self._get_lineno(test_node, lineno)
+                check_place = self.new_place(label="check_do_while", line_number=test_lineno)
+
+                if is_last:
+                    loop_exit = target_exit
+                else:
+                    loop_exit = self.new_place(label="exit_do_while", line_number=lineno)
+
+                self.loop_stack.append(_LoopContext(head=check_place, exit=loop_exit))
+                body_stmts = _to_stmt_list(stmt.get("body"))
+                self.walk_block(body_stmts, current_place=body_head, target_exit=check_place)
+                self.loop_stack.pop()
+
+                cond_label = self._format_parenthesized_condition("while", test_node)
+                cond_trans = self.new_transition(
+                    label=cond_label,
+                    line_number=test_lineno,
+                )
+                self.net.add_arc(source=check_place, target=cond_trans)
+                self.net.add_arc(source=cond_trans, target=body_head)
+
+                exit_trans = self.new_transition(
+                    label="exit",
+                    line_number=test_lineno,
+                )
+                self.net.add_arc(source=check_place, target=exit_trans)
+                self.net.add_arc(source=exit_trans, target=loop_exit)
+
+                current_place = loop_exit
+
+            elif stmt_type == "ThrowStatement":
+                label = self._format_statement_label(stmt)
+                trans = self.new_transition(
+                    label=label,
+                    line_number=lineno,
+                )
+                self.net.add_arc(source=current_place, target=trans)
+                if not self.try_stack:
+                    self.net.add_arc(source=trans, target=self.end_place)
+                return None
+
+            elif self._is_raf_cycle_call(stmt):
+                label = self._format_statement_label(stmt)
+                trans = self.new_transition(
+                    label=label,
+                    line_number=lineno,
+                )
+                self.net.add_arc(source=current_place, target=trans)
+                self.net.add_arc(source=trans, target=self.start_place)
+                if is_last:
+                    return None
+                else:
+                    next_place = self.new_place(line_number=lineno)
+                    self.net.add_arc(source=trans, target=next_place)
+                    current_place = next_place
+
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=lineno)
                 label = self._format_statement_label(stmt)
@@ -391,6 +587,12 @@ class JavascriptWalker(WalkerProtocol):
         self.tree = tree
         return tree
 
+    def _slice_node(self, node: Optional[dict]) -> str:
+        """Extracts raw source substring for an AST node."""
+        if not node or "start" not in node or "end" not in node:
+            return ""
+        return self.raw_source[node["start"]:node["end"]].strip()
+
     def _get_executable_statements(self, tree: dict) -> List[dict]:
         """Returns top-level executable statements outside functions/classes."""
         return [
@@ -398,22 +600,97 @@ class JavascriptWalker(WalkerProtocol):
             if s.get("type") not in ("FunctionDeclaration", "ClassDeclaration")
         ]
 
+    def _collect_all_functions(self, tree: dict) -> List[dict]:
+        """Recursively collects all function declarations, class methods, and callbacks."""
+        results = []
+
+        def _traverse(node: Any, scope: List[str]) -> None:
+            if isinstance(node, dict):
+                ntype = node.get("type")
+                if ntype == "ClassDeclaration":
+                    cls_name = node.get("id", {}).get("name", "(anonymous_class)")
+                    body = node.get("body", {}).get("body", [])
+                    for elem in body:
+                        if elem.get("type") == "MethodDefinition":
+                            key = elem.get("key", {}).get("name")
+                            if not key and "key" in elem:
+                                key = self._slice_node(elem["key"])
+                            val = elem.get("value", {})
+                            lineno = (
+                                elem.get("loc", {}).get("start", {}).get("line")
+                                or val.get("loc", {}).get("start", {}).get("line", 0)
+                            )
+                            qual_name = f"{cls_name}.{key}"
+                            results.append({
+                                "qual_name": qual_name,
+                                "bare_name": key,
+                                "lineno": lineno,
+                                "node": val,
+                            })
+                            _traverse(val.get("body"), scope + [cls_name, key])
+                    return
+
+                elif ntype == "FunctionDeclaration":
+                    name = node.get("id", {}).get("name")
+                    lineno = node.get("loc", {}).get("start", {}).get("line", 0)
+                    if name:
+                        qual_name = f"{'.'.join(scope)}.{name}" if scope else name
+                        bare_name = name
+                    else:
+                        qual_name = f"{'.'.join(scope)}.(anonymous@{lineno})" if scope else f"(anonymous@{lineno})"
+                        bare_name = f"(anonymous@{lineno})"
+
+                    results.append({
+                        "qual_name": qual_name,
+                        "bare_name": bare_name,
+                        "lineno": lineno,
+                        "node": node,
+                    })
+                    new_scope = scope + [bare_name]
+                    _traverse(node.get("body"), new_scope)
+                    return
+
+                elif ntype in ("FunctionExpression", "ArrowFunctionExpression"):
+                    lineno = node.get("loc", {}).get("start", {}).get("line", 0)
+                    func_id = node.get("id")
+                    if func_id and func_id.get("name"):
+                        name = func_id.get("name")
+                        qual_name = f"{'.'.join(scope)}.{name}" if scope else name
+                        bare_name = name
+                    else:
+                        qual_name = f"{'.'.join(scope)}.(anonymous@{lineno})" if scope else f"(anonymous@{lineno})"
+                        bare_name = f"(anonymous@{lineno})"
+
+                    results.append({
+                        "qual_name": qual_name,
+                        "bare_name": bare_name,
+                        "lineno": lineno,
+                        "node": node,
+                    })
+                    new_scope = scope + [bare_name]
+                    _traverse(node.get("body"), new_scope)
+                    return
+
+                for k, v in node.items():
+                    if k != "loc":
+                        _traverse(v, scope)
+
+            elif isinstance(node, list):
+                for item in node:
+                    _traverse(item, scope)
+
+        _traverse(tree, [])
+        return results
+
     def find_all_functions(self, tree: dict) -> List[str]:
         """Finds all function names and (global) if top-level code exists."""
         funcs = []
         if self._get_executable_statements(tree):
             funcs.append("(global)")
 
-        declared_funcs = []
-        for stmt in tree.get("body", []):
-            if stmt.get("type") == "FunctionDeclaration" and stmt.get("id"):
-                name = stmt["id"].get("name")
-                lineno = stmt.get("loc", {}).get("start", {}).get("line", 0)
-                if name:
-                    declared_funcs.append((lineno, name))
-
-        declared_funcs.sort(key=lambda item: item[0])
-        funcs.extend([name for _, name in declared_funcs])
+        collected = self._collect_all_functions(tree)
+        collected.sort(key=lambda item: item["lineno"])
+        funcs.extend([item["qual_name"] for item in collected])
         return funcs
 
     def find_function(self, tree: dict, func_name: str) -> Optional[dict]:
@@ -426,7 +703,7 @@ class JavascriptWalker(WalkerProtocol):
             if "loc" in executable_stmts[0]:
                 first_lineno = executable_stmts[0]["loc"]["start"].get("line", 1)
 
-            return {
+            wrapper = {
                 "type": "FunctionDeclaration",
                 "id": {"type": "Identifier", "name": "(global)"},
                 "loc": {"start": {"line": first_lineno, "column": 0}},
@@ -434,24 +711,61 @@ class JavascriptWalker(WalkerProtocol):
                     "type": "BlockStatement",
                     "body": executable_stmts,
                 },
+                "_petri_func_name": "(global)",
             }
+            return wrapper
 
-        for stmt in tree.get("body", []):
-            if stmt.get("type") == "FunctionDeclaration" and stmt.get("id"):
-                if stmt["id"].get("name") == func_name:
-                    return stmt
+        collected = self._collect_all_functions(tree)
+
+        # 1. Exact match on qualified name
+        for item in collected:
+            if item["qual_name"] == func_name:
+                item["node"]["_petri_func_name"] = item["qual_name"]
+                return item["node"]
+
+        # 2. Exact match on bare name
+        for item in collected:
+            if item["bare_name"] == func_name:
+                item["node"]["_petri_func_name"] = item["qual_name"]
+                return item["node"]
+
+        # 3. Suffix match (e.g. .func_name)
+        for item in collected:
+            if item["qual_name"].endswith(f".{func_name}"):
+                item["node"]["_petri_func_name"] = item["qual_name"]
+                return item["node"]
+
+        # 4. Anonymous callback substring match (e.g. (anonymous@151) in qual_name)
+        if "(anonymous@" in func_name:
+            for item in collected:
+                if func_name in item["qual_name"] or func_name in item["bare_name"]:
+                    item["node"]["_petri_func_name"] = item["qual_name"]
+                    return item["node"]
 
         return None
 
-    def walk_function(self, ast_node: dict) -> PetriNet:
+    def walk_function(self, ast_node: dict, func_name: Optional[str] = None) -> PetriNet:
         """Walks a JavaScript function AST node and constructs a PetriNet model."""
         if not isinstance(ast_node, dict):
             raise TypeError(f"walk_function expects a dict AST node, got {type(ast_node).__name__}")
 
+        if ast_node.get("type") == "MethodDefinition":
+            func_node = ast_node.get("value", {})
+            if func_name is None and ast_node.get("key"):
+                func_name = ast_node["key"].get("name")
+        else:
+            func_node = ast_node
+
+        if func_name is None:
+            func_name = func_node.get("_petri_func_name") or ast_node.get("_petri_func_name")
+            if func_name is None and func_node.get("id"):
+                func_name = func_node["id"].get("name")
+
         net = PetriNet()
         start_lineno = 1
-        if "loc" in ast_node and "start" in ast_node["loc"]:
-            start_lineno = ast_node["loc"]["start"].get("line", 1)
+        loc = func_node.get("loc") or ast_node.get("loc")
+        if loc and "start" in loc:
+            start_lineno = loc["start"].get("line", 1)
 
         start_place = net.add_place(
             id_="p0",
@@ -467,18 +781,28 @@ class JavascriptWalker(WalkerProtocol):
         )
 
         # Extract statement block
-        body_node = ast_node.get("body", {})
+        body_node = func_node.get("body", {})
         if body_node.get("type") == "BlockStatement":
             statements = body_node.get("body", [])
         elif isinstance(body_node, list):
             statements = body_node
+        elif isinstance(body_node, dict) and body_node:
+            statements = [{
+                "type": "ExpressionStatement",
+                "expression": body_node,
+                "loc": body_node.get("loc"),
+                "start": body_node.get("start"),
+                "end": body_node.get("end"),
+            }]
         else:
-            statements = [body_node]
+            statements = []
 
         walker = _JavascriptControlFlowWalker(
             net=net,
+            start_place=start_place,
             end_place=end_place,
             raw_source=self.raw_source,
+            func_name=func_name,
         )
         walker.walk_block(statements, current_place=start_place, target_exit=end_place)
 
