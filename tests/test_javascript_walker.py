@@ -165,5 +165,154 @@ class TestEngineJavascriptIntegration(unittest.TestCase):
         self.assertEqual(len(net.transitions), 3)
 
 
+class TestJavascriptIfBranching(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.fixtures_dir = os.path.join(os.path.dirname(__file__), "test_code", "petri_js")
+
+    def test_if_else(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "if_else.js"))
+        node = self.walker.find_function(tree, "if_else_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        branch_places = [p for p in net.places if len([a for a in net.arcs if a.source == p]) == 2]
+        self.assertEqual(len(branch_places), 1)
+
+        labels = [t.label for t in net.transitions]
+        self.assertIn("if (x > 0)", labels)
+        self.assertIn("else", labels)
+        self.assertIn("result = 1", labels)
+        self.assertIn("result = -1", labels)
+        self.assertIn("return result", labels)
+
+    def test_if_elif_else(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "if_elif_else.js"))
+        node = self.walker.find_function(tree, "if_elif_else_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertIn("if (x > 10)", labels)
+        self.assertIn("if (x > 0)", labels)
+        self.assertIn("result = 1", labels)
+        self.assertIn("result = 2", labels)
+        self.assertIn("result = 3", labels)
+
+    def test_if_no_else(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "if_no_else.js"))
+        node = self.walker.find_function(tree, "if_no_else_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertIn("if (x > 0)", labels)
+        self.assertIn("else", labels)
+        self.assertIn("result = 1", labels)
+        self.assertIn("return result", labels)
+
+
+class TestJavascriptLoops(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.fixtures_dir = os.path.join(os.path.dirname(__file__), "test_code", "petri_js")
+
+    def test_while_loop(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "while_loop.js"))
+        node = self.walker.find_function(tree, "while_loop_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        loop_trans = next(t for t in net.transitions if "while" in t.label)
+        head_place = next(a.source for a in net.arcs if a.target == loop_trans)
+        back_arcs = [a for a in net.arcs if a.target == head_place and a.source != net.places[0]]
+        self.assertGreaterEqual(len(back_arcs), 1)
+
+    def test_for_loop(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "for_loop.js"))
+        node = self.walker.find_function(tree, "for_loop_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertTrue(any("for" in l for l in labels))
+        self.assertIn("exit", labels)
+
+    def test_for_in_of_loops(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "for_in_of.js"))
+        node = self.walker.find_function(tree, "for_in_of_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertTrue(any("for" in l and "in" in l for l in labels))
+        self.assertTrue(any("for" in l and "of" in l for l in labels))
+
+    def test_loop_break_continue(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "loop_break_continue.js"))
+        node = self.walker.find_function(tree, "loop_break_continue_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertIn("continue", labels)
+        self.assertIn("break", labels)
+
+    def test_break_outside_loop_raises_syntax_error(self):
+        stmt = {"type": "BreakStatement", "loc": {"start": {"line": 1, "column": 0}}}
+        func = {
+            "type": "FunctionDeclaration",
+            "id": {"type": "Identifier", "name": "bad"},
+            "loc": {"start": {"line": 1, "column": 0}},
+            "body": {"type": "BlockStatement", "body": [stmt]},
+        }
+        with self.assertRaises(SyntaxError):
+            self.walker.walk_function(func)
+
+
+class TestJavascriptTryCatch(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.fixtures_dir = os.path.join(os.path.dirname(__file__), "test_code", "petri_js")
+
+    def test_try_catch(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "try_catch.js"))
+        node = self.walker.find_function(tree, "try_catch_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertIn("catch (err)", labels)
+        self.assertIn("val = call: riskyOperation()", labels)
+
+        risky_trans = next(t for t in net.transitions if "riskyOperation" in t.label)
+        catch_trans = next(t for t in net.transitions if "catch" in t.label)
+        except_entry = next(a.source for a in net.arcs if a.target == catch_trans)
+        exc_arc = next(a for a in net.arcs if a.source == risky_trans and a.target == except_entry)
+        self.assertIsNotNone(exc_arc)
+
+    def test_try_catch_finally(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "try_catch_finally.js"))
+        node = self.walker.find_function(tree, "try_catch_finally_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertIn("catch (err)", labels)
+        self.assertIn("call: cleanup()", labels)
+
+    def test_try_finally(self):
+        tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "try_finally.js"))
+        node = self.walker.find_function(tree, "try_finally_func")
+        net = self.walker.walk_function(node)
+        assert_valid_petri_net(self, net)
+
+        labels = [t.label for t in net.transitions]
+        self.assertIn("val = call: riskyOperation()", labels)
+        self.assertIn("call: cleanup()", labels)
+        self.assertIn("exception", labels)
+
+
 if __name__ == '__main__':
     unittest.main()
+

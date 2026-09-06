@@ -5,3 +5,4 @@ init(x, y);
 function init(a, b) {
     return a + b;
 }
+

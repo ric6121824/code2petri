@@ -1,8 +1,35 @@
+from typing import Optional, List, Any, Union
 from code2flow.engine import LanguageParams
 from code2flow.javascript import Javascript
-from code2petri.base_walker import _BaseControlFlowWalker
+from code2petri.base_walker import (
+    _BaseControlFlowWalker,
+    LoopContext,
+    TryContext,
+    _LoopContext,
+    _TryContext,
+)
 from code2petri.model import PetriNet, Place, Transition
 from code2petri.walker_protocol import WalkerProtocol
+
+
+def _to_stmt_list(node: Any) -> List[dict]:
+    """Normalizes an AST node or list into a list of statement dicts."""
+    if not node:
+        return []
+    if isinstance(node, list):
+        return node
+    if isinstance(node, dict):
+        if node.get("type") == "BlockStatement":
+            return node.get("body", [])
+        return [node]
+    return []
+
+
+def _get_block_lineno(stmts: List[dict], default: Optional[int] = None) -> Optional[int]:
+    """Returns the line number of the first statement in a block, or default."""
+    if stmts and isinstance(stmts[0], dict) and "loc" in stmts[0] and "start" in stmts[0]["loc"]:
+        return stmts[0]["loc"]["start"].get("line", default)
+    return default
 
 
 class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
@@ -18,7 +45,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             return ""
         return self.raw_source[node["start"]:node["end"]].strip()
 
-    def _get_lineno(self, node: dict, default: Optional[int] = None) -> Optional[int]:
+    def _get_lineno(self, node: Optional[dict], default: Optional[int] = None) -> Optional[int]:
         """Returns the 1-indexed start line number of an AST node."""
         if isinstance(node, dict) and "loc" in node and "start" in node["loc"]:
             return node["loc"]["start"].get("line", default)
@@ -48,13 +75,71 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 return f"return {arg_str}"
             return "return"
 
-        # Expression statement wrapping a call
+        # Break and Continue
+        if stmt_type == "BreakStatement":
+            label = stmt.get("label")
+            if label and label.get("name"):
+                return f"break {label['name']}"
+            return "break"
+
+        if stmt_type == "ContinueStatement":
+            label = stmt.get("label")
+            if label and label.get("name"):
+                return f"continue {label['name']}"
+            return "continue"
+
+        # If statement
+        if stmt_type == "IfStatement":
+            test_slice = self._slice(stmt.get("test"))
+            if test_slice.startswith("(") and test_slice.endswith(")"):
+                return f"if {test_slice}"
+            return f"if ({test_slice})"
+
+        # While statement
+        if stmt_type == "WhileStatement":
+            test_slice = self._slice(stmt.get("test"))
+            if test_slice.startswith("(") and test_slice.endswith(")"):
+                return f"while {test_slice}"
+            return f"while ({test_slice})"
+
+        # For statement
+        if stmt_type == "ForStatement":
+            body = stmt.get("body", {})
+            if "start" in stmt and "start" in body:
+                return self.raw_source[stmt["start"]:body["start"]].strip()
+            init_str = self._slice(stmt.get("init")).rstrip(";")
+            test_str = self._slice(stmt.get("test"))
+            update_str = self._slice(stmt.get("update"))
+            return f"for ({init_str}; {test_str}; {update_str})"
+
+        # ForInStatement and ForOfStatement
+        if stmt_type in ("ForInStatement", "ForOfStatement"):
+            body = stmt.get("body", {})
+            if "start" in stmt and "start" in body:
+                return self.raw_source[stmt["start"]:body["start"]].strip()
+            left_str = self._slice(stmt.get("left")).rstrip(";")
+            right_str = self._slice(stmt.get("right"))
+            op = "in" if stmt_type == "ForInStatement" else "of"
+            return f"for ({left_str} {op} {right_str})"
+
+        # Expression statement
         if stmt_type == "ExpressionStatement":
             expr = stmt.get("expression", {})
-            if expr.get("type") == "CallExpression":
+            expr_type = expr.get("type")
+            if expr_type == "CallExpression":
                 return self._format_call_expression(expr)
+            if expr_type == "AssignmentExpression":
+                left_str = self._slice(expr.get("left"))
+                op = expr.get("operator", "=")
+                right = expr.get("right", {})
+                if right.get("type") == "CallExpression":
+                    return f"{left_str} {op} {self._format_call_expression(right)}"
+                right_str = self._slice(right)
+                return f"{left_str} {op} {right_str}"
+            if expr_type == "UpdateExpression":
+                return self._slice(expr)
 
-        # VariableDeclaration with a CallExpression initializer (e.g. let res = calc())
+        # VariableDeclaration with CallExpression initializer (e.g. let res = calc())
         if stmt_type == "VariableDeclaration":
             decls = stmt.get("declarations", [])
             if len(decls) == 1 and decls[0].get("init", {}).get("type") == "CallExpression":
@@ -63,11 +148,50 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 call_str = self._format_call_expression(decls[0]["init"])
                 return f"{kind} {var_name} = {call_str}"
 
+        # Try statement
+        if stmt_type == "TryStatement":
+            return "try"
+
         # Default source slice
         raw = self._slice(stmt)
         first_line = raw.split("\n")[0].strip().rstrip(";")
         return first_line or stmt_type or "statement"
 
+    def _walk_branch(
+        self,
+        statements: Any,
+        source_transition: Transition,
+        target_exit: Place,
+        line_number: Optional[int] = None,
+    ) -> Optional[Place]:
+        """Creates an entry place from source_transition and walks statements to target_exit."""
+        stmt_list = _to_stmt_list(statements)
+        if not stmt_list:
+            self.net.add_arc(source=source_transition, target=target_exit)
+            return target_exit
+        entry_place = self.new_place(line_number=line_number)
+        self.net.add_arc(source=source_transition, target=entry_place)
+        return self.walk_block(stmt_list, current_place=entry_place, target_exit=target_exit)
+
+    def _handle_loop_jump(
+        self,
+        stmt: dict,
+        current_place: Place,
+    ) -> None:
+        """Handles break or continue jump statements to loop exit or head."""
+        stmt_type = stmt.get("type")
+        is_break = (stmt_type == "BreakStatement")
+        keyword = "break" if is_break else "continue"
+        lineno = self._get_lineno(stmt)
+        if not self.loop_stack:
+            raise SyntaxError(f"'{keyword}' outside loop at line {lineno}")
+        target_place = self.loop_stack[-1].exit if is_break else self.loop_stack[-1].head
+        trans = self.new_transition(
+            label=self._format_statement_label(stmt),
+            line_number=lineno,
+        )
+        self.net.add_arc(source=current_place, target=trans)
+        self.net.add_arc(source=trans, target=target_place)
 
     def walk_block(
         self,
@@ -91,6 +215,150 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 self.net.add_arc(source=current_place, target=trans)
                 self.net.add_arc(source=trans, target=self.end_place)
                 return None
+
+            elif stmt_type in ("BreakStatement", "ContinueStatement"):
+                self._handle_loop_jump(stmt, current_place)
+                return None
+
+            elif stmt_type == "IfStatement":
+                true_trans = self.new_transition(
+                    label=self._format_statement_label(stmt),
+                    line_number=lineno,
+                )
+                self.net.add_arc(source=current_place, target=true_trans)
+
+                alternate = stmt.get("alternate")
+                else_lineno = self._get_lineno(alternate, lineno)
+                false_trans = self.new_transition(
+                    label="else",
+                    line_number=else_lineno,
+                )
+                self.net.add_arc(source=current_place, target=false_trans)
+
+                if is_last:
+                    merge_place = target_exit
+                else:
+                    merge_place = self.new_place(label=f"merge_{true_trans.id}", line_number=lineno)
+
+                consequent_stmts = _to_stmt_list(stmt.get("consequent"))
+                true_exit = self._walk_branch(consequent_stmts, true_trans, merge_place, lineno)
+
+                if alternate:
+                    alternate_stmts = _to_stmt_list(alternate)
+                    false_exit = self._walk_branch(alternate_stmts, false_trans, merge_place, else_lineno)
+                else:
+                    self.net.add_arc(source=false_trans, target=merge_place)
+                    false_exit = merge_place
+
+                if true_exit is None and false_exit is None:
+                    return None
+
+                current_place = merge_place
+
+            elif stmt_type in ("WhileStatement", "ForStatement", "ForInStatement", "ForOfStatement"):
+                loop_head = current_place
+                loop_trans = self.new_transition(
+                    label=self._format_statement_label(stmt),
+                    line_number=lineno,
+                )
+                self.net.add_arc(source=loop_head, target=loop_trans)
+
+                exit_trans = self.new_transition(
+                    label="exit",
+                    line_number=lineno,
+                )
+                self.net.add_arc(source=loop_head, target=exit_trans)
+
+                if is_last:
+                    loop_exit = target_exit
+                else:
+                    loop_exit = self.new_place(label=f"exit_{loop_trans.id}", line_number=lineno)
+
+                self.loop_stack.append(_LoopContext(head=loop_head, exit=loop_exit))
+                body_stmts = _to_stmt_list(stmt.get("body"))
+                self._walk_branch(body_stmts, loop_trans, loop_head, lineno)
+                self.loop_stack.pop()
+
+                self.net.add_arc(source=exit_trans, target=loop_exit)
+
+                has_exit_inflow = any(arc.target == loop_exit for arc in self.net.arcs)
+                if not has_exit_inflow:
+                    return None
+
+                current_place = loop_exit
+
+            elif stmt_type == "TryStatement":
+                except_entry = self.new_place(label="except_entry", line_number=lineno)
+
+                if is_last:
+                    try_exit = target_exit
+                else:
+                    try_exit = self.new_place(label="try_exit", line_number=lineno)
+
+                finalizer = stmt.get("finalizer")
+                if finalizer:
+                    finally_lineno = self._get_lineno(finalizer, lineno)
+                    finally_entry = self.new_place(label="finally_entry", line_number=finally_lineno)
+                    finally_stmts = _to_stmt_list(finalizer)
+                else:
+                    finally_entry = try_exit
+                    finally_stmts = []
+
+                try_normal_exit = finally_entry
+
+                # Walk try body with try_stack active
+                self.try_stack.append(_TryContext(except_entry=except_entry))
+                try_stmts = _to_stmt_list(stmt.get("block"))
+                self.walk_block(try_stmts, current_place=current_place, target_exit=try_normal_exit)
+                self.try_stack.pop()
+
+                # Walk catch handler if present
+                handler = stmt.get("handler")
+                if handler:
+                    h_lineno = self._get_lineno(handler, lineno)
+                    param = handler.get("param")
+                    if param:
+                        param_str = self._slice(param)
+                        h_label = f"catch ({param_str})"
+                    else:
+                        h_label = "catch"
+
+                    h_trans = self.new_transition(
+                        label=h_label,
+                        line_number=h_lineno,
+                        hook_exception=False,
+                    )
+                    self.net.add_arc(source=except_entry, target=h_trans)
+                    catch_stmts = _to_stmt_list(handler.get("body"))
+                    self._walk_branch(
+                        catch_stmts,
+                        source_transition=h_trans,
+                        target_exit=finally_entry,
+                        line_number=h_lineno,
+                    )
+                elif finalizer:
+                    # try...finally without catch: unhandled exception flows to finally
+                    exc_trans = self.new_transition(
+                        label="exception",
+                        line_number=lineno,
+                        hook_exception=False,
+                    )
+                    self.net.add_arc(source=except_entry, target=exc_trans)
+                    self.net.add_arc(source=exc_trans, target=finally_entry)
+
+                # Walk finally block if present
+                if finalizer:
+                    self.walk_block(finally_stmts, current_place=finally_entry, target_exit=try_exit)
+
+                current_place = try_exit
+
+            elif stmt_type == "BlockStatement":
+                block_stmts = stmt.get("body", [])
+                next_place = target_exit if is_last else self.new_place(line_number=lineno)
+                res = self.walk_block(block_stmts, current_place=current_place, target_exit=next_place)
+                if res is None:
+                    return None
+                current_place = next_place
 
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=lineno)

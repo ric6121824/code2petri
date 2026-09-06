@@ -6,3 +6,4 @@ function sequential_func() {
     print(d);
     return d;
 }
+
