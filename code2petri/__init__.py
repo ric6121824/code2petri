@@ -2,6 +2,7 @@ from code2petri.engine import code2petri
 from code2petri.model import Place, Transition, Arc, PetriNet
 from code2petri.walker_protocol import WalkerProtocol
 from code2petri.base_walker import _BaseControlFlowWalker, BaseControlFlowWalker
+from code2petri.javascript_walker import JavascriptWalker
 from code2petri.python_walker import (
     walk_function,
     parse_file,
@@ -19,6 +20,8 @@ __all__ = [
     "BaseControlFlowWalker",
     "_BaseControlFlowWalker",
     "PythonWalker",
+    "JavascriptWalker",
+
 
     "walk_function",
     "parse_file",

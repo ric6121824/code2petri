@@ -5,12 +5,15 @@ import subprocess
 import sys
 from typing import Optional, List
 
-from code2petri.model import PetriNet
+from code2petri.javascript_walker import JavascriptWalker
 from code2petri.python_walker import PythonWalker
 
 WALKERS = {
     ".py": PythonWalker,
+    ".js": JavascriptWalker,
+    ".mjs": JavascriptWalker,
 }
+
 
 IMAGE_EXTENSIONS = {"png", "svg"}
 TEXT_SERIALIZERS = {
