@@ -16,6 +16,7 @@ from code2petri.python_walker import (  # noqa: E402
     find_all_functions,
 )
 from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
+from tests.petri_assertions import assert_has_start_and_end, assert_bipartite  # noqa: E402
 
 
 class TestPythonWalkerSequential(unittest.TestCase):
@@ -43,11 +44,15 @@ class TestPythonWalkerSequential(unittest.TestCase):
 
     def test_start_and_end_places(self):
         net = walk_function(self.func_node)
+        assert_has_start_and_end(self, net)
+        assert_bipartite(self, net)
+
         # Exactly one place with initial_tokens == 1 (the start place)
         start_places = [p for p in net.places if p.initial_tokens == 1]
         self.assertEqual(len(start_places), 1)
         start_place = start_places[0]
         self.assertEqual(start_place.label, "start")
+
 
         # The start place has an outgoing arc to the first transition
         outgoing_start = [a for a in net.arcs if a.source == start_place]

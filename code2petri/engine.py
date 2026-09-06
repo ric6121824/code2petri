@@ -6,12 +6,11 @@ import sys
 from typing import Optional, List
 
 from code2petri.model import PetriNet
-from code2petri.python_walker import (
-    parse_file,
-    find_function,
-    find_all_functions,
-    walk_function,
-)
+from code2petri.python_walker import PythonWalker
+
+WALKERS = {
+    ".py": PythonWalker,
+}
 
 IMAGE_EXTENSIONS = {"png", "svg"}
 TEXT_SERIALIZERS = {
@@ -40,9 +39,9 @@ def code2petri(
     list_functions: bool = False,
     level: Optional[int] = None,
 ) -> Optional[PetriNet]:
-    """Generates a Petri net from a Python source file and writes the serialized output.
+    """Generates a Petri net from a source file and writes the serialized output.
 
-    :param source_path: Path to the Python source file.
+    :param source_path: Path to the source file.
     :param output_file: Destination file path (.pnml, .dot, .gv, .json, .png, .svg).
     :param target_function: Name of the function to extract and convert.
     :param list_functions: If True, prints all function names found and exits without analyzing.
@@ -56,9 +55,18 @@ def code2petri(
     if not os.path.exists(source_path):
         raise AssertionError(f"Source file '{source_path}' does not exist.")
 
+    src_ext = os.path.splitext(source_path)[1].lower()
+    if src_ext not in WALKERS:
+        supported_src = ", ".join(sorted(WALKERS.keys()))
+        raise AssertionError(
+            f"Unsupported source extension '{src_ext}'. Supported extensions are: {supported_src}"
+        )
+
+    walker = WALKERS[src_ext]()
+
     logger.debug("Parsing source file '%s'...", source_path)
     try:
-        tree = parse_file(source_path)
+        tree = walker.parse_file(source_path)
     except Exception as exc:
         raise AssertionError(f"Could not parse file '{source_path}': {exc}") from exc
 
@@ -66,7 +74,7 @@ def code2petri(
         raise AssertionError(f"Could not parse file '{source_path}'.")
 
     if list_functions:
-        funcs = find_all_functions(tree)
+        funcs = walker.find_all_functions(tree)
         logger.debug("Discovered %d functions in '%s': %s", len(funcs), source_path, funcs)
         for fn in funcs:
             print(fn)
@@ -78,17 +86,18 @@ def code2petri(
             "(or use --list-functions to see available functions)."
         )
 
-    func_node = find_function(tree, target_function)
+    func_node = walker.find_function(tree, target_function)
     if func_node is None:
-        available = find_all_functions(tree)
+        available = walker.find_all_functions(tree)
         avail_str = f" Available functions: {', '.join(available)}" if available else ""
         raise AssertionError(
             f"Target function '{target_function}' not found in '{source_path}'.{avail_str}"
         )
 
-    logger.info("Analyzing function '%s' at line %d...", target_function, func_node.lineno)
+    lineno = getattr(func_node, "lineno", 0)
+    logger.info("Analyzing function '%s' at line %d...", target_function, lineno)
     logger.debug("Walking AST node for '%s'...", target_function)
-    net = walk_function(func_node)
+    net = walker.walk_function(func_node)
     logger.info(
         "Constructed Petri net with %d places, %d transitions, and %d arcs.",
         len(net.places),
@@ -139,12 +148,12 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
     """CLI entry point for code2petri."""
     parser = argparse.ArgumentParser(
         prog="code2petri",
-        description="Convert Python function control flow into Petri nets (PNML, DOT, JSON, SVG, PNG).",
+        description="Convert function control flow into Petri nets (PNML, DOT, JSON, SVG, PNG).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "source",
-        help="Path to Python source file.",
+        help="Path to source file.",
     )
     parser.add_argument(
         "--target-function", "-t",
