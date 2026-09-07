@@ -288,9 +288,47 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         if not args:
             return False
         first_arg = args[0]
-        arg_name = first_arg.get("name") if first_arg.get("type") == "Identifier" else self._slice(first_arg)
+        if not isinstance(first_arg, dict):
+            return False
+
+        # If wrapped in .bind(...) e.g. this.step.bind(this)
+        if first_arg.get("type") == "CallExpression":
+            callee = first_arg.get("callee") or {}
+            if callee.get("type") == "MemberExpression":
+                prop = callee.get("property") or {}
+                prop_name = prop.get("name") if prop.get("type") == "Identifier" else self._slice(prop)
+                if prop_name == "bind":
+                    first_arg = callee.get("object") or {}
+
+        arg_type = first_arg.get("type")
         bare_func_name = self.func_name.split(".")[-1]
-        return arg_name in (self.func_name, bare_func_name)
+
+        # Case 1: Direct identifier, e.g. requestAnimationFrame(loop)
+        if arg_type == "Identifier":
+            name = first_arg.get("name")
+            return name in (self.func_name, bare_func_name)
+
+        # Case 2: Member expression, e.g. requestAnimationFrame(this.step) or requestAnimationFrame(WebGLEngine.step)
+        if arg_type == "MemberExpression":
+            prop = first_arg.get("property") or {}
+            prop_name = prop.get("name") if prop.get("type") == "Identifier" else self._slice(prop)
+
+            obj = first_arg.get("object") or {}
+            obj_type = obj.get("type")
+
+            if obj_type == "ThisExpression":
+                # this.step matches enclosing method 'step' or 'ClassName.step'
+                return prop_name in (self.func_name, bare_func_name)
+
+            obj_name = obj.get("name") if obj_type == "Identifier" else self._slice(obj)
+            full_member = f"{obj_name}.{prop_name}"
+            return prop_name == bare_func_name or full_member == self.func_name
+
+        # Case 3: Sliced string fallback (stripping 'this.')
+        sliced = self._slice(first_arg)
+        if sliced.startswith("this."):
+            sliced = sliced[5:]
+        return sliced in (self.func_name, bare_func_name)
 
     def walk_block(
         self,
@@ -549,16 +587,12 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 current_place = loop_exit
 
             elif stmt_type == "ThrowStatement":
-                label = self._format_statement_label(stmt)
-                trans = self.new_transition(
-                    label=label,
+                self._wire_terminal_exception(
+                    current_place=current_place,
+                    label=self._format_statement_label(stmt),
                     line_number=lineno,
                 )
-                self.net.add_arc(source=current_place, target=trans)
-                if not self.try_stack:
-                    self.net.add_arc(source=trans, target=self.end_place)
                 return None
-
 
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=lineno)
@@ -574,18 +608,17 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         return current_place
 
 
-class JavascriptWalker(WalkerProtocol, _BaseControlFlowWalker):
-    """JavaScript AST walker implementing WalkerProtocol and inheriting _BaseControlFlowWalker."""
+class JavascriptWalker(WalkerProtocol):
+    """JavaScript AST walker implementing WalkerProtocol."""
 
-    def __init__(
-        self,
-        net: Optional[PetriNet] = None,
-        end_place: Optional[Place] = None,
-    ) -> None:
-        super().__init__(net=net, end_place=end_place)
+    def __init__(self) -> None:
         self.raw_source: str = ""
         self.tree: Optional[dict] = None
         self._func_name_cache: dict[int, str] = {}
+
+    def get_node_lineno(self, ast_node: Any) -> int:
+        """Returns the start line number for a JavaScript AST node, defaulting to 0."""
+        return _get_node_lineno(ast_node, 0)
 
     def parse_file(self, filepath: str) -> dict:
         """Parses a JavaScript file using Acorn, caching raw source text.

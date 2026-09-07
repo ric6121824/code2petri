@@ -312,14 +312,11 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
                 current_place = try_exit
 
             elif isinstance(stmt, ast.Raise):
-                label = _format_statement_label(stmt)
-                trans = self.new_transition(
-                    label=label,
+                self._wire_terminal_exception(
+                    current_place=current_place,
+                    label=_format_statement_label(stmt),
                     line_number=stmt.lineno,
                 )
-                self.net.add_arc(source=current_place, target=trans)
-                if not self.try_stack:
-                    self.net.add_arc(source=trans, target=self.end_place)
                 return None
 
             else:
@@ -336,15 +333,15 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
         return current_place
 
 
-class PythonWalker(WalkerProtocol, _BaseControlFlowWalker):
-    """Python AST walker implementing WalkerProtocol and inheriting _BaseControlFlowWalker."""
+class PythonWalker(WalkerProtocol):
+    """Python AST walker implementing WalkerProtocol."""
 
-    def __init__(
-        self,
-        net: Optional[PetriNet] = None,
-        end_place: Optional[Place] = None,
-    ) -> None:
-        super().__init__(net=net, end_place=end_place)
+    def __init__(self) -> None:
+        pass
+
+    def get_node_lineno(self, ast_node: Any) -> int:
+        """Returns the start line number for a Python AST node, defaulting to 0."""
+        return getattr(ast_node, "lineno", 0)
 
     def parse_file(self, filepath: str) -> ast.AST:
         """Parses a Python source file into an AST using code2flow's Python.get_tree."""

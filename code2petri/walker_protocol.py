@@ -27,3 +27,8 @@ class WalkerProtocol(ABC):
         """Walks a function/method AST node and constructs a PetriNet model."""
         ...
 
+    @abstractmethod
+    def get_node_lineno(self, ast_node: Any) -> int:
+        """Returns the start line number for an AST node, defaulting to 0."""
+        ...
+

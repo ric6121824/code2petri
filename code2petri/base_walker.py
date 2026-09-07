@@ -92,6 +92,23 @@ class _BaseControlFlowWalker:
         self._walk_branch(body_stmts, loop_trans, loop_head, lineno)
         self.loop_stack.pop()
 
+    def _wire_terminal_exception(
+        self,
+        current_place: Place,
+        label: str,
+        line_number: Optional[int] = None,
+    ) -> Transition:
+        """Wires a terminal exception (raise/throw) transition.
+
+        Connects current_place to the transition. If outside any try block,
+        arcs directly to self.end_place. Inside a try block, _walk_branch adds exception arcs.
+        """
+        trans = self.new_transition(label=label, line_number=line_number)
+        self.net.add_arc(source=current_place, target=trans)
+        if not self.try_stack:
+            self.net.add_arc(source=trans, target=self.end_place)
+        return trans
+
     def walk_block(
         self,
         statements: Any,

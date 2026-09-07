@@ -42,6 +42,9 @@ class TestWalkerProtocolABC(unittest.TestCase):
             def walk_function(self, ast_node):
                 return PetriNet()
 
+            def get_node_lineno(self, ast_node):
+                return 0
+
         walker = CompleteWalker()
         self.assertIsInstance(walker, WalkerProtocol)
 
@@ -199,8 +202,24 @@ class TestEngineLanguageDispatch(unittest.TestCase):
         self.assertNotIn("BaseControlFlowWalker", code2petri.__all__)
         self.assertNotIn("_BaseControlFlowWalker", code2petri.__all__)
         self.assertIn("WalkerProtocol", code2petri.__all__)
-        self.assertTrue(issubclass(PythonWalker, (WalkerProtocol, _BaseControlFlowWalker)))
-        self.assertTrue(issubclass(JavascriptWalker, (WalkerProtocol, _BaseControlFlowWalker)))
+        self.assertTrue(issubclass(PythonWalker, WalkerProtocol))
+        self.assertTrue(issubclass(JavascriptWalker, WalkerProtocol))
+        self.assertFalse(issubclass(PythonWalker, _BaseControlFlowWalker))
+        self.assertFalse(issubclass(JavascriptWalker, _BaseControlFlowWalker))
+
+    def test_walker_protocol_get_node_lineno(self):
+        import ast
+        from code2petri.python_walker import PythonWalker
+        from code2petri.javascript_walker import JavascriptWalker
+
+        py_walker = PythonWalker()
+        node = ast.parse("x = 1\n").body[0]
+        self.assertEqual(py_walker.get_node_lineno(node), 1)
+
+        js_walker = JavascriptWalker()
+        js_node = {"type": "Identifier", "loc": {"start": {"line": 42, "column": 0}}}
+        self.assertEqual(js_walker.get_node_lineno(js_node), 42)
+        self.assertEqual(js_walker.get_node_lineno({}), 0)
 
 
 if __name__ == '__main__':

@@ -706,6 +706,62 @@ class TestJavascriptGameLoopRAF(unittest.TestCase):
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
+    def test_loop_raf_class_method_this_step(self):
+        code = (
+            "class Engine {\n"
+            "    step() {\n"
+            "        requestAnimationFrame(this.step);\n"
+            "    }\n"
+            "}\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+        try:
+            tree = self.walker.parse_file(temp_path)
+            node = self.walker.find_function(tree, "Engine.step")
+            net = self.walker.walk_function(node)
+            assert_valid_petri_net(self, net)
+            assert_bipartite(self, net)
+
+            start_place, end_place = assert_has_start_and_end(self, net)
+            raf_trans = next(t for t in net.transitions if "requestAnimationFrame" in t.label)
+
+            # RAF calling this.step inside Engine.step produces a back-arc cycle to start_place
+            self.assertTrue(any(a.source == raf_trans and a.target == start_place for a in net.arcs))
+            self.assertTrue(any(a.source == raf_trans and a.target == end_place for a in net.arcs))
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_loop_raf_class_method_bind(self):
+        code = (
+            "class Engine {\n"
+            "    step() {\n"
+            "        requestAnimationFrame(this.step.bind(this));\n"
+            "    }\n"
+            "}\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+        try:
+            tree = self.walker.parse_file(temp_path)
+            node = self.walker.find_function(tree, "Engine.step")
+            net = self.walker.walk_function(node)
+            assert_valid_petri_net(self, net)
+            assert_bipartite(self, net)
+
+            start_place, end_place = assert_has_start_and_end(self, net)
+            raf_trans = next(t for t in net.transitions if "requestAnimationFrame" in t.label)
+
+            # RAF calling this.step.bind(this) produces a back-arc cycle to start_place
+            self.assertTrue(any(a.source == raf_trans and a.target == start_place for a in net.arcs))
+            self.assertTrue(any(a.source == raf_trans and a.target == end_place for a in net.arcs))
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
 
 
 class TestGameOfLifeSimulatorIntegration(unittest.TestCase):
