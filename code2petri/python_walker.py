@@ -6,16 +6,19 @@ from code2petri.base_walker import (
     _BaseControlFlowWalker,
     LoopContext,
     TryContext,
-    _LoopContext,
-    _TryContext,
 )
 from code2petri.model import PetriNet, Place, Transition, Arc
 from code2petri.walker_protocol import WalkerProtocol
 
 
-def parse_file(filepath: str) -> ast.AST:
-    """Parses a Python source file into an AST using code2flow's Python.get_tree."""
-    return Python.get_tree(filepath, None)
+def _get_executable_statements(tree: ast.AST) -> List[ast.stmt]:
+    """Returns top-level executable statements outside functions/classes."""
+    if not isinstance(tree, ast.Module):
+        return []
+    return [
+        stmt for stmt in tree.body
+        if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+    ]
 
 
 def _collect_functions(tree: ast.AST) -> List[tuple[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]]]:
@@ -36,29 +39,6 @@ def _collect_functions(tree: ast.AST) -> List[tuple[str, Union[ast.FunctionDef, 
     visit(tree, [])
     results.sort(key=lambda item: getattr(item[1], "lineno", 0))
     return results
-
-
-
-def find_function(
-    tree: ast.AST,
-    func_name: str,
-) -> Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]]:
-    """Locates a function or method definition AST node by name within an AST."""
-    funcs = _collect_functions(tree)
-    # Exact match first (covers qualified names and top-level functions)
-    for name, node in funcs:
-        if name == func_name:
-            return node
-    # Fallback match for bare name if method was qualified
-    for name, node in funcs:
-        if node.name == func_name:
-            return node
-    return None
-
-
-def find_all_functions(tree: ast.AST) -> List[str]:
-    """Finds all function and method definition names within an AST ordered by line number."""
-    return [name for name, _ in _collect_functions(tree)]
 
 
 
@@ -251,7 +231,7 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
                 else:
                     loop_exit = self.new_place(label=f"exit_{loop_trans.id}", line_number=stmt.lineno)
 
-                self.loop_stack.append(_LoopContext(head=loop_head, exit=loop_exit))
+                self.loop_stack.append(LoopContext(head=loop_head, exit=loop_exit))
                 self._walk_branch(stmt.body, loop_trans, loop_head, stmt.lineno)
                 self.loop_stack.pop()
 
@@ -290,7 +270,7 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
                     try_normal_exit = finally_entry
 
                 # Walk try body with try_stack active
-                self.try_stack.append(_TryContext(except_entry=except_entry))
+                self.try_stack.append(TryContext(except_entry=except_entry))
                 self.walk_block(stmt.body, current_place=current_place, target_exit=try_normal_exit)
                 self.try_stack.pop()
 
@@ -330,6 +310,17 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
 
                 current_place = try_exit
 
+            elif isinstance(stmt, ast.Raise):
+                label = _format_statement_label(stmt)
+                trans = self.new_transition(
+                    label=label,
+                    line_number=stmt.lineno,
+                )
+                self.net.add_arc(source=current_place, target=trans)
+                if not self.try_stack:
+                    self.net.add_arc(source=trans, target=self.end_place)
+                return None
+
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=stmt.lineno)
                 label = _format_statement_label(stmt)
@@ -344,54 +335,97 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
         return current_place
 
 
-def walk_function(ast_node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> PetriNet:
-    """Walks a Python function definition AST and constructs a PetriNet model."""
-    if not isinstance(ast_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        raise TypeError(
-            f"walk_function expects an ast.FunctionDef or ast.AsyncFunctionDef, "
-            f"got {type(ast_node).__name__}"
-        )
-
-    net = PetriNet()
-
-    start_place = net.add_place(
-        id_="p0",
-        label="start",
-        line_number=ast_node.lineno,
-        initial_tokens=1,
-    )
-    end_place = net.add_place(
-        id_="p_end",
-        label="end",
-        line_number=None,
-        initial_tokens=0,
-    )
-
-    walker = _PythonControlFlowWalker(net=net, end_place=end_place)
-    walker.walk_block(ast_node.body, current_place=start_place, target_exit=end_place)
-
-    return net
-
-
 class PythonWalker(WalkerProtocol):
     """Python AST walker implementing WalkerProtocol."""
 
     def parse_file(self, filepath: str) -> ast.AST:
-        return parse_file(filepath)
+        """Parses a Python source file into an AST using code2flow's Python.get_tree."""
+        return Python.get_tree(filepath, None)
 
     def find_function(
         self,
         tree: ast.AST,
         func_name: str,
     ) -> Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]]:
-        return find_function(tree, func_name)
+        """Locates a function or method definition AST node by name or returns synthetic wrapper for (global)."""
+        if func_name == "(global)":
+            executable_stmts = _get_executable_statements(tree)
+            if not executable_stmts:
+                return None
+            first_lineno = getattr(executable_stmts[0], "lineno", 1)
+            wrapper = ast.FunctionDef(
+                name="(global)",
+                args=ast.arguments(
+                    posonlyargs=[],
+                    args=[],
+                    vararg=None,
+                    kwonlyargs=[],
+                    kw_defaults=[],
+                    kwarg=None,
+                    defaults=[],
+                ),
+                body=executable_stmts,
+                decorator_list=[],
+                returns=None,
+                lineno=first_lineno,
+                col_offset=0,
+            )
+            return wrapper
+
+        funcs = _collect_functions(tree)
+        # Exact match first (covers qualified names and top-level functions)
+        for name, node in funcs:
+            if name == func_name:
+                return node
+        # Fallback match for bare name if method was qualified
+        for name, node in funcs:
+            if node.name == func_name:
+                return node
+        return None
 
     def find_all_functions(self, tree: ast.AST) -> List[str]:
-        return find_all_functions(tree)
+        """Finds all function and method definition names within an AST, including (global) if top-level code exists."""
+        funcs = []
+        if _get_executable_statements(tree):
+            funcs.append("(global)")
+        funcs.extend([name for name, _ in _collect_functions(tree)])
+        return funcs
 
     def walk_function(
         self,
         ast_node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
     ) -> PetriNet:
-        return walk_function(ast_node)
+        """Walks a Python function definition AST and constructs a PetriNet model."""
+        if not isinstance(ast_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            raise TypeError(
+                f"walk_function expects an ast.FunctionDef or ast.AsyncFunctionDef, "
+                f"got {type(ast_node).__name__}"
+            )
+
+        net = PetriNet()
+
+        start_place = net.add_place(
+            id_="p0",
+            label="start",
+            line_number=ast_node.lineno,
+            initial_tokens=1,
+        )
+        end_place = net.add_place(
+            id_="p_end",
+            label="end",
+            line_number=None,
+            initial_tokens=0,
+        )
+
+        walker = _PythonControlFlowWalker(net=net, end_place=end_place)
+        walker.walk_block(ast_node.body, current_place=start_place, target_exit=end_place)
+
+        return net
+
+
+_default_walker = PythonWalker()
+parse_file = _default_walker.parse_file
+find_function = _default_walker.find_function
+find_all_functions = _default_walker.find_all_functions
+walk_function = _default_walker.walk_function
 

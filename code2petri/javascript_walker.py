@@ -5,15 +5,13 @@ from code2petri.base_walker import (
     _BaseControlFlowWalker,
     LoopContext,
     TryContext,
-    _LoopContext,
-    _TryContext,
 )
 from code2petri.model import PetriNet, Place, Transition
 from code2petri.walker_protocol import WalkerProtocol
 
 
 def _to_stmt_list(node: Any) -> List[dict]:
-    """Normalizes an AST node or list into a list of statement dicts."""
+    """Converts an AST node or list into a list of statement dicts."""
     if not node:
         return []
     if isinstance(node, list):
@@ -25,10 +23,21 @@ def _to_stmt_list(node: Any) -> List[dict]:
     return []
 
 
+def _get_node_lineno(node: Optional[dict], default: Optional[int] = None) -> Optional[int]:
+    """Extracts start line number from AST node's location metadata."""
+    if isinstance(node, dict):
+        loc = node.get("loc")
+        if isinstance(loc, dict):
+            start = loc.get("start")
+            if isinstance(start, dict):
+                return start.get("line", default)
+    return default
+
+
 def _get_block_lineno(stmts: List[dict], default: Optional[int] = None) -> Optional[int]:
     """Returns the line number of the first statement in a block, or default."""
-    if stmts and isinstance(stmts[0], dict) and "loc" in stmts[0] and "start" in stmts[0]["loc"]:
-        return stmts[0]["loc"]["start"].get("line", default)
+    if stmts and isinstance(stmts, list):
+        return _get_node_lineno(stmts[0], default)
     return default
 
 
@@ -56,9 +65,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
 
     def _get_lineno(self, node: Optional[dict], default: Optional[int] = None) -> Optional[int]:
         """Returns the 1-indexed start line number of an AST node."""
-        if isinstance(node, dict) and "loc" in node and "start" in node["loc"]:
-            return node["loc"]["start"].get("line", default)
-        return default
+        return _get_node_lineno(node, default)
 
     def _format_call_expression(self, expr: dict) -> str:
         """Formats a CallExpression into call: callee()."""
@@ -196,9 +203,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         if not stmt_list:
             self.net.add_arc(source=source_transition, target=target_exit)
             return target_exit
-        entry_place = self.new_place(line_number=line_number)
-        self.net.add_arc(source=source_transition, target=entry_place)
-        return self.walk_block(stmt_list, current_place=entry_place, target_exit=target_exit)
+        return super()._walk_branch(stmt_list, source_transition, target_exit, line_number=line_number)
 
     def _handle_loop_jump(
         self,
@@ -269,6 +274,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             return call_expr
         return None
 
+    # TODO: Extend game-loop cycle detection to setTimeout and setInterval.
     def _is_raf_cycle_call(self, stmt: dict) -> bool:
         """Determines if a statement is a recursive requestAnimationFrame call to enclosing func."""
         if not self.func_name:
@@ -365,7 +371,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 else:
                     loop_exit = self.new_place(label=f"exit_{loop_trans.id}", line_number=lineno)
 
-                self.loop_stack.append(_LoopContext(head=loop_head, exit=loop_exit))
+                self.loop_stack.append(LoopContext(head=loop_head, exit=loop_exit))
                 body_stmts = _to_stmt_list(stmt.get("body"))
                 self._walk_branch(body_stmts, loop_trans, loop_head, lineno)
                 self.loop_stack.pop()
@@ -393,7 +399,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 try_normal_exit = finally_entry
 
                 # Walk try body with try_stack active
-                self.try_stack.append(_TryContext(except_entry=except_entry))
+                self.try_stack.append(TryContext(except_entry=except_entry))
                 try_stmts = _to_stmt_list(stmt.get("block"))
                 self.walk_block(try_stmts, current_place=current_place, target_exit=try_normal_exit)
                 self.try_stack.pop()
@@ -445,15 +451,18 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 else:
                     switch_exit = self.new_place(label="exit_switch", line_number=lineno)
 
-                self.loop_stack.append(_LoopContext(head=None, exit=switch_exit))
+                self.loop_stack.append(LoopContext(head=None, exit=switch_exit))
                 cases = stmt.get("cases", [])
                 has_default = any(case.get("test") is None for case in cases)
 
                 for case in cases:
                     case_test = case.get("test")
                     case_lineno = self._get_lineno(case, lineno)
-                    if case_test:
-                        case_label = f"case {self._slice(case_test)}"
+                    case_body = _to_stmt_list(case.get("consequent", []))
+
+                    if case_test is not None:
+                        test_str = self._slice(case_test)
+                        case_label = f"case {test_str}"
                     else:
                         case_label = "default"
 
@@ -462,9 +471,8 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                         line_number=case_lineno,
                     )
                     self.net.add_arc(source=decision_place, target=case_trans)
-                    case_stmts = case.get("consequent", [])
                     self._walk_branch(
-                        case_stmts,
+                        case_body,
                         source_transition=case_trans,
                         target_exit=switch_exit,
                         line_number=case_lineno,
@@ -480,7 +488,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
 
                 self.loop_stack.pop()
 
-                incoming_to_exit = [a for a in self.net.arcs if a.target == switch_exit]
+                incoming_to_exit = any(a.target == switch_exit for a in self.net.arcs)
                 if not incoming_to_exit:
                     return None
 
@@ -497,7 +505,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 else:
                     loop_exit = self.new_place(label="exit_do_while", line_number=lineno)
 
-                self.loop_stack.append(_LoopContext(head=check_place, exit=loop_exit))
+                self.loop_stack.append(LoopContext(head=check_place, exit=loop_exit))
                 body_stmts = _to_stmt_list(stmt.get("body"))
                 self.walk_block(body_stmts, current_place=body_head, target_exit=check_place)
                 self.loop_stack.pop()
@@ -531,6 +539,7 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 return None
 
             elif self._is_raf_cycle_call(stmt):
+                next_place = target_exit if is_last else self.new_place(line_number=lineno)
                 label = self._format_statement_label(stmt)
                 trans = self.new_transition(
                     label=label,
@@ -538,7 +547,8 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 )
                 self.net.add_arc(source=current_place, target=trans)
                 self.net.add_arc(source=trans, target=self.start_place)
-                return None
+                self.net.add_arc(source=trans, target=next_place)
+                current_place = next_place
 
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=lineno)
@@ -571,15 +581,7 @@ class JavascriptWalker(WalkerProtocol):
             with open(filepath, "r", encoding="latin-1") as f:
                 self.raw_source = f.read()
 
-        # Try script first, fallback to module if required
-        try:
-            tree = Javascript.get_tree(filepath, LanguageParams(source_type="script"))
-        except AssertionError as exc:
-            if "source-type=module" in str(exc) or "SyntaxError" in str(exc):
-                tree = Javascript.get_tree(filepath, LanguageParams(source_type="module"))
-            else:
-                raise
-
+        tree = Javascript.get_tree(filepath, LanguageParams(source_type="script"))
         self.tree = tree
         return tree
 
@@ -606,30 +608,29 @@ class JavascriptWalker(WalkerProtocol):
                 if ntype == "ClassDeclaration":
                     cls_name = node.get("id", {}).get("name", "(anonymous_class)")
                     body = node.get("body", {}).get("body", [])
+                    cls_qual = f"{'.'.join(scope)}.{cls_name}" if scope else cls_name
                     for elem in body:
                         if elem.get("type") == "MethodDefinition":
                             key = elem.get("key", {}).get("name")
                             if not key and "key" in elem:
                                 key = self._slice_node(elem["key"])
                             val = elem.get("value", {})
-                            lineno = (
-                                elem.get("loc", {}).get("start", {}).get("line")
-                                or val.get("loc", {}).get("start", {}).get("line", 0)
-                            )
-                            qual_name = f"{cls_name}.{key}"
+                            lineno = _get_node_lineno(elem) or _get_node_lineno(val, 0)
+                            qual_name = f"{cls_qual}.{key}"
                             results.append({
                                 "qual_name": qual_name,
                                 "bare_name": key,
                                 "lineno": lineno,
                                 "node": val,
                             })
-                            _traverse(val.get("body"), scope + [cls_name, key])
+                            new_scope = scope + [cls_name, key]
+                            _traverse(val.get("body"), new_scope)
                     return
 
                 elif ntype in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"):
                     func_id = node.get("id")
                     name = func_id.get("name") if func_id else None
-                    lineno = node.get("loc", {}).get("start", {}).get("line", 0)
+                    lineno = _get_node_lineno(node, 0)
                     if name:
                         qual_name = f"{'.'.join(scope)}.{name}" if scope else name
                         bare_name = name
@@ -675,9 +676,7 @@ class JavascriptWalker(WalkerProtocol):
             executable_stmts = self._get_executable_statements(tree)
             if not executable_stmts:
                 return None
-            first_lineno = 1
-            if "loc" in executable_stmts[0]:
-                first_lineno = executable_stmts[0]["loc"]["start"].get("line", 1)
+            first_lineno = _get_node_lineno(executable_stmts[0], 1)
 
             wrapper = {
                 "type": "FunctionDeclaration",
@@ -738,10 +737,7 @@ class JavascriptWalker(WalkerProtocol):
                 func_name = func_node["id"].get("name")
 
         net = PetriNet()
-        start_lineno = 1
-        loc = func_node.get("loc") or ast_node.get("loc")
-        if loc and "start" in loc:
-            start_lineno = loc["start"].get("line", 1)
+        start_lineno = _get_node_lineno(func_node) or _get_node_lineno(ast_node, 1)
 
         start_place = net.add_place(
             id_="p0",

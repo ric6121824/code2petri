@@ -13,10 +13,6 @@ class TryContext(NamedTuple):
     except_entry: Place
 
 
-_LoopContext = LoopContext
-_TryContext = TryContext
-
-
 class _BaseControlFlowWalker:
 
     """Base control flow walker managing places, transitions, stacks, and counters."""
@@ -83,7 +79,4 @@ class _BaseControlFlowWalker:
     ) -> Optional[Place]:
         """Subclasses must implement statement traversal."""
         raise NotImplementedError("Subclasses must implement walk_block")
-
-
-BaseControlFlowWalker = _BaseControlFlowWalker
 

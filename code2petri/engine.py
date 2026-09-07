@@ -11,7 +11,6 @@ from code2petri.python_walker import PythonWalker
 WALKERS = {
     ".py": PythonWalker,
     ".js": JavascriptWalker,
-    ".mjs": JavascriptWalker,
 }
 
 

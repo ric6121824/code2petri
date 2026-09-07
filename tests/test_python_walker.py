@@ -16,7 +16,11 @@ from code2petri.python_walker import (  # noqa: E402
     find_all_functions,
 )
 from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
-from tests.petri_assertions import assert_has_start_and_end, assert_bipartite  # noqa: E402
+from tests.petri_assertions import (  # noqa: E402
+    assert_has_start_and_end,
+    assert_bipartite,
+    assert_valid_petri_net,
+)
 
 
 class TestPythonWalkerSequential(unittest.TestCase):
@@ -184,6 +188,81 @@ class TestPythonWalkerEdgeCases(unittest.TestCase):
         tree = ast.parse(code)
         func_names = find_all_functions(tree)
         self.assertEqual(func_names, ["alpha", "beta", "gamma"])
+
+    def test_global_scope_discovery(self):
+        code = (
+            "x = 1\n"
+            "y = 2\n"
+            "def helper(): pass\n"
+        )
+        tree = ast.parse(code)
+        func_names = find_all_functions(tree)
+        self.assertEqual(func_names, ["(global)", "helper"])
+
+    def test_find_function_global_synthetic_wrapper(self):
+        code = (
+            "a = 10\n"
+            "b = 20\n"
+            "print(a + b)\n"
+        )
+        tree = ast.parse(code)
+        global_node = find_function(tree, "(global)")
+        self.assertIsNotNone(global_node)
+        self.assertIsInstance(global_node, ast.FunctionDef)
+        self.assertEqual(global_node.name, "(global)")
+        self.assertEqual(len(global_node.body), 3)
+
+        net = walk_function(global_node)
+        assert_valid_petri_net(self, net)
+        assert_bipartite(self, net)
+        start_p, end_p = assert_has_start_and_end(self, net)
+        self.assertIsNotNone(start_p)
+        self.assertIsNotNone(end_p)
+
+    def test_find_function_global_none_when_no_executable_statements(self):
+        code = (
+            "def func_a(): pass\n"
+            "class ClassB: pass\n"
+        )
+        tree = ast.parse(code)
+        self.assertIsNone(find_function(tree, "(global)"))
+
+    def test_raise_statement_unhandled(self):
+        code = (
+            "def func_with_raise():\n"
+            "    x = 1\n"
+            "    raise ValueError('error')\n"
+            "    y = 2\n"
+        )
+        tree = ast.parse(code)
+        func_node = find_function(tree, "func_with_raise")
+        net = walk_function(func_node)
+        assert_valid_petri_net(self, net)
+        start_p, end_p = assert_has_start_and_end(self, net)
+
+        raise_trans = next(t for t in net.transitions if "raise" in t.label)
+        self.assertIsNotNone(raise_trans)
+        # Unhandled raise arcs to end_place
+        self.assertTrue(any(a.source == raise_trans and a.target == end_p for a in net.arcs))
+        # Dead statement after raise is not present in net
+        self.assertFalse(any("y = 2" in t.label for t in net.transitions))
+
+    def test_raise_statement_in_try(self):
+        code = (
+            "def func_with_try_raise():\n"
+            "    try:\n"
+            "        raise RuntimeError('fail')\n"
+            "    except RuntimeError:\n"
+            "        pass\n"
+        )
+        tree = ast.parse(code)
+        func_node = find_function(tree, "func_with_try_raise")
+        net = walk_function(func_node)
+        assert_valid_petri_net(self, net)
+
+        raise_trans = next(t for t in net.transitions if "raise" in t.label)
+        except_place = next(p for p in net.places if p.label == "except_entry")
+        self.assertTrue(any(a.source == raise_trans and a.target == except_place for a in net.arcs))
 
 
 if __name__ == '__main__':

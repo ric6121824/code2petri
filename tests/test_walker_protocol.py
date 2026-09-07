@@ -154,11 +154,31 @@ class TestPythonWalkerProtocolAndQualifiedNames(unittest.TestCase):
         net = self.walker.walk_function(node)
         assert_valid_petri_net(self, net)
 
+    def test_python_walker_global_discovery_and_walk(self):
+        code = (
+            "msg = 'hello'\n"
+            "print(msg)\n"
+            "def worker():\n"
+            "    pass\n"
+        )
+        tree = ast.parse(code)
+        funcs = self.walker.find_all_functions(tree)
+        self.assertEqual(funcs, ["(global)", "worker"])
+
+        global_node = self.walker.find_function(tree, "(global)")
+        self.assertIsNotNone(global_node)
+        self.assertEqual(global_node.name, "(global)")
+        net = self.walker.walk_function(global_node)
+        assert_valid_petri_net(self, net)
+
 
 class TestEngineLanguageDispatch(unittest.TestCase):
     def test_engine_has_python_registered(self):
         self.assertIn(".py", WALKERS)
         self.assertEqual(WALKERS[".py"], PythonWalker)
+
+    def test_engine_does_not_register_mjs(self):
+        self.assertNotIn(".mjs", WALKERS)
 
     def test_engine_runs_via_instantiated_walker(self):
         fixture_path = os.path.join(
@@ -171,7 +191,13 @@ class TestEngineLanguageDispatch(unittest.TestCase):
         self.assertIsNotNone(net)
         assert_valid_petri_net(self, net)
 
+    def test_package_does_not_export_walker_base_class(self):
+        import code2petri
+        self.assertNotIn("BaseControlFlowWalker", code2petri.__all__)
+        self.assertNotIn("_BaseControlFlowWalker", code2petri.__all__)
+
 
 if __name__ == '__main__':
     unittest.main()
+
 

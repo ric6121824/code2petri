@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -554,6 +555,32 @@ class TestJavascriptClassMethods(unittest.TestCase):
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
+    def test_nested_scoped_class_method_qualification(self):
+        code = (
+            "function outerFactory() {\n"
+            "    class InnerService {\n"
+            "        performAction() {\n"
+            "            return 42;\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+        try:
+            tree = self.walker.parse_file(temp_path)
+            funcs = self.walker.find_all_functions(tree)
+            self.assertIn("outerFactory.InnerService.performAction", funcs)
+            node = self.walker.find_function(tree, "outerFactory.InnerService.performAction")
+            self.assertIsNotNone(node)
+            net = self.walker.walk_function(node)
+            assert_valid_petri_net(self, net)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+
 
 class TestJavascriptAnonymousCallbacks(unittest.TestCase):
     def setUp(self):
@@ -618,6 +645,39 @@ class TestJavascriptGameLoopRAF(unittest.TestCase):
             any(a.source == raf_trans and a.target == start_place for a in net.arcs),
             "Expected requestAnimationFrame(loop) to have a back-arc cycle to start_place",
         )
+
+    def test_loop_raf_with_trailing_statements(self):
+        code = (
+            "function gameLoop() {\n"
+            "    requestAnimationFrame(gameLoop);\n"
+            "    cleanupFrame();\n"
+            "}\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+        try:
+            tree = self.walker.parse_file(temp_path)
+            node = self.walker.find_function(tree, "gameLoop")
+            net = self.walker.walk_function(node)
+            assert_valid_petri_net(self, net)
+            assert_bipartite(self, net)
+
+            start_place, end_place = assert_has_start_and_end(self, net)
+            raf_trans = next(t for t in net.transitions if "requestAnimationFrame" in t.label)
+            cleanup_trans = next(t for t in net.transitions if "cleanupFrame" in t.label)
+
+            # RAF has a back-arc cycle to start_place
+            self.assertTrue(any(a.source == raf_trans and a.target == start_place for a in net.arcs))
+
+            # Forward flow continues from RAF to cleanupFrame and then to end_place
+            cleanup_inflow_places = [a.source for a in net.arcs if a.target == cleanup_trans]
+            self.assertTrue(any(a.source == raf_trans and a.target in cleanup_inflow_places for a in net.arcs))
+            self.assertTrue(any(a.source == cleanup_trans and a.target == end_place for a in net.arcs))
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
 
 
 class TestGameOfLifeSimulatorIntegration(unittest.TestCase):
