@@ -7,7 +7,12 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from code2petri.python_walker import walk_function, parse_file, find_function  # noqa: E402
+from code2petri.python_walker import PythonWalker  # noqa: E402
+
+walker = PythonWalker()
+walk_function = walker.walk_function
+parse_file = walker.parse_file
+find_function = walker.find_function
 from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
 
 

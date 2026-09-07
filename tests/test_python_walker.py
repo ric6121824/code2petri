@@ -9,12 +9,13 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from code2petri.python_walker import (  # noqa: E402
-    walk_function,
-    parse_file,
-    find_function,
-    find_all_functions,
-)
+from code2petri.python_walker import PythonWalker  # noqa: E402
+
+walker = PythonWalker()
+walk_function = walker.walk_function
+parse_file = walker.parse_file
+find_function = walker.find_function
+find_all_functions = walker.find_all_functions
 from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
 from tests.petri_assertions import (  # noqa: E402
     assert_has_start_and_end,

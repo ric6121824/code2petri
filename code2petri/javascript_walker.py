@@ -3,8 +3,9 @@ from typing import Optional, List, Any, Union, NamedTuple
 from code2flow.engine import LanguageParams
 from code2flow.javascript import Javascript
 from code2petri.base_walker import (
-    _BaseControlFlowWalker,
+    ControlFlowBuilder,
     LoopContext,
+    LoopRouting,
     TryContext,
 )
 from code2petri.model import PetriNet, Place, Transition
@@ -57,18 +58,17 @@ def _get_block_lineno(stmts: List[dict], default: Optional[int] = None) -> Optio
     return default
 
 
-class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
+class _JavascriptControlFlowWalker:
     """Internal recursive walker constructing PetriNet places, transitions, and arcs for JavaScript."""
 
     def __init__(
         self,
-        net: PetriNet,
+        builder: ControlFlowBuilder,
         start_place: Place,
-        end_place: Place,
         raw_source: str,
         func_name: Optional[str] = None,
     ) -> None:
-        super().__init__(net, end_place)
+        self.builder = builder
         self.start_place = start_place
         self.raw_source = raw_source
         self.func_name = func_name
@@ -78,9 +78,9 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             "ContinueStatement": lambda s: "continue",
             "ThrowStatement": self._format_throw,
             "SwitchStatement": self._format_switch,
-            "IfStatement": lambda s: self._format_parenthesized_condition("if", s.get("test")),
-            "WhileStatement": lambda s: self._format_parenthesized_condition("while", s.get("test")),
-            "DoWhileStatement": lambda s: self._format_parenthesized_condition("while", s.get("test")),
+            "IfStatement": self._format_if,
+            "WhileStatement": self._format_while,
+            "DoWhileStatement": self._format_do_while,
             "ForStatement": self._format_for,
             "ForInStatement": lambda s: self._format_for_in_of(s, "in"),
             "ForOfStatement": lambda s: self._format_for_in_of(s, "of"),
@@ -88,6 +88,75 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             "VariableDeclaration": self._format_var_decl,
             "TryStatement": lambda s: "try",
         }
+        self._statement_handlers = {
+            "ReturnStatement": self._walk_return,
+            "BreakStatement": self._walk_break,
+            "ContinueStatement": self._walk_continue,
+            "ThrowStatement": self._walk_throw,
+            "IfStatement": self._walk_if,
+            "WhileStatement": self._walk_standard_loop,
+            "ForStatement": self._walk_standard_loop,
+            "ForInStatement": self._walk_standard_loop,
+            "ForOfStatement": self._walk_standard_loop,
+            "TryStatement": self._walk_try,
+            "SwitchStatement": self._walk_switch,
+            "DoWhileStatement": self._walk_do_while,
+        }
+
+    @property
+    def net(self) -> PetriNet:
+        return self.builder.net
+
+    @property
+    def end_place(self) -> Optional[Place]:
+        return self.builder.end_place
+
+    @property
+    def loop_stack(self) -> List[LoopContext]:
+        return self.builder.loop_stack
+
+    @property
+    def try_stack(self) -> List[TryContext]:
+        return self.builder.try_stack
+
+    def new_place(
+        self,
+        label: Optional[str] = None,
+        line_number: Optional[int] = None,
+    ) -> Place:
+        return self.builder.new_place(label=label, line_number=line_number)
+
+    def new_transition(
+        self,
+        label: str,
+        line_number: Optional[int] = None,
+        hook_exception: bool = True,
+    ) -> Transition:
+        return self.builder.new_transition(
+            label=label,
+            line_number=line_number,
+            hook_exception=hook_exception,
+        )
+
+    def _walk_branch(
+        self,
+        statements: Any,
+        source_transition: Transition,
+        target_exit: Place,
+        line_number: Optional[int] = None,
+    ) -> Optional[Place]:
+        """Creates an entry place from source_transition and walks statements to target_exit."""
+        stmt_list = _to_stmt_list(statements)
+        if not stmt_list:
+            self.net.add_arc(source=source_transition, target=target_exit)
+            return target_exit
+        return self.builder.walk_branch(
+            stmt_list,
+            source_transition,
+            target_exit,
+            self.walk_block,
+            line_number=line_number,
+        )
 
     def _slice(self, node: Optional[dict]) -> str:
         """Extracts source text substring for an AST node using character offsets."""
@@ -132,8 +201,41 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         return f"throw {self._slice(arg)}" if arg else "throw"
 
     def _format_switch(self, stmt: dict) -> str:
-        disc = self._slice(stmt.get("discriminant"))
-        return f"switch ({disc})"
+        cases = stmt.get("cases", [])
+        if cases and isinstance(cases[0], dict) and "start" in cases[0]:
+            header = self.raw_source[stmt["start"]:cases[0]["start"]].strip().rstrip("{").strip()
+            if header.startswith("switch"):
+                return header
+        disc = stmt.get("discriminant")
+        if isinstance(disc, dict) and "end" in disc:
+            brace_idx = self.raw_source.find("{", disc["end"])
+            if brace_idx != -1:
+                return self.raw_source[stmt["start"]:brace_idx].strip()
+        return f"switch ({self._slice(disc)})"
+
+    def _format_if(self, stmt: dict) -> str:
+        consequent = stmt.get("consequent")
+        if "start" in stmt and isinstance(consequent, dict) and "start" in consequent:
+            header = self.raw_source[stmt["start"]:consequent["start"]].strip()
+            if header.startswith("if"):
+                return header
+        return self._format_parenthesized_condition("if", stmt.get("test"))
+
+    def _format_while(self, stmt: dict) -> str:
+        body = stmt.get("body")
+        if "start" in stmt and isinstance(body, dict) and "start" in body:
+            header = self.raw_source[stmt["start"]:body["start"]].strip()
+            if header.startswith("while"):
+                return header
+        return self._format_parenthesized_condition("while", stmt.get("test"))
+
+    def _format_do_while(self, stmt: dict) -> str:
+        body = stmt.get("body")
+        if isinstance(body, dict) and "end" in body and "end" in stmt:
+            sliced = self.raw_source[body["end"]:stmt["end"]].strip().rstrip(";").strip()
+            if sliced.startswith("while"):
+                return sliced
+        return self._format_parenthesized_condition("while", stmt.get("test"))
 
     def _format_for(self, stmt: dict) -> str:
         header = self._get_loop_header_slice(stmt)
@@ -193,49 +295,6 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         first_line = raw.split("\n")[0].strip().rstrip(";")
         return first_line or stmt_type or "statement"
 
-    def _walk_branch(
-        self,
-        statements: Any,
-        source_transition: Transition,
-        target_exit: Place,
-        line_number: Optional[int] = None,
-    ) -> Optional[Place]:
-        """Creates an entry place from source_transition and walks statements to target_exit."""
-        stmt_list = _to_stmt_list(statements)
-        if not stmt_list:
-            self.net.add_arc(source=source_transition, target=target_exit)
-            return target_exit
-        return super()._walk_branch(stmt_list, source_transition, target_exit, line_number=line_number)
-
-    def _handle_loop_jump(
-        self,
-        stmt: dict,
-        current_place: Place,
-    ) -> None:
-        """Handles break or continue jump statements to loop/switch exit or loop head."""
-        stmt_type = stmt.get("type")
-        is_break = stmt_type == "BreakStatement"
-        keyword = "break" if is_break else "continue"
-        lineno = self._get_lineno(stmt)
-        if not self.loop_stack:
-            raise SyntaxError(f"'{keyword}' outside loop at line {lineno}")
-        if is_break:
-            target_place = self.loop_stack[-1].exit
-        else:
-            target_place = None
-            for ctx in reversed(self.loop_stack):
-                if ctx.head is not None:
-                    target_place = ctx.head
-                    break
-            if target_place is None:
-                raise SyntaxError(f"'continue' outside loop at line {lineno}")
-        trans = self.new_transition(
-            label=self._format_statement_label(stmt),
-            line_number=lineno,
-        )
-        self.net.add_arc(source=current_place, target=trans)
-        self.net.add_arc(source=trans, target=target_place)
-
     def _find_raf_call(self, stmt: dict) -> Optional[dict]:
         """Finds a requestAnimationFrame CallExpression within a statement if present."""
         if not stmt or not isinstance(stmt, dict):
@@ -276,7 +335,6 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             return call_expr
         return None
 
-    # TODO: Extend game-loop cycle detection to setTimeout and setInterval.
     def _is_raf_cycle_call(self, stmt: dict) -> bool:
         """Determines if a statement is a recursive requestAnimationFrame call to enclosing func."""
         if not self.func_name:
@@ -290,15 +348,6 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         first_arg = args[0]
         if not isinstance(first_arg, dict):
             return False
-
-        # If wrapped in .bind(...) e.g. this.step.bind(this)
-        if first_arg.get("type") == "CallExpression":
-            callee = first_arg.get("callee") or {}
-            if callee.get("type") == "MemberExpression":
-                prop = callee.get("property") or {}
-                prop_name = prop.get("name") if prop.get("type") == "Identifier" else self._slice(prop)
-                if prop_name == "bind":
-                    first_arg = callee.get("object") or {}
 
         arg_type = first_arg.get("type")
         bare_func_name = self.func_name.split(".")[-1]
@@ -330,6 +379,344 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             sliced = sliced[5:]
         return sliced in (self.func_name, bare_func_name)
 
+    def _walk_return(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        self.builder.wire_return(
+            current_place=current_place,
+            label=self._format_statement_label(stmt),
+            line_number=lineno,
+        )
+        return None
+
+    def _walk_break(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        self.builder.wire_break(
+            current_place=current_place,
+            label=self._format_statement_label(stmt),
+            line_number=lineno,
+        )
+        return None
+
+    def _walk_continue(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        self.builder.wire_continue(
+            current_place=current_place,
+            label=self._format_statement_label(stmt),
+            line_number=lineno,
+        )
+        return None
+
+    def _walk_throw(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        self.builder.wire_terminal_exception(
+            current_place=current_place,
+            label=self._format_statement_label(stmt),
+            line_number=lineno,
+        )
+        return None
+
+    def _walk_if(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        true_trans = self.new_transition(
+            label=self._format_statement_label(stmt),
+            line_number=lineno,
+        )
+        self.net.add_arc(source=current_place, target=true_trans)
+
+        alternate = stmt.get("alternate")
+        else_lineno = self._get_lineno(alternate, lineno)
+        false_trans = self.new_transition(
+            label="else",
+            line_number=else_lineno,
+        )
+        self.net.add_arc(source=current_place, target=false_trans)
+
+        merge_place = target_exit if is_last else self.new_place(label=f"merge_{true_trans.id}", line_number=lineno)
+
+        consequent_stmts = _to_stmt_list(stmt.get("consequent"))
+        true_exit = self._walk_branch(consequent_stmts, true_trans, merge_place, lineno)
+
+        if alternate:
+            alternate_stmts = _to_stmt_list(alternate)
+            false_exit = self._walk_branch(alternate_stmts, false_trans, merge_place, else_lineno)
+        else:
+            self.net.add_arc(source=false_trans, target=merge_place)
+            false_exit = merge_place
+
+        if true_exit is None and false_exit is None:
+            return None
+
+        return merge_place
+
+    def _walk_standard_loop(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        loop_trans = self.new_transition(
+            label=self._format_statement_label(stmt),
+            line_number=lineno,
+        )
+        exit_trans = self.new_transition(
+            label="exit",
+            line_number=lineno,
+        )
+        loop_exit = target_exit if is_last else self.new_place(label=f"exit_{loop_trans.id}", line_number=lineno)
+
+        body_stmts = _to_stmt_list(stmt.get("body"))
+        routing = LoopRouting(
+            head=current_place,
+            loop_trans=loop_trans,
+            exit_trans=exit_trans,
+            exit_place=loop_exit,
+        )
+        self.builder.wire_standard_loop(
+            routing=routing,
+            body_stmts=body_stmts,
+            walk_block_fn=self.walk_block,
+            lineno=lineno,
+        )
+        self.net.add_arc(source=exit_trans, target=loop_exit)
+        return loop_exit
+
+    def _walk_try(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        except_entry = self.new_place(label="except_entry", line_number=lineno)
+        try_exit = target_exit if is_last else self.new_place(label="try_exit", line_number=lineno)
+
+        finalizer = stmt.get("finalizer")
+        if finalizer:
+            finally_lineno = self._get_lineno(finalizer, lineno)
+            finally_entry = self.new_place(label="finally_entry", line_number=finally_lineno)
+            finally_target = finally_entry
+            finally_stmts = _to_stmt_list(finalizer)
+        else:
+            finally_entry = None
+            finally_target = try_exit
+            finally_stmts = []
+
+        try_normal_exit = finally_target
+
+        self.try_stack.append(TryContext(
+            except_entry=except_entry,
+            finally_entry=finally_entry,
+            loop_depth=len(self.loop_stack),
+        ))
+        try_stmts = _to_stmt_list(stmt.get("block"))
+        self.walk_block(try_stmts, current_place=current_place, target_exit=try_normal_exit)
+        self.try_stack.pop()
+
+        handler = stmt.get("handler")
+        if handler:
+            handler_lineno = self._get_lineno(handler, lineno)
+            param = handler.get("param")
+            if param:
+                param_str = self._slice(param)
+                handler_label = f"catch ({param_str})"
+            else:
+                handler_label = "catch"
+
+            handler_trans = self.new_transition(
+                label=handler_label,
+                line_number=handler_lineno,
+                hook_exception=False,
+            )
+            self.net.add_arc(source=except_entry, target=handler_trans)
+            catch_stmts = _to_stmt_list(handler.get("body"))
+            self._walk_branch(
+                catch_stmts,
+                source_transition=handler_trans,
+                target_exit=finally_target,
+                line_number=handler_lineno,
+            )
+        elif finalizer:
+            exc_trans = self.new_transition(
+                label="exception",
+                line_number=lineno,
+                hook_exception=False,
+            )
+            self.net.add_arc(source=except_entry, target=exc_trans)
+            self.net.add_arc(source=exc_trans, target=finally_target)
+
+        if finalizer:
+            self.walk_block(finally_stmts, current_place=finally_entry, target_exit=try_exit)
+
+        return try_exit
+
+    def _walk_switch(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        decision_place = current_place
+        switch_exit = target_exit if is_last else self.new_place(label="exit_switch", line_number=lineno)
+
+        self.loop_stack.append(LoopContext(head=None, exit=switch_exit))
+        cases = stmt.get("cases", [])
+        has_default = any(case.get("test") is None for case in cases)
+
+        if not cases:
+            default_trans = self.new_transition(label="default", line_number=lineno)
+            self.net.add_arc(source=decision_place, target=default_trans)
+            self.net.add_arc(source=default_trans, target=switch_exit)
+            self.loop_stack.pop()
+            return switch_exit
+
+        case_entry_places: List[Place] = []
+        for case in cases:
+            case_lineno = self._get_lineno(case, lineno)
+            case_label = "case_entry" if case.get("test") is not None else "default_entry"
+            case_entry_places.append(self.new_place(label=case_label, line_number=case_lineno))
+
+        for case, case_entry in zip(cases, case_entry_places):
+            case_test = case.get("test")
+            case_lineno = self._get_lineno(case, lineno)
+            if case_test is not None:
+                test_str = self._slice(case_test)
+                case_label = f"case {test_str}"
+            else:
+                case_label = "default"
+
+            case_trans = self.new_transition(label=case_label, line_number=case_lineno)
+            self.net.add_arc(source=decision_place, target=case_trans)
+            self.net.add_arc(source=case_trans, target=case_entry)
+
+        if not has_default:
+            default_trans = self.new_transition(label="default", line_number=lineno)
+            self.net.add_arc(source=decision_place, target=default_trans)
+            self.net.add_arc(source=default_trans, target=switch_exit)
+
+        for i, (case, case_entry) in enumerate(zip(cases, case_entry_places)):
+            case_lineno = self._get_lineno(case, lineno)
+            case_body = _to_stmt_list(case.get("consequent", []))
+            next_target = case_entry_places[i + 1] if i + 1 < len(cases) else switch_exit
+
+            if not case_body:
+                pass_trans = self.new_transition(label="fallthrough", line_number=case_lineno)
+                self.net.add_arc(source=case_entry, target=pass_trans)
+                self.net.add_arc(source=pass_trans, target=next_target)
+            else:
+                self.walk_block(case_body, current_place=case_entry, target_exit=next_target)
+
+        self.loop_stack.pop()
+
+        incoming_to_exit = any(a.target == switch_exit for a in self.net.arcs)
+        if not incoming_to_exit:
+            return None
+
+        return switch_exit
+
+    def _walk_do_while(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        body_head = current_place
+        test_node = stmt.get("test")
+        test_lineno = self._get_lineno(test_node, lineno)
+        check_place = self.new_place(label="check_do_while", line_number=test_lineno)
+        loop_exit = target_exit if is_last else self.new_place(label="exit_do_while", line_number=lineno)
+
+        self.loop_stack.append(LoopContext(head=check_place, exit=loop_exit))
+        body_stmts = _to_stmt_list(stmt.get("body"))
+        self.walk_block(body_stmts, current_place=body_head, target_exit=check_place)
+        self.loop_stack.pop()
+
+        cond_label = self._format_do_while(stmt)
+        cond_trans = self.new_transition(label=cond_label, line_number=test_lineno)
+        self.net.add_arc(source=check_place, target=cond_trans)
+        self.net.add_arc(source=cond_trans, target=body_head)
+
+        exit_trans = self.new_transition(label="exit", line_number=test_lineno)
+        self.net.add_arc(source=check_place, target=exit_trans)
+        self.net.add_arc(source=exit_trans, target=loop_exit)
+
+        return loop_exit
+
+    def _walk_raf_cycle(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        label = self._format_statement_label(stmt)
+        trans = self.new_transition(label=label, line_number=lineno)
+        self.net.add_arc(source=current_place, target=trans)
+        self.net.add_arc(source=trans, target=self.start_place)
+
+        stmt_type = stmt.get("type")
+        if stmt_type == "ReturnStatement":
+            target = self.builder.get_active_finally() or self.end_place
+            if target is not None:
+                self.net.add_arc(source=trans, target=target)
+            return None
+        else:
+            next_place = target_exit if is_last else self.new_place(line_number=lineno)
+            self.net.add_arc(source=trans, target=next_place)
+            return next_place
+
+    def _walk_default_stmt(
+        self,
+        stmt: dict,
+        current_place: Place,
+        is_last: bool,
+        target_exit: Place,
+        lineno: Optional[int],
+    ) -> Optional[Place]:
+        next_place = target_exit if is_last else self.new_place(line_number=lineno)
+        label = self._format_statement_label(stmt)
+        trans = self.new_transition(label=label, line_number=lineno)
+        self.net.add_arc(source=current_place, target=trans)
+        self.net.add_arc(source=trans, target=next_place)
+        return next_place
+
     def walk_block(
         self,
         statements: List[dict],
@@ -345,265 +732,17 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             stmt_type = stmt.get("type")
 
             if self._is_raf_cycle_call(stmt):
-                label = self._format_statement_label(stmt)
-                trans = self.new_transition(
-                    label=label,
-                    line_number=lineno,
-                )
-                self.net.add_arc(source=current_place, target=trans)
-                self.net.add_arc(source=trans, target=self.start_place)
-
-                if stmt_type == "ReturnStatement":
-                    self.net.add_arc(source=trans, target=self.end_place)
+                res = self._walk_raf_cycle(stmt, current_place, is_last, target_exit, lineno)
+                if res is None:
                     return None
-                else:
-                    next_place = target_exit if is_last else self.new_place(line_number=lineno)
-                    self.net.add_arc(source=trans, target=next_place)
-                    current_place = next_place
+                current_place = res
                 continue
 
-            if stmt_type == "ReturnStatement":
-                trans = self.new_transition(
-                    label=self._format_statement_label(stmt),
-                    line_number=lineno,
-                )
-                self.net.add_arc(source=current_place, target=trans)
-                self.net.add_arc(source=trans, target=self.end_place)
+            handler = self._statement_handlers.get(stmt_type, self._walk_default_stmt)
+            res = handler(stmt, current_place, is_last, target_exit, lineno)
+            if res is None:
                 return None
-
-            elif stmt_type in ("BreakStatement", "ContinueStatement"):
-                self._handle_loop_jump(stmt, current_place)
-                return None
-
-            elif stmt_type == "IfStatement":
-                true_trans = self.new_transition(
-                    label=self._format_statement_label(stmt),
-                    line_number=lineno,
-                )
-                self.net.add_arc(source=current_place, target=true_trans)
-
-                alternate = stmt.get("alternate")
-                else_lineno = self._get_lineno(alternate, lineno)
-                false_trans = self.new_transition(
-                    label="else",
-                    line_number=else_lineno,
-                )
-                self.net.add_arc(source=current_place, target=false_trans)
-
-                if is_last:
-                    merge_place = target_exit
-                else:
-                    merge_place = self.new_place(label=f"merge_{true_trans.id}", line_number=lineno)
-
-                consequent_stmts = _to_stmt_list(stmt.get("consequent"))
-                true_exit = self._walk_branch(consequent_stmts, true_trans, merge_place, lineno)
-
-                if alternate:
-                    alternate_stmts = _to_stmt_list(alternate)
-                    false_exit = self._walk_branch(alternate_stmts, false_trans, merge_place, else_lineno)
-                else:
-                    self.net.add_arc(source=false_trans, target=merge_place)
-                    false_exit = merge_place
-
-                if true_exit is None and false_exit is None:
-                    return None
-
-                current_place = merge_place
-
-            elif stmt_type in ("WhileStatement", "ForStatement", "ForInStatement", "ForOfStatement"):
-                loop_trans = self.new_transition(
-                    label=self._format_statement_label(stmt),
-                    line_number=lineno,
-                )
-                exit_trans = self.new_transition(
-                    label="exit",
-                    line_number=lineno,
-                )
-
-                if is_last:
-                    loop_exit = target_exit
-                else:
-                    loop_exit = self.new_place(label=f"exit_{loop_trans.id}", line_number=lineno)
-
-                body_stmts = _to_stmt_list(stmt.get("body"))
-                self._wire_standard_loop(
-                    loop_head=current_place,
-                    loop_trans=loop_trans,
-                    exit_trans=exit_trans,
-                    loop_exit=loop_exit,
-                    body_stmts=body_stmts,
-                    lineno=lineno,
-                )
-
-                self.net.add_arc(source=exit_trans, target=loop_exit)
-                current_place = loop_exit
-
-            elif stmt_type == "TryStatement":
-                except_entry = self.new_place(label="except_entry", line_number=lineno)
-
-                if is_last:
-                    try_exit = target_exit
-                else:
-                    try_exit = self.new_place(label="try_exit", line_number=lineno)
-
-                finalizer = stmt.get("finalizer")
-                if finalizer:
-                    finally_lineno = self._get_lineno(finalizer, lineno)
-                    finally_entry = self.new_place(label="finally_entry", line_number=finally_lineno)
-                    finally_stmts = _to_stmt_list(finalizer)
-                else:
-                    finally_entry = try_exit
-                    finally_stmts = []
-
-                try_normal_exit = finally_entry
-
-                # Walk try body with try_stack active
-                self.try_stack.append(TryContext(except_entry=except_entry))
-                try_stmts = _to_stmt_list(stmt.get("block"))
-                self.walk_block(try_stmts, current_place=current_place, target_exit=try_normal_exit)
-                self.try_stack.pop()
-
-                # Walk catch handler if present
-                handler = stmt.get("handler")
-                if handler:
-                    handler_lineno = self._get_lineno(handler, lineno)
-                    param = handler.get("param")
-                    if param:
-                        param_str = self._slice(param)
-                        handler_label = f"catch ({param_str})"
-                    else:
-                        handler_label = "catch"
-
-                    handler_trans = self.new_transition(
-                        label=handler_label,
-                        line_number=handler_lineno,
-                        hook_exception=False,
-                    )
-                    self.net.add_arc(source=except_entry, target=handler_trans)
-                    catch_stmts = _to_stmt_list(handler.get("body"))
-                    self._walk_branch(
-                        catch_stmts,
-                        source_transition=handler_trans,
-                        target_exit=finally_entry,
-                        line_number=handler_lineno,
-                    )
-                elif finalizer:
-                    # try...finally without catch: unhandled exception flows to finally
-                    exc_trans = self.new_transition(
-                        label="exception",
-                        line_number=lineno,
-                        hook_exception=False,
-                    )
-                    self.net.add_arc(source=except_entry, target=exc_trans)
-                    self.net.add_arc(source=exc_trans, target=finally_entry)
-
-                # Walk finally block if present
-                if finalizer:
-                    self.walk_block(finally_stmts, current_place=finally_entry, target_exit=try_exit)
-
-                current_place = try_exit
-
-            elif stmt_type == "SwitchStatement":
-                decision_place = current_place
-                if is_last:
-                    switch_exit = target_exit
-                else:
-                    switch_exit = self.new_place(label="exit_switch", line_number=lineno)
-
-                self.loop_stack.append(LoopContext(head=None, exit=switch_exit))
-                cases = stmt.get("cases", [])
-                has_default = any(case.get("test") is None for case in cases)
-
-                for case in cases:
-                    case_test = case.get("test")
-                    case_lineno = self._get_lineno(case, lineno)
-                    case_body = _to_stmt_list(case.get("consequent", []))
-
-                    if case_test is not None:
-                        test_str = self._slice(case_test)
-                        case_label = f"case {test_str}"
-                    else:
-                        case_label = "default"
-
-                    case_trans = self.new_transition(
-                        label=case_label,
-                        line_number=case_lineno,
-                    )
-                    self.net.add_arc(source=decision_place, target=case_trans)
-                    self._walk_branch(
-                        case_body,
-                        source_transition=case_trans,
-                        target_exit=switch_exit,
-                        line_number=case_lineno,
-                    )
-
-                if not has_default:
-                    default_trans = self.new_transition(
-                        label="default",
-                        line_number=lineno,
-                    )
-                    self.net.add_arc(source=decision_place, target=default_trans)
-                    self.net.add_arc(source=default_trans, target=switch_exit)
-
-                self.loop_stack.pop()
-
-                incoming_to_exit = any(a.target == switch_exit for a in self.net.arcs)
-                if not incoming_to_exit:
-                    return None
-
-                current_place = switch_exit
-
-            elif stmt_type == "DoWhileStatement":
-                body_head = current_place
-                test_node = stmt.get("test")
-                test_lineno = self._get_lineno(test_node, lineno)
-                check_place = self.new_place(label="check_do_while", line_number=test_lineno)
-
-                if is_last:
-                    loop_exit = target_exit
-                else:
-                    loop_exit = self.new_place(label="exit_do_while", line_number=lineno)
-
-                self.loop_stack.append(LoopContext(head=check_place, exit=loop_exit))
-                body_stmts = _to_stmt_list(stmt.get("body"))
-                self.walk_block(body_stmts, current_place=body_head, target_exit=check_place)
-                self.loop_stack.pop()
-
-                cond_label = self._format_parenthesized_condition("while", test_node)
-                cond_trans = self.new_transition(
-                    label=cond_label,
-                    line_number=test_lineno,
-                )
-                self.net.add_arc(source=check_place, target=cond_trans)
-                self.net.add_arc(source=cond_trans, target=body_head)
-
-                exit_trans = self.new_transition(
-                    label="exit",
-                    line_number=test_lineno,
-                )
-                self.net.add_arc(source=check_place, target=exit_trans)
-                self.net.add_arc(source=exit_trans, target=loop_exit)
-
-                current_place = loop_exit
-
-            elif stmt_type == "ThrowStatement":
-                self._wire_terminal_exception(
-                    current_place=current_place,
-                    label=self._format_statement_label(stmt),
-                    line_number=lineno,
-                )
-                return None
-
-            else:
-                next_place = target_exit if is_last else self.new_place(line_number=lineno)
-                label = self._format_statement_label(stmt)
-                trans = self.new_transition(
-                    label=label,
-                    line_number=lineno,
-                )
-                self.net.add_arc(source=current_place, target=trans)
-                self.net.add_arc(source=trans, target=next_place)
-                current_place = next_place
+            current_place = res
 
         return current_place
 
@@ -826,10 +965,10 @@ class JavascriptWalker(WalkerProtocol):
         else:
             statements = []
 
+        builder = ControlFlowBuilder(net=net, end_place=end_place)
         walker = _JavascriptControlFlowWalker(
-            net=net,
+            builder=builder,
             start_place=start_place,
-            end_place=end_place,
             raw_source=self.raw_source,
             func_name=func_name,
         )

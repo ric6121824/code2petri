@@ -3,8 +3,9 @@ from typing import Optional, Union, List
 
 from code2flow.python import Python
 from code2petri.base_walker import (
-    _BaseControlFlowWalker,
+    ControlFlowBuilder,
     LoopContext,
+    LoopRouting,
     TryContext,
 )
 from code2petri.model import PetriNet, Place, Transition, Arc
@@ -125,27 +126,61 @@ def _get_block_lineno(stmts: List[ast.AST], default: Optional[int] = None) -> Op
     return default
 
 
-class _PythonControlFlowWalker(_BaseControlFlowWalker):
+class _PythonControlFlowWalker:
     """Internal recursive walker constructing PetriNet places, transitions, and arcs."""
 
-    def _handle_loop_jump(
-        self,
-        stmt: Union[ast.Break, ast.Continue],
-        current_place: Place,
-    ) -> None:
-        """Handles break or continue jump statements to loop exit or head."""
-        is_break = isinstance(stmt, ast.Break)
-        keyword = "break" if is_break else "continue"
-        if not self.loop_stack:
-            raise SyntaxError(f"'{keyword}' outside loop at line {stmt.lineno}")
-        target_place = self.loop_stack[-1].exit if is_break else self.loop_stack[-1].head
-        trans = self.new_transition(
-            label=_format_statement_label(stmt),
-            line_number=stmt.lineno,
-        )
-        self.net.add_arc(source=current_place, target=trans)
-        self.net.add_arc(source=trans, target=target_place)
+    def __init__(self, builder: ControlFlowBuilder) -> None:
+        self.builder = builder
 
+    @property
+    def net(self) -> PetriNet:
+        return self.builder.net
+
+    @property
+    def end_place(self) -> Optional[Place]:
+        return self.builder.end_place
+
+    @property
+    def loop_stack(self) -> List[LoopContext]:
+        return self.builder.loop_stack
+
+    @property
+    def try_stack(self) -> List[TryContext]:
+        return self.builder.try_stack
+
+    def new_place(
+        self,
+        label: Optional[str] = None,
+        line_number: Optional[int] = None,
+    ) -> Place:
+        return self.builder.new_place(label=label, line_number=line_number)
+
+    def new_transition(
+        self,
+        label: str,
+        line_number: Optional[int] = None,
+        hook_exception: bool = True,
+    ) -> Transition:
+        return self.builder.new_transition(
+            label=label,
+            line_number=line_number,
+            hook_exception=hook_exception,
+        )
+
+    def _walk_branch(
+        self,
+        statements: List[ast.stmt],
+        source_transition: Transition,
+        target_exit: Place,
+        line_number: Optional[int] = None,
+    ) -> Optional[Place]:
+        return self.builder.walk_branch(
+            statements,
+            source_transition,
+            target_exit,
+            self.walk_block,
+            line_number=line_number,
+        )
 
     def walk_block(
         self,
@@ -159,16 +194,15 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
             is_last = (i == total_stmts - 1)
 
             if isinstance(stmt, ast.Return):
-                trans = self.new_transition(
-                    label=_format_statement_label(stmt),
-                    line_number=stmt.lineno,
-                )
-                self.net.add_arc(source=current_place, target=trans)
-                self.net.add_arc(source=trans, target=self.end_place)
+                self.builder.wire_return(current_place, _format_statement_label(stmt), stmt.lineno)
                 return None
 
-            elif isinstance(stmt, (ast.Break, ast.Continue)):
-                self._handle_loop_jump(stmt, current_place)
+            elif isinstance(stmt, ast.Break):
+                self.builder.wire_break(current_place, "break", stmt.lineno)
+                return None
+
+            elif isinstance(stmt, ast.Continue):
+                self.builder.wire_continue(current_place, "continue", stmt.lineno)
                 return None
 
             elif isinstance(stmt, ast.If):
@@ -227,12 +261,16 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
                 else:
                     loop_exit = self.new_place(label=f"exit_{loop_trans.id}", line_number=stmt.lineno)
 
-                self._wire_standard_loop(
-                    loop_head=current_place,
+                routing = LoopRouting(
+                    head=current_place,
                     loop_trans=loop_trans,
                     exit_trans=exit_trans,
-                    loop_exit=loop_exit,
+                    exit_place=loop_exit,
+                )
+                self.builder.wire_standard_loop(
+                    routing=routing,
                     body_stmts=stmt.body,
+                    walk_block_fn=self.walk_block,
                     lineno=stmt.lineno,
                 )
 
@@ -260,24 +298,30 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
                 if stmt.finalbody:
                     finally_lineno = _get_block_lineno(stmt.finalbody, stmt.lineno)
                     finally_entry = self.new_place(label="finally_entry", line_number=finally_lineno)
+                    finally_target = finally_entry
                 else:
-                    finally_entry = try_exit
+                    finally_entry = None
+                    finally_target = try_exit
 
                 if stmt.orelse:
                     else_lineno = _get_block_lineno(stmt.orelse, stmt.lineno)
                     else_entry = self.new_place(label="else_entry", line_number=else_lineno)
                     try_normal_exit = else_entry
                 else:
-                    try_normal_exit = finally_entry
+                    try_normal_exit = finally_target
 
                 # Walk try body with try_stack active
-                self.try_stack.append(TryContext(except_entry=except_entry))
+                self.try_stack.append(TryContext(
+                    except_entry=except_entry,
+                    finally_entry=finally_entry,
+                    loop_depth=len(self.loop_stack),
+                ))
                 self.walk_block(stmt.body, current_place=current_place, target_exit=try_normal_exit)
                 self.try_stack.pop()
 
                 # Walk else clause if present
                 if stmt.orelse:
-                    self.walk_block(stmt.orelse, current_place=else_entry, target_exit=finally_entry)
+                    self.walk_block(stmt.orelse, current_place=else_entry, target_exit=finally_target)
 
                 # Walk except handlers
                 if stmt.handlers:
@@ -292,7 +336,7 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
                         self._walk_branch(
                             handler.body,
                             source_transition=h_trans,
-                            target_exit=finally_entry,
+                            target_exit=finally_target,
                             line_number=handler.lineno,
                         )
                 elif stmt.finalbody:
@@ -312,7 +356,7 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
                 current_place = try_exit
 
             elif isinstance(stmt, ast.Raise):
-                self._wire_terminal_exception(
+                self.builder.wire_terminal_exception(
                     current_place=current_place,
                     label=_format_statement_label(stmt),
                     line_number=stmt.lineno,
@@ -340,11 +384,11 @@ class PythonWalker(WalkerProtocol):
         pass
 
     def get_node_lineno(self, ast_node: Any) -> int:
-        """Returns the start line number for a Python AST node, defaulting to 0."""
+        """Returns the line number for an AST node, defaulting to 0."""
         return getattr(ast_node, "lineno", 0)
 
     def parse_file(self, filepath: str) -> ast.AST:
-        """Parses a Python source file into an AST using code2flow's Python.get_tree."""
+        """Parses a Python source file into an AST."""
         return Python.get_tree(filepath, None)
 
     def find_function(
@@ -352,7 +396,7 @@ class PythonWalker(WalkerProtocol):
         tree: ast.AST,
         func_name: str,
     ) -> Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]]:
-        """Locates a function or method definition AST node by name or returns synthetic wrapper for (global)."""
+        """Locates a function or method definition AST node by name within an AST."""
         if func_name == "(global)":
             executable_stmts = _get_executable_statements(tree)
             if not executable_stmts:
@@ -422,31 +466,8 @@ class PythonWalker(WalkerProtocol):
             initial_tokens=0,
         )
 
-        walker = _PythonControlFlowWalker(net=net, end_place=end_place)
+        builder = ControlFlowBuilder(net=net, end_place=end_place)
+        walker = _PythonControlFlowWalker(builder=builder)
         walker.walk_block(ast_node.body, current_place=start_place, target_exit=end_place)
 
         return net
-
-
-def walk_function(ast_node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> PetriNet:
-    """Walks a Python function definition AST and constructs a PetriNet model."""
-    return PythonWalker().walk_function(ast_node)
-
-
-def parse_file(filepath: str) -> ast.AST:
-    """Parses a Python source file into an AST."""
-    return Python.get_tree(filepath, None)
-
-
-def find_function(
-    tree: ast.AST,
-    func_name: str,
-) -> Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]]:
-    """Locates a function or method definition AST node by name within an AST."""
-    return PythonWalker().find_function(tree, func_name)
-
-
-def find_all_functions(tree: ast.AST) -> List[str]:
-    """Finds all function and method definition names within an AST."""
-    return PythonWalker().find_all_functions(tree)
-

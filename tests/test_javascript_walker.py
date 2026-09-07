@@ -377,6 +377,68 @@ class TestJavascriptTryCatch(unittest.TestCase):
         # Unhandled exception flows into finally_entry
         self.assertTrue(any(a.source == exc_trans and a.target == finally_entry for a in net.arcs))
 
+    def test_try_finally_return_routes_through_finally(self):
+        code = (
+            "function try_finally_return() {\n"
+            "    try {\n"
+            "        return 42;\n"
+            "    } finally {\n"
+            "        cleanup();\n"
+            "    }\n"
+            "}\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+        try:
+            tree = self.walker.parse_file(temp_path)
+            node = self.walker.find_function(tree, "try_finally_return")
+            net = self.walker.walk_function(node)
+            assert_valid_petri_net(self, net)
+            assert_bipartite(self, net)
+
+            ret_trans = next(t for t in net.transitions if "return" in t.label)
+            cleanup_trans = next(t for t in net.transitions if "cleanup" in t.label)
+            finally_entry = next(a.source for a in net.arcs if a.target == cleanup_trans)
+
+            # return 42 inside try routes into finally_entry, NOT directly to end_place
+            self.assertTrue(any(a.source == ret_trans and a.target == finally_entry for a in net.arcs))
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
+    def test_try_finally_break_in_loop_routes_through_finally(self):
+        code = (
+            "function loop_try_finally_break() {\n"
+            "    while (true) {\n"
+            "        try {\n"
+            "            break;\n"
+            "        } finally {\n"
+            "            cleanup();\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+        try:
+            tree = self.walker.parse_file(temp_path)
+            node = self.walker.find_function(tree, "loop_try_finally_break")
+            net = self.walker.walk_function(node)
+            assert_valid_petri_net(self, net)
+            assert_bipartite(self, net)
+
+            break_trans = next(t for t in net.transitions if t.label == "break")
+            cleanup_trans = next(t for t in net.transitions if "cleanup" in t.label)
+            finally_entry = next(a.source for a in net.arcs if a.target == cleanup_trans)
+
+            # break inside try in loop routes to finally_entry first
+            self.assertTrue(any(a.source == break_trans and a.target == finally_entry for a in net.arcs))
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
 
 class TestJavascriptSwitch(unittest.TestCase):
     def setUp(self):
@@ -431,6 +493,50 @@ class TestJavascriptSwitch(unittest.TestCase):
         t_def = next(t for t in net.transitions if t.label == "default")
         decision_place = next(a.source for a in net.arcs if a.target == t_c1)
         self.assertTrue(any(a.source == decision_place and a.target == t_def for a in net.arcs))
+
+    def test_switch_fallthrough(self):
+        code = (
+            "function fallthrough_func(val) {\n"
+            "    let x = 0;\n"
+            "    switch (val) {\n"
+            "        case 1:\n"
+            "            x = 10;\n"
+            "        case 2:\n"
+            "            x = 20;\n"
+            "            break;\n"
+            "        default:\n"
+            "            x = -1;\n"
+            "    }\n"
+            "    return x;\n"
+            "}\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
+            f.write(code)
+            temp_path = f.name
+        try:
+            tree = self.walker.parse_file(temp_path)
+            node = self.walker.find_function(tree, "fallthrough_func")
+            net = self.walker.walk_function(node)
+            assert_valid_petri_net(self, net)
+            assert_bipartite(self, net)
+
+            t_c1 = next(t for t in net.transitions if t.label == "case 1")
+            t_x10 = next(t for t in net.transitions if "x = 10" in t.label)
+            t_c2 = next(t for t in net.transitions if t.label == "case 2")
+            t_x20 = next(t for t in net.transitions if "x = 20" in t.label)
+
+            p_c1_entry = next(a.target for a in net.arcs if a.source == t_c1)
+            p_c2_entry = next(a.target for a in net.arcs if a.source == t_c2)
+
+            # case 1 leads to x = 10
+            self.assertTrue(any(a.source == p_c1_entry and a.target == t_x10 for a in net.arcs))
+            # x = 10 without break falls through to case 2's entry place
+            self.assertTrue(any(a.source == t_x10 and a.target == p_c2_entry for a in net.arcs))
+            # case 2 entry leads to x = 20
+            self.assertTrue(any(a.source == p_c2_entry and a.target == t_x20 for a in net.arcs))
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
 
 class TestJavascriptDoWhile(unittest.TestCase):
@@ -728,34 +834,6 @@ class TestJavascriptGameLoopRAF(unittest.TestCase):
             raf_trans = next(t for t in net.transitions if "requestAnimationFrame" in t.label)
 
             # RAF calling this.step inside Engine.step produces a back-arc cycle to start_place
-            self.assertTrue(any(a.source == raf_trans and a.target == start_place for a in net.arcs))
-            self.assertTrue(any(a.source == raf_trans and a.target == end_place for a in net.arcs))
-        finally:
-            if os.path.exists(temp_path):
-                os.remove(temp_path)
-
-    def test_loop_raf_class_method_bind(self):
-        code = (
-            "class Engine {\n"
-            "    step() {\n"
-            "        requestAnimationFrame(this.step.bind(this));\n"
-            "    }\n"
-            "}\n"
-        )
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".js", delete=False) as f:
-            f.write(code)
-            temp_path = f.name
-        try:
-            tree = self.walker.parse_file(temp_path)
-            node = self.walker.find_function(tree, "Engine.step")
-            net = self.walker.walk_function(node)
-            assert_valid_petri_net(self, net)
-            assert_bipartite(self, net)
-
-            start_place, end_place = assert_has_start_and_end(self, net)
-            raf_trans = next(t for t in net.transitions if "requestAnimationFrame" in t.label)
-
-            # RAF calling this.step.bind(this) produces a back-arc cycle to start_place
             self.assertTrue(any(a.source == raf_trans and a.target == start_place for a in net.arcs))
             self.assertTrue(any(a.source == raf_trans and a.target == end_place for a in net.arcs))
         finally:

@@ -9,7 +9,7 @@ if REPO_ROOT not in sys.path:
 
 from code2petri.walker_protocol import WalkerProtocol
 from code2petri.base_walker import _BaseControlFlowWalker, LoopContext, TryContext
-from code2petri.python_walker import PythonWalker, find_all_functions, find_function
+from code2petri.python_walker import PythonWalker
 from code2petri.model import PetriNet, Place, Transition
 from code2petri.engine import code2petri, WALKERS
 from tests.petri_assertions import assert_valid_petri_net, assert_has_start_and_end, assert_bipartite

@@ -7,7 +7,12 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from code2petri.python_walker import walk_function, parse_file, find_function  # noqa: E402
+from code2petri.python_walker import PythonWalker  # noqa: E402
+
+walker = PythonWalker()
+walk_function = walker.walk_function
+parse_file = walker.parse_file
+find_function = walker.find_function
 from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
 
 
@@ -285,6 +290,24 @@ class TestTryElseAndNesting(unittest.TestCase):
         t_exc = next(t for t in net.transitions if t.label == "exception")
         self.assertIn(t_exc, [a.target for a in net.arcs if a.source == p_except])
         self.assertIn(p_finally, [a.target for a in net.arcs if a.source == t_exc])
+
+    def test_try_finally_return_routes_to_finally(self):
+        code = (
+            "def try_ret_func():\n"
+            "    try:\n"
+            "        return 1\n"
+            "    finally:\n"
+            "        cleanup()\n"
+        )
+        tree = ast.parse(code)
+        func = tree.body[0]
+        net = walk_function(func)
+
+        p_finally = next(p for p in net.places if p.label == "finally_entry")
+        t_ret = next(t for t in net.transitions if "return" in t.label)
+
+        # return 1 arcs to finally_entry, NOT directly to end_place
+        self.assertTrue(any(a.source == t_ret and a.target == p_finally for a in net.arcs))
 
 
 if __name__ == '__main__':
