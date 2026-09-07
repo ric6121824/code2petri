@@ -8,7 +8,7 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from code2petri.walker_protocol import WalkerProtocol
-from code2petri.base_walker import _BaseControlFlowWalker, LoopContext, TryContext
+from code2petri.control_flow_builder import ControlFlowBuilder, LoopContext, TryContext
 from code2petri.python_walker import PythonWalker
 from code2petri.model import PetriNet, Place, Transition
 from code2petri.engine import code2petri, WALKERS
@@ -49,38 +49,38 @@ class TestWalkerProtocolABC(unittest.TestCase):
         self.assertIsInstance(walker, WalkerProtocol)
 
 
-class TestBaseControlFlowWalker(unittest.TestCase):
+class TestControlFlowBuilder(unittest.TestCase):
     def setUp(self):
         self.net = PetriNet()
         self.end_place = self.net.add_place("p_end", "end")
-        self.walker = _BaseControlFlowWalker(self.net, self.end_place)
+        self.builder = ControlFlowBuilder(self.net, self.end_place)
 
     def test_id_counters_and_places(self):
-        p1 = self.walker.new_place(line_number=10)
-        p2 = self.walker.new_place(label="custom_p", line_number=12)
+        p1 = self.builder.new_place(line_number=10)
+        p2 = self.builder.new_place(label="custom_p", line_number=12)
         self.assertEqual(p1.id, "p1")
         self.assertEqual(p1.label, "p1")
         self.assertEqual(p1.line_number, 10)
         self.assertEqual(p2.id, "p2")
         self.assertEqual(p2.label, "custom_p")
-        self.assertEqual(self.walker.place_counter, 2)
+        self.assertEqual(self.builder.place_counter, 2)
 
     def test_transitions_and_exception_hook(self):
-        t1 = self.walker.new_transition("op_1", line_number=5)
+        t1 = self.builder.new_transition("op_1", line_number=5)
         self.assertEqual(t1.id, "t1")
         self.assertEqual(t1.label, "op_1")
         self.assertEqual(len(self.net.arcs), 0)
 
         # Push try context and test hook_exception
-        exc_entry = self.walker.new_place("except_entry")
-        self.walker.try_stack.append(TryContext(except_entry=exc_entry))
+        exc_entry = self.builder.new_place("except_entry")
+        self.builder.try_stack.append(TryContext(except_entry=exc_entry))
 
-        t2 = self.walker.new_transition("op_in_try", line_number=6, hook_exception=True)
+        t2 = self.builder.new_transition("op_in_try", line_number=6, hook_exception=True)
         # Should create an arc from t2 to exc_entry
         exc_arcs = [a for a in self.net.arcs if a.source == t2 and a.target == exc_entry]
         self.assertEqual(len(exc_arcs), 1)
 
-        t3 = self.walker.new_transition("no_hook", line_number=7, hook_exception=False)
+        t3 = self.builder.new_transition("no_hook", line_number=7, hook_exception=False)
         no_hook_arcs = [a for a in self.net.arcs if a.source == t3]
         self.assertEqual(len(no_hook_arcs), 0)
 
@@ -196,16 +196,17 @@ class TestEngineLanguageDispatch(unittest.TestCase):
 
     def test_package_exports_walker_protocol_not_internal_builder(self):
         import code2petri
-        from code2petri.base_walker import _BaseControlFlowWalker
+        from code2petri.control_flow_builder import ControlFlowBuilder
         from code2petri.python_walker import PythonWalker
         from code2petri.javascript_walker import JavascriptWalker
+        self.assertNotIn("ControlFlowBuilder", code2petri.__all__)
         self.assertNotIn("BaseControlFlowWalker", code2petri.__all__)
         self.assertNotIn("_BaseControlFlowWalker", code2petri.__all__)
         self.assertIn("WalkerProtocol", code2petri.__all__)
         self.assertTrue(issubclass(PythonWalker, WalkerProtocol))
         self.assertTrue(issubclass(JavascriptWalker, WalkerProtocol))
-        self.assertFalse(issubclass(PythonWalker, _BaseControlFlowWalker))
-        self.assertFalse(issubclass(JavascriptWalker, _BaseControlFlowWalker))
+        self.assertFalse(issubclass(PythonWalker, ControlFlowBuilder))
+        self.assertFalse(issubclass(JavascriptWalker, ControlFlowBuilder))
 
     def test_walker_protocol_get_node_lineno(self):
         import ast

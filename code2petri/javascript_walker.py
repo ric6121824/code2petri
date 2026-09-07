@@ -2,7 +2,7 @@ import shutil
 from typing import Optional, List, Any, Union, NamedTuple
 from code2flow.engine import LanguageParams
 from code2flow.javascript import Javascript
-from code2petri.base_walker import (
+from code2petri.control_flow_builder import (
     ControlFlowBuilder,
     LoopContext,
     LoopRouting,
@@ -58,6 +58,24 @@ def _get_block_lineno(stmts: List[dict], default: Optional[int] = None) -> Optio
     return default
 
 
+def _get_class_name(node: dict) -> str:
+    """Extracts class name from ClassDeclaration node, defaulting to (anonymous_class)."""
+    cls_id = node.get("id")
+    if isinstance(cls_id, dict):
+        return cls_id.get("name") or "(anonymous_class)"
+    return "(anonymous_class)"
+
+
+def _get_class_body_elements(node: dict) -> List[dict]:
+    """Extracts method/property elements from ClassDeclaration body."""
+    body_node = node.get("body")
+    if isinstance(body_node, dict):
+        elements = body_node.get("body")
+        if isinstance(elements, list):
+            return elements
+    return []
+
+
 class _JavascriptControlFlowWalker:
     """Internal recursive walker constructing PetriNet places, transitions, and arcs for JavaScript."""
 
@@ -102,61 +120,6 @@ class _JavascriptControlFlowWalker:
             "SwitchStatement": self._walk_switch,
             "DoWhileStatement": self._walk_do_while,
         }
-
-    @property
-    def net(self) -> PetriNet:
-        return self.builder.net
-
-    @property
-    def end_place(self) -> Optional[Place]:
-        return self.builder.end_place
-
-    @property
-    def loop_stack(self) -> List[LoopContext]:
-        return self.builder.loop_stack
-
-    @property
-    def try_stack(self) -> List[TryContext]:
-        return self.builder.try_stack
-
-    def new_place(
-        self,
-        label: Optional[str] = None,
-        line_number: Optional[int] = None,
-    ) -> Place:
-        return self.builder.new_place(label=label, line_number=line_number)
-
-    def new_transition(
-        self,
-        label: str,
-        line_number: Optional[int] = None,
-        hook_exception: bool = True,
-    ) -> Transition:
-        return self.builder.new_transition(
-            label=label,
-            line_number=line_number,
-            hook_exception=hook_exception,
-        )
-
-    def _walk_branch(
-        self,
-        statements: Any,
-        source_transition: Transition,
-        target_exit: Place,
-        line_number: Optional[int] = None,
-    ) -> Optional[Place]:
-        """Creates an entry place from source_transition and walks statements to target_exit."""
-        stmt_list = _to_stmt_list(statements)
-        if not stmt_list:
-            self.net.add_arc(source=source_transition, target=target_exit)
-            return target_exit
-        return self.builder.walk_branch(
-            stmt_list,
-            source_transition,
-            target_exit,
-            self.walk_block,
-            line_number=line_number,
-        )
 
     def _slice(self, node: Optional[dict]) -> str:
         """Extracts source text substring for an AST node using character offsets."""
@@ -335,6 +298,7 @@ class _JavascriptControlFlowWalker:
             return call_expr
         return None
 
+    # TODO: Extend game-loop cycle detection to setTimeout or setInterval.
     def _is_raf_cycle_call(self, stmt: dict) -> bool:
         """Determines if a statement is a recursive requestAnimationFrame call to enclosing func."""
         if not self.func_name:
@@ -447,31 +411,39 @@ class _JavascriptControlFlowWalker:
         target_exit: Place,
         lineno: Optional[int],
     ) -> Optional[Place]:
-        true_trans = self.new_transition(
+        true_trans = self.builder.new_transition(
             label=self._format_statement_label(stmt),
             line_number=lineno,
         )
-        self.net.add_arc(source=current_place, target=true_trans)
+        self.builder.net.add_arc(source=current_place, target=true_trans)
 
         alternate = stmt.get("alternate")
         else_lineno = self._get_lineno(alternate, lineno)
-        false_trans = self.new_transition(
+        false_trans = self.builder.new_transition(
             label="else",
             line_number=else_lineno,
         )
-        self.net.add_arc(source=current_place, target=false_trans)
+        self.builder.net.add_arc(source=current_place, target=false_trans)
 
-        merge_place = target_exit if is_last else self.new_place(label=f"merge_{true_trans.id}", line_number=lineno)
+        merge_place = target_exit if is_last else self.builder.new_place(label=f"merge_{true_trans.id}", line_number=lineno)
 
         consequent_stmts = _to_stmt_list(stmt.get("consequent"))
-        true_exit = self._walk_branch(consequent_stmts, true_trans, merge_place, lineno)
+        true_exit = self.builder.walk_branch(
+            consequent_stmts,
+            source_transition=true_trans,
+            target_exit=merge_place,
+            walk_block_fn=self.walk_block,
+            line_number=lineno,
+        )
 
-        if alternate:
-            alternate_stmts = _to_stmt_list(alternate)
-            false_exit = self._walk_branch(alternate_stmts, false_trans, merge_place, else_lineno)
-        else:
-            self.net.add_arc(source=false_trans, target=merge_place)
-            false_exit = merge_place
+        alternate_stmts = _to_stmt_list(alternate)
+        false_exit = self.builder.walk_branch(
+            alternate_stmts,
+            source_transition=false_trans,
+            target_exit=merge_place,
+            walk_block_fn=self.walk_block,
+            line_number=else_lineno,
+        )
 
         if true_exit is None and false_exit is None:
             return None
@@ -486,15 +458,15 @@ class _JavascriptControlFlowWalker:
         target_exit: Place,
         lineno: Optional[int],
     ) -> Optional[Place]:
-        loop_trans = self.new_transition(
+        loop_trans = self.builder.new_transition(
             label=self._format_statement_label(stmt),
             line_number=lineno,
         )
-        exit_trans = self.new_transition(
+        exit_trans = self.builder.new_transition(
             label="exit",
             line_number=lineno,
         )
-        loop_exit = target_exit if is_last else self.new_place(label=f"exit_{loop_trans.id}", line_number=lineno)
+        loop_exit = target_exit if is_last else self.builder.new_place(label=f"exit_{loop_trans.id}", line_number=lineno)
 
         body_stmts = _to_stmt_list(stmt.get("body"))
         routing = LoopRouting(
@@ -509,7 +481,7 @@ class _JavascriptControlFlowWalker:
             walk_block_fn=self.walk_block,
             lineno=lineno,
         )
-        self.net.add_arc(source=exit_trans, target=loop_exit)
+        self.builder.net.add_arc(source=exit_trans, target=loop_exit)
         return loop_exit
 
     def _walk_try(
@@ -520,13 +492,13 @@ class _JavascriptControlFlowWalker:
         target_exit: Place,
         lineno: Optional[int],
     ) -> Optional[Place]:
-        except_entry = self.new_place(label="except_entry", line_number=lineno)
-        try_exit = target_exit if is_last else self.new_place(label="try_exit", line_number=lineno)
+        except_entry = self.builder.new_place(label="except_entry", line_number=lineno)
+        try_exit = target_exit if is_last else self.builder.new_place(label="try_exit", line_number=lineno)
 
         finalizer = stmt.get("finalizer")
         if finalizer:
             finally_lineno = self._get_lineno(finalizer, lineno)
-            finally_entry = self.new_place(label="finally_entry", line_number=finally_lineno)
+            finally_entry = self.builder.new_place(label="finally_entry", line_number=finally_lineno)
             finally_target = finally_entry
             finally_stmts = _to_stmt_list(finalizer)
         else:
@@ -536,14 +508,14 @@ class _JavascriptControlFlowWalker:
 
         try_normal_exit = finally_target
 
-        self.try_stack.append(TryContext(
+        self.builder.try_stack.append(TryContext(
             except_entry=except_entry,
             finally_entry=finally_entry,
-            loop_depth=len(self.loop_stack),
+            loop_depth=len(self.builder.loop_stack),
         ))
         try_stmts = _to_stmt_list(stmt.get("block"))
         self.walk_block(try_stmts, current_place=current_place, target_exit=try_normal_exit)
-        self.try_stack.pop()
+        self.builder.try_stack.pop()
 
         handler = stmt.get("handler")
         if handler:
@@ -555,27 +527,28 @@ class _JavascriptControlFlowWalker:
             else:
                 handler_label = "catch"
 
-            handler_trans = self.new_transition(
+            handler_trans = self.builder.new_transition(
                 label=handler_label,
                 line_number=handler_lineno,
                 hook_exception=False,
             )
-            self.net.add_arc(source=except_entry, target=handler_trans)
+            self.builder.net.add_arc(source=except_entry, target=handler_trans)
             catch_stmts = _to_stmt_list(handler.get("body"))
-            self._walk_branch(
+            self.builder.walk_branch(
                 catch_stmts,
                 source_transition=handler_trans,
                 target_exit=finally_target,
+                walk_block_fn=self.walk_block,
                 line_number=handler_lineno,
             )
         elif finalizer:
-            exc_trans = self.new_transition(
+            exc_trans = self.builder.new_transition(
                 label="exception",
                 line_number=lineno,
                 hook_exception=False,
             )
-            self.net.add_arc(source=except_entry, target=exc_trans)
-            self.net.add_arc(source=exc_trans, target=finally_target)
+            self.builder.net.add_arc(source=except_entry, target=exc_trans)
+            self.builder.net.add_arc(source=exc_trans, target=finally_target)
 
         if finalizer:
             self.walk_block(finally_stmts, current_place=finally_entry, target_exit=try_exit)
@@ -591,24 +564,24 @@ class _JavascriptControlFlowWalker:
         lineno: Optional[int],
     ) -> Optional[Place]:
         decision_place = current_place
-        switch_exit = target_exit if is_last else self.new_place(label="exit_switch", line_number=lineno)
+        switch_exit = target_exit if is_last else self.builder.new_place(label="exit_switch", line_number=lineno)
 
-        self.loop_stack.append(LoopContext(head=None, exit=switch_exit))
+        self.builder.loop_stack.append(LoopContext(head=None, exit=switch_exit))
         cases = stmt.get("cases", [])
         has_default = any(case.get("test") is None for case in cases)
 
         if not cases:
-            default_trans = self.new_transition(label="default", line_number=lineno)
-            self.net.add_arc(source=decision_place, target=default_trans)
-            self.net.add_arc(source=default_trans, target=switch_exit)
-            self.loop_stack.pop()
+            default_trans = self.builder.new_transition(label="default", line_number=lineno)
+            self.builder.net.add_arc(source=decision_place, target=default_trans)
+            self.builder.net.add_arc(source=default_trans, target=switch_exit)
+            self.builder.loop_stack.pop()
             return switch_exit
 
         case_entry_places: List[Place] = []
         for case in cases:
             case_lineno = self._get_lineno(case, lineno)
             case_label = "case_entry" if case.get("test") is not None else "default_entry"
-            case_entry_places.append(self.new_place(label=case_label, line_number=case_lineno))
+            case_entry_places.append(self.builder.new_place(label=case_label, line_number=case_lineno))
 
         for case, case_entry in zip(cases, case_entry_places):
             case_test = case.get("test")
@@ -619,14 +592,14 @@ class _JavascriptControlFlowWalker:
             else:
                 case_label = "default"
 
-            case_trans = self.new_transition(label=case_label, line_number=case_lineno)
-            self.net.add_arc(source=decision_place, target=case_trans)
-            self.net.add_arc(source=case_trans, target=case_entry)
+            case_trans = self.builder.new_transition(label=case_label, line_number=case_lineno)
+            self.builder.net.add_arc(source=decision_place, target=case_trans)
+            self.builder.net.add_arc(source=case_trans, target=case_entry)
 
         if not has_default:
-            default_trans = self.new_transition(label="default", line_number=lineno)
-            self.net.add_arc(source=decision_place, target=default_trans)
-            self.net.add_arc(source=default_trans, target=switch_exit)
+            default_trans = self.builder.new_transition(label="default", line_number=lineno)
+            self.builder.net.add_arc(source=decision_place, target=default_trans)
+            self.builder.net.add_arc(source=default_trans, target=switch_exit)
 
         for i, (case, case_entry) in enumerate(zip(cases, case_entry_places)):
             case_lineno = self._get_lineno(case, lineno)
@@ -634,15 +607,15 @@ class _JavascriptControlFlowWalker:
             next_target = case_entry_places[i + 1] if i + 1 < len(cases) else switch_exit
 
             if not case_body:
-                pass_trans = self.new_transition(label="fallthrough", line_number=case_lineno)
-                self.net.add_arc(source=case_entry, target=pass_trans)
-                self.net.add_arc(source=pass_trans, target=next_target)
+                pass_trans = self.builder.new_transition(label="fallthrough", line_number=case_lineno)
+                self.builder.net.add_arc(source=case_entry, target=pass_trans)
+                self.builder.net.add_arc(source=pass_trans, target=next_target)
             else:
                 self.walk_block(case_body, current_place=case_entry, target_exit=next_target)
 
-        self.loop_stack.pop()
+        self.builder.loop_stack.pop()
 
-        incoming_to_exit = any(a.target == switch_exit for a in self.net.arcs)
+        incoming_to_exit = any(a.target == switch_exit for a in self.builder.net.arcs)
         if not incoming_to_exit:
             return None
 
@@ -659,22 +632,22 @@ class _JavascriptControlFlowWalker:
         body_head = current_place
         test_node = stmt.get("test")
         test_lineno = self._get_lineno(test_node, lineno)
-        check_place = self.new_place(label="check_do_while", line_number=test_lineno)
-        loop_exit = target_exit if is_last else self.new_place(label="exit_do_while", line_number=lineno)
+        check_place = self.builder.new_place(label="check_do_while", line_number=test_lineno)
+        loop_exit = target_exit if is_last else self.builder.new_place(label="exit_do_while", line_number=lineno)
 
-        self.loop_stack.append(LoopContext(head=check_place, exit=loop_exit))
+        self.builder.loop_stack.append(LoopContext(head=check_place, exit=loop_exit))
         body_stmts = _to_stmt_list(stmt.get("body"))
         self.walk_block(body_stmts, current_place=body_head, target_exit=check_place)
-        self.loop_stack.pop()
+        self.builder.loop_stack.pop()
 
         cond_label = self._format_do_while(stmt)
-        cond_trans = self.new_transition(label=cond_label, line_number=test_lineno)
-        self.net.add_arc(source=check_place, target=cond_trans)
-        self.net.add_arc(source=cond_trans, target=body_head)
+        cond_trans = self.builder.new_transition(label=cond_label, line_number=test_lineno)
+        self.builder.net.add_arc(source=check_place, target=cond_trans)
+        self.builder.net.add_arc(source=cond_trans, target=body_head)
 
-        exit_trans = self.new_transition(label="exit", line_number=test_lineno)
-        self.net.add_arc(source=check_place, target=exit_trans)
-        self.net.add_arc(source=exit_trans, target=loop_exit)
+        exit_trans = self.builder.new_transition(label="exit", line_number=test_lineno)
+        self.builder.net.add_arc(source=check_place, target=exit_trans)
+        self.builder.net.add_arc(source=exit_trans, target=loop_exit)
 
         return loop_exit
 
@@ -687,19 +660,19 @@ class _JavascriptControlFlowWalker:
         lineno: Optional[int],
     ) -> Optional[Place]:
         label = self._format_statement_label(stmt)
-        trans = self.new_transition(label=label, line_number=lineno)
-        self.net.add_arc(source=current_place, target=trans)
-        self.net.add_arc(source=trans, target=self.start_place)
+        trans = self.builder.new_transition(label=label, line_number=lineno)
+        self.builder.net.add_arc(source=current_place, target=trans)
+        self.builder.net.add_arc(source=trans, target=self.start_place)
 
         stmt_type = stmt.get("type")
         if stmt_type == "ReturnStatement":
-            target = self.builder.get_active_finally() or self.end_place
+            target = self.builder.get_active_finally() or self.builder.end_place
             if target is not None:
-                self.net.add_arc(source=trans, target=target)
+                self.builder.net.add_arc(source=trans, target=target)
             return None
         else:
-            next_place = target_exit if is_last else self.new_place(line_number=lineno)
-            self.net.add_arc(source=trans, target=next_place)
+            next_place = target_exit if is_last else self.builder.new_place(line_number=lineno)
+            self.builder.net.add_arc(source=trans, target=next_place)
             return next_place
 
     def _walk_default_stmt(
@@ -710,11 +683,11 @@ class _JavascriptControlFlowWalker:
         target_exit: Place,
         lineno: Optional[int],
     ) -> Optional[Place]:
-        next_place = target_exit if is_last else self.new_place(line_number=lineno)
+        next_place = target_exit if is_last else self.builder.new_place(line_number=lineno)
         label = self._format_statement_label(stmt)
-        trans = self.new_transition(label=label, line_number=lineno)
-        self.net.add_arc(source=current_place, target=trans)
-        self.net.add_arc(source=trans, target=next_place)
+        trans = self.builder.new_transition(label=label, line_number=lineno)
+        self.builder.net.add_arc(source=current_place, target=trans)
+        self.builder.net.add_arc(source=trans, target=next_place)
         return next_place
 
     def walk_block(
@@ -808,8 +781,8 @@ class JavascriptWalker(WalkerProtocol):
             if isinstance(node, dict):
                 ntype = node.get("type")
                 if ntype == "ClassDeclaration":
-                    cls_name = node.get("id", {}).get("name", "(anonymous_class)")
-                    body = node.get("body", {}).get("body", [])
+                    cls_name = _get_class_name(node)
+                    body = _get_class_body_elements(node)
                     cls_qual = f"{'.'.join(scope)}.{cls_name}" if scope else cls_name
                     for elem in body:
                         if elem.get("type") == "MethodDefinition":

@@ -1,3 +1,9 @@
+"""Shared control flow builder infrastructure for Petri net generation.
+
+To comply with the project architecture rule ('Avoid: walker base class'), language
+walkers compose this builder internally rather than inheriting from a walker base class.
+"""
+
 from typing import Optional, List, NamedTuple, Any
 from code2petri.model import PetriNet, Place, Transition
 
@@ -80,7 +86,13 @@ class ControlFlowBuilder:
         walk_block_fn: Any,
         line_number: Optional[int] = None,
     ) -> Optional[Place]:
-        """Creates an entry place from source_transition and walks statements to target_exit using walk_block_fn."""
+        """Creates an entry place from source_transition and walks statements to target_exit using walk_block_fn.
+
+        If statements is empty/None, connects source_transition directly to target_exit and returns target_exit.
+        """
+        if not statements:
+            self.net.add_arc(source=source_transition, target=target_exit)
+            return target_exit
         entry_place = self.new_place(line_number=line_number)
         self.net.add_arc(source=source_transition, target=entry_place)
         return walk_block_fn(statements, current_place=entry_place, target_exit=target_exit)
@@ -185,7 +197,4 @@ class ControlFlowBuilder:
             if target is not None:
                 self.net.add_arc(source=trans, target=target)
         return trans
-
-
-_BaseControlFlowWalker = ControlFlowBuilder
 
