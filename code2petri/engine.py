@@ -96,7 +96,14 @@ def code2petri(
             f"Target function '{target_function}' not found in '{source_path}'.{avail_str}"
         )
 
-    lineno = getattr(func_node, "lineno", 0)
+    if isinstance(func_node, dict):
+        loc = func_node.get("loc")
+        if isinstance(loc, dict) and isinstance(loc.get("start"), dict):
+            lineno = loc["start"].get("line", 0)
+        else:
+            lineno = func_node.get("lineno", 0)
+    else:
+        lineno = getattr(func_node, "lineno", 0)
     logger.info("Analyzing function '%s' at line %d...", target_function, lineno)
     logger.debug("Walking AST node for '%s'...", target_function)
     net = walker.walk_function(func_node)

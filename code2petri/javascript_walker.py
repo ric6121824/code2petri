@@ -1,4 +1,5 @@
-from typing import Optional, List, Any, Union
+import shutil
+from typing import Optional, List, Any, Union, NamedTuple
 from code2flow.engine import LanguageParams
 from code2flow.javascript import Javascript
 from code2petri.base_walker import (
@@ -8,6 +9,21 @@ from code2petri.base_walker import (
 )
 from code2petri.model import PetriNet, Place, Transition
 from code2petri.walker_protocol import WalkerProtocol
+
+
+class FunctionInfo(NamedTuple):
+    """Metadata for a discovered JavaScript function, method, or callback."""
+    qual_name: str
+    bare_name: str
+    lineno: int
+    node: dict
+
+
+def slice_source(source: str, node: Optional[dict]) -> str:
+    """Extracts raw source substring for an AST node using character offsets."""
+    if not node or not isinstance(node, dict) or "start" not in node or "end" not in node:
+        return ""
+    return source[node["start"]:node["end"]].strip()
 
 
 def _to_stmt_list(node: Any) -> List[dict]:
@@ -56,12 +72,26 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         self.start_place = start_place
         self.raw_source = raw_source
         self.func_name = func_name
+        self._statement_formatters = {
+            "ReturnStatement": self._format_return,
+            "BreakStatement": lambda s: "break",
+            "ContinueStatement": lambda s: "continue",
+            "ThrowStatement": self._format_throw,
+            "SwitchStatement": self._format_switch,
+            "IfStatement": lambda s: self._format_parenthesized_condition("if", s.get("test")),
+            "WhileStatement": lambda s: self._format_parenthesized_condition("while", s.get("test")),
+            "DoWhileStatement": lambda s: self._format_parenthesized_condition("while", s.get("test")),
+            "ForStatement": self._format_for,
+            "ForInStatement": lambda s: self._format_for_in_of(s, "in"),
+            "ForOfStatement": lambda s: self._format_for_in_of(s, "of"),
+            "ExpressionStatement": self._format_expression_stmt,
+            "VariableDeclaration": self._format_var_decl,
+            "TryStatement": lambda s: "try",
+        }
 
     def _slice(self, node: Optional[dict]) -> str:
         """Extracts source text substring for an AST node using character offsets."""
-        if not node or "start" not in node or "end" not in node:
-            return ""
-        return self.raw_source[node["start"]:node["end"]].strip()
+        return slice_source(self.raw_source, node)
 
     def _get_lineno(self, node: Optional[dict], default: Optional[int] = None) -> Optional[int]:
         """Returns the 1-indexed start line number of an AST node."""
@@ -93,100 +123,72 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             return self.raw_source[stmt["start"]:body["start"]].strip()
         return None
 
+    def _format_return(self, stmt: dict) -> str:
+        arg = stmt.get("argument")
+        return f"return {self._slice(arg)}" if arg else "return"
+
+    def _format_throw(self, stmt: dict) -> str:
+        arg = stmt.get("argument")
+        return f"throw {self._slice(arg)}" if arg else "throw"
+
+    def _format_switch(self, stmt: dict) -> str:
+        disc = self._slice(stmt.get("discriminant"))
+        return f"switch ({disc})"
+
+    def _format_for(self, stmt: dict) -> str:
+        header = self._get_loop_header_slice(stmt)
+        if header:
+            return header
+        init_str = self._slice(stmt.get("init")).rstrip(";")
+        test_str = self._slice(stmt.get("test"))
+        update_str = self._slice(stmt.get("update"))
+        return f"for ({init_str}; {test_str}; {update_str})"
+
+    def _format_for_in_of(self, stmt: dict, op: str) -> str:
+        header = self._get_loop_header_slice(stmt)
+        if header:
+            return header
+        left_str = self._slice(stmt.get("left")).rstrip(";")
+        right_str = self._slice(stmt.get("right"))
+        return f"for ({left_str} {op} {right_str})"
+
+    def _format_expression_stmt(self, stmt: dict) -> str:
+        expr = stmt.get("expression", {})
+        expr_type = expr.get("type")
+        if expr_type == "CallExpression":
+            return self._format_call_expression(expr)
+        if expr_type == "AssignmentExpression":
+            left_str = self._slice(expr.get("left"))
+            op = expr.get("operator", "=")
+            right = expr.get("right", {})
+            if right.get("type") == "CallExpression":
+                return f"{left_str} {op} {self._format_call_expression(right)}"
+            right_str = self._slice(right)
+            return f"{left_str} {op} {right_str}"
+        if expr_type == "UpdateExpression":
+            return self._slice(expr)
+        raw = self._slice(stmt)
+        first_line = raw.split("\n")[0].strip().rstrip(";")
+        return first_line or "statement"
+
+    def _format_var_decl(self, stmt: dict) -> str:
+        decls = stmt.get("declarations", [])
+        if len(decls) == 1 and decls[0].get("init", {}).get("type") == "CallExpression":
+            kind = stmt.get("kind", "let")
+            var_name = self._slice(decls[0].get("id"))
+            call_str = self._format_call_expression(decls[0]["init"])
+            return f"{kind} {var_name} = {call_str}"
+        raw = self._slice(stmt)
+        first_line = raw.split("\n")[0].strip().rstrip(";")
+        return first_line or "statement"
+
     def _format_statement_label(self, stmt: dict) -> str:
         """Returns a readable summary of the statement for transition labeling."""
         stmt_type = stmt.get("type")
+        formatter = self._statement_formatters.get(stmt_type)
+        if formatter:
+            return formatter(stmt)
 
-        # Return statement
-        if stmt_type == "ReturnStatement":
-            arg = stmt.get("argument")
-            if arg:
-                arg_str = self._slice(arg)
-                return f"return {arg_str}"
-            return "return"
-
-        # Break and Continue
-        if stmt_type == "BreakStatement":
-            return "break"
-
-        if stmt_type == "ContinueStatement":
-            return "continue"
-
-        # Throw statement
-        if stmt_type == "ThrowStatement":
-            arg = stmt.get("argument")
-            if arg:
-                return f"throw {self._slice(arg)}"
-            return "throw"
-
-        # Switch statement
-        if stmt_type == "SwitchStatement":
-            disc = self._slice(stmt.get("discriminant"))
-            return f"switch ({disc})"
-
-        # If statement
-        if stmt_type == "IfStatement":
-            return self._format_parenthesized_condition("if", stmt.get("test"))
-
-        # While statement
-        if stmt_type == "WhileStatement":
-            return self._format_parenthesized_condition("while", stmt.get("test"))
-
-        # Do-while statement
-        if stmt_type == "DoWhileStatement":
-            return self._format_parenthesized_condition("while", stmt.get("test"))
-
-        # For statement
-        if stmt_type == "ForStatement":
-            header = self._get_loop_header_slice(stmt)
-            if header:
-                return header
-            init_str = self._slice(stmt.get("init")).rstrip(";")
-            test_str = self._slice(stmt.get("test"))
-            update_str = self._slice(stmt.get("update"))
-            return f"for ({init_str}; {test_str}; {update_str})"
-
-        # ForInStatement and ForOfStatement
-        if stmt_type in ("ForInStatement", "ForOfStatement"):
-            header = self._get_loop_header_slice(stmt)
-            if header:
-                return header
-            left_str = self._slice(stmt.get("left")).rstrip(";")
-            right_str = self._slice(stmt.get("right"))
-            op = "in" if stmt_type == "ForInStatement" else "of"
-            return f"for ({left_str} {op} {right_str})"
-
-        # Expression statement
-        if stmt_type == "ExpressionStatement":
-            expr = stmt.get("expression", {})
-            expr_type = expr.get("type")
-            if expr_type == "CallExpression":
-                return self._format_call_expression(expr)
-            if expr_type == "AssignmentExpression":
-                left_str = self._slice(expr.get("left"))
-                op = expr.get("operator", "=")
-                right = expr.get("right", {})
-                if right.get("type") == "CallExpression":
-                    return f"{left_str} {op} {self._format_call_expression(right)}"
-                right_str = self._slice(right)
-                return f"{left_str} {op} {right_str}"
-            if expr_type == "UpdateExpression":
-                return self._slice(expr)
-
-        # VariableDeclaration with CallExpression initializer (e.g. let res = calc())
-        if stmt_type == "VariableDeclaration":
-            decls = stmt.get("declarations", [])
-            if len(decls) == 1 and decls[0].get("init", {}).get("type") == "CallExpression":
-                kind = stmt.get("kind", "let")
-                var_name = self._slice(decls[0].get("id"))
-                call_str = self._format_call_expression(decls[0]["init"])
-                return f"{kind} {var_name} = {call_str}"
-
-        # Try statement
-        if stmt_type == "TryStatement":
-            return "try"
-
-        # Default source slice
         raw = self._slice(stmt)
         first_line = raw.split("\n")[0].strip().rstrip(";")
         return first_line or stmt_type or "statement"
@@ -241,21 +243,21 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         stmt_type = stmt.get("type")
         call_expr = None
         if stmt_type == "ExpressionStatement":
-            expr = stmt.get("expression", {})
+            expr = stmt.get("expression") or {}
             if expr.get("type") == "CallExpression":
                 call_expr = expr
             elif expr.get("type") == "AssignmentExpression":
-                right = expr.get("right", {})
+                right = expr.get("right") or {}
                 if right.get("type") == "CallExpression":
                     call_expr = right
         elif stmt_type == "VariableDeclaration":
             for decl in stmt.get("declarations", []):
-                init = decl.get("init", {})
+                init = decl.get("init") or {}
                 if init.get("type") == "CallExpression":
                     call_expr = init
                     break
         elif stmt_type == "ReturnStatement":
-            arg = stmt.get("argument", {})
+            arg = stmt.get("argument") or {}
             if arg.get("type") == "CallExpression":
                 call_expr = arg
 
@@ -303,6 +305,24 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
             is_last = (i == total_stmts - 1)
             lineno = self._get_lineno(stmt)
             stmt_type = stmt.get("type")
+
+            if self._is_raf_cycle_call(stmt):
+                label = self._format_statement_label(stmt)
+                trans = self.new_transition(
+                    label=label,
+                    line_number=lineno,
+                )
+                self.net.add_arc(source=current_place, target=trans)
+                self.net.add_arc(source=trans, target=self.start_place)
+
+                if stmt_type == "ReturnStatement":
+                    self.net.add_arc(source=trans, target=self.end_place)
+                    return None
+                else:
+                    next_place = target_exit if is_last else self.new_place(line_number=lineno)
+                    self.net.add_arc(source=trans, target=next_place)
+                    current_place = next_place
+                continue
 
             if stmt_type == "ReturnStatement":
                 trans = self.new_transition(
@@ -353,28 +373,29 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                 current_place = merge_place
 
             elif stmt_type in ("WhileStatement", "ForStatement", "ForInStatement", "ForOfStatement"):
-                loop_head = current_place
                 loop_trans = self.new_transition(
                     label=self._format_statement_label(stmt),
                     line_number=lineno,
                 )
-                self.net.add_arc(source=loop_head, target=loop_trans)
-
                 exit_trans = self.new_transition(
                     label="exit",
                     line_number=lineno,
                 )
-                self.net.add_arc(source=loop_head, target=exit_trans)
 
                 if is_last:
                     loop_exit = target_exit
                 else:
                     loop_exit = self.new_place(label=f"exit_{loop_trans.id}", line_number=lineno)
 
-                self.loop_stack.append(LoopContext(head=loop_head, exit=loop_exit))
                 body_stmts = _to_stmt_list(stmt.get("body"))
-                self._walk_branch(body_stmts, loop_trans, loop_head, lineno)
-                self.loop_stack.pop()
+                self._wire_standard_loop(
+                    loop_head=current_place,
+                    loop_trans=loop_trans,
+                    exit_trans=exit_trans,
+                    loop_exit=loop_exit,
+                    body_stmts=body_stmts,
+                    lineno=lineno,
+                )
 
                 self.net.add_arc(source=exit_trans, target=loop_exit)
                 current_place = loop_exit
@@ -538,17 +559,6 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
                     self.net.add_arc(source=trans, target=self.end_place)
                 return None
 
-            elif self._is_raf_cycle_call(stmt):
-                next_place = target_exit if is_last else self.new_place(line_number=lineno)
-                label = self._format_statement_label(stmt)
-                trans = self.new_transition(
-                    label=label,
-                    line_number=lineno,
-                )
-                self.net.add_arc(source=current_place, target=trans)
-                self.net.add_arc(source=trans, target=self.start_place)
-                self.net.add_arc(source=trans, target=next_place)
-                current_place = next_place
 
             else:
                 next_place = target_exit if is_last else self.new_place(line_number=lineno)
@@ -564,16 +574,30 @@ class _JavascriptControlFlowWalker(_BaseControlFlowWalker):
         return current_place
 
 
-class JavascriptWalker(WalkerProtocol):
-    """JavaScript AST walker implementing WalkerProtocol."""
+class JavascriptWalker(WalkerProtocol, _BaseControlFlowWalker):
+    """JavaScript AST walker implementing WalkerProtocol and inheriting _BaseControlFlowWalker."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        net: Optional[PetriNet] = None,
+        end_place: Optional[Place] = None,
+    ) -> None:
+        super().__init__(net=net, end_place=end_place)
         self.raw_source: str = ""
         self.tree: Optional[dict] = None
         self._func_name_cache: dict[int, str] = {}
 
     def parse_file(self, filepath: str) -> dict:
-        """Parses a JavaScript file using Acorn, caching raw source text."""
+        """Parses a JavaScript file using Acorn, caching raw source text.
+
+        Requires Node.js and the 'acorn' npm package.
+        """
+        if not shutil.which("node"):
+            raise RuntimeError(
+                "Node.js is required to parse JavaScript files with code2petri. "
+                "Please ensure Node.js is installed and available in PATH."
+            )
+
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 self.raw_source = f.read()
@@ -581,15 +605,21 @@ class JavascriptWalker(WalkerProtocol):
             with open(filepath, "r", encoding="latin-1") as f:
                 self.raw_source = f.read()
 
-        tree = Javascript.get_tree(filepath, LanguageParams(source_type="script"))
+        try:
+            tree = Javascript.get_tree(filepath, LanguageParams(source_type="script"))
+        except AssertionError as exc:
+            raise RuntimeError(
+                f"Failed to parse JavaScript file {filepath!r} with Acorn. "
+                "Ensure that Node.js and the 'acorn' npm package are installed. "
+                f"Details: {exc}"
+            ) from exc
+
         self.tree = tree
         return tree
 
     def _slice_node(self, node: Optional[dict]) -> str:
         """Extracts raw source substring for an AST node."""
-        if not node or "start" not in node or "end" not in node:
-            return ""
-        return self.raw_source[node["start"]:node["end"]].strip()
+        return slice_source(self.raw_source, node)
 
     def _get_executable_statements(self, tree: dict) -> List[dict]:
         """Returns top-level executable statements outside functions/classes."""
@@ -598,9 +628,9 @@ class JavascriptWalker(WalkerProtocol):
             if s.get("type") not in ("FunctionDeclaration", "ClassDeclaration")
         ]
 
-    def _collect_all_functions(self, tree: dict) -> List[dict]:
+    def _collect_all_functions(self, tree: dict) -> List[FunctionInfo]:
         """Recursively collects all function declarations, class methods, and callbacks."""
-        results = []
+        results: List[FunctionInfo] = []
 
         def _traverse(node: Any, scope: List[str]) -> None:
             if isinstance(node, dict):
@@ -617,12 +647,12 @@ class JavascriptWalker(WalkerProtocol):
                             val = elem.get("value", {})
                             lineno = _get_node_lineno(elem) or _get_node_lineno(val, 0)
                             qual_name = f"{cls_qual}.{key}"
-                            results.append({
-                                "qual_name": qual_name,
-                                "bare_name": key,
-                                "lineno": lineno,
-                                "node": val,
-                            })
+                            results.append(FunctionInfo(
+                                qual_name=qual_name,
+                                bare_name=key,
+                                lineno=lineno,
+                                node=val,
+                            ))
                             new_scope = scope + [cls_name, key]
                             _traverse(val.get("body"), new_scope)
                     return
@@ -638,12 +668,12 @@ class JavascriptWalker(WalkerProtocol):
                         qual_name = f"{'.'.join(scope)}.(anonymous@{lineno})" if scope else f"(anonymous@{lineno})"
                         bare_name = f"(anonymous@{lineno})"
 
-                    results.append({
-                        "qual_name": qual_name,
-                        "bare_name": bare_name,
-                        "lineno": lineno,
-                        "node": node,
-                    })
+                    results.append(FunctionInfo(
+                        qual_name=qual_name,
+                        bare_name=bare_name,
+                        lineno=lineno,
+                        node=node,
+                    ))
                     new_scope = scope + [bare_name]
                     _traverse(node.get("body"), new_scope)
                     return
@@ -666,8 +696,8 @@ class JavascriptWalker(WalkerProtocol):
             funcs.append("(global)")
 
         collected = self._collect_all_functions(tree)
-        collected.sort(key=lambda item: item["lineno"])
-        funcs.extend([item["qual_name"] for item in collected])
+        collected.sort(key=lambda item: item.lineno)
+        funcs.extend([item.qual_name for item in collected])
         return funcs
 
     def find_function(self, tree: dict, func_name: str) -> Optional[dict]:
@@ -694,28 +724,22 @@ class JavascriptWalker(WalkerProtocol):
 
         # 1. Exact match on qualified name
         for item in collected:
-            if item["qual_name"] == func_name:
-                self._func_name_cache[id(item["node"])] = item["qual_name"]
-                return item["node"]
+            if item.qual_name == func_name:
+                self._func_name_cache[id(item.node)] = item.qual_name
+                return item.node
 
         # 2. Exact match on bare name
         for item in collected:
-            if item["bare_name"] == func_name:
-                self._func_name_cache[id(item["node"])] = item["qual_name"]
-                return item["node"]
+            if item.bare_name == func_name:
+                self._func_name_cache[id(item.node)] = item.qual_name
+                return item.node
 
-        # 3. Suffix match (e.g. .func_name)
-        for item in collected:
-            if item["qual_name"].endswith(f".{func_name}"):
-                self._func_name_cache[id(item["node"])] = item["qual_name"]
-                return item["node"]
-
-        # 4. Anonymous callback substring match (e.g. (anonymous@151) in qual_name)
+        # 3. Anonymous callback substring match (e.g. (anonymous@151) in qual_name)
         if "(anonymous@" in func_name:
             for item in collected:
-                if func_name in item["qual_name"] or func_name in item["bare_name"]:
-                    self._func_name_cache[id(item["node"])] = item["qual_name"]
-                    return item["node"]
+                if func_name in item.qual_name or func_name in item.bare_name:
+                    self._func_name_cache[id(item.node)] = item.qual_name
+                    return item.node
 
         return None
 

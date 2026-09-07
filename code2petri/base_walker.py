@@ -15,10 +15,14 @@ class TryContext(NamedTuple):
 
 class _BaseControlFlowWalker:
 
-    """Base control flow walker managing places, transitions, stacks, and counters."""
+    """Internal control flow builder managing places, transitions, stacks, and counters."""
 
-    def __init__(self, net: PetriNet, end_place: Place) -> None:
-        self.net = net
+    def __init__(
+        self,
+        net: Optional[PetriNet] = None,
+        end_place: Optional[Place] = None,
+    ) -> None:
+        self.net = net if net is not None else PetriNet()
         self.end_place = end_place
         self.place_counter = 0
         self.trans_counter = 0
@@ -70,6 +74,23 @@ class _BaseControlFlowWalker:
         entry_place = self.new_place(line_number=line_number)
         self.net.add_arc(source=source_transition, target=entry_place)
         return self.walk_block(statements, current_place=entry_place, target_exit=target_exit)
+
+    def _wire_standard_loop(
+        self,
+        loop_head: Place,
+        loop_trans: Transition,
+        exit_trans: Transition,
+        loop_exit: Place,
+        body_stmts: Any,
+        lineno: Optional[int] = None,
+    ) -> None:
+        """Wires standard loop head, body branch with back-arc, and exit transition."""
+        self.net.add_arc(source=loop_head, target=loop_trans)
+        self.net.add_arc(source=loop_head, target=exit_trans)
+
+        self.loop_stack.append(LoopContext(head=loop_head, exit=loop_exit))
+        self._walk_branch(body_stmts, loop_trans, loop_head, lineno)
+        self.loop_stack.pop()
 
     def walk_block(
         self,

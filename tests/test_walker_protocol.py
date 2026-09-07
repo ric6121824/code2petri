@@ -191,10 +191,16 @@ class TestEngineLanguageDispatch(unittest.TestCase):
         self.assertIsNotNone(net)
         assert_valid_petri_net(self, net)
 
-    def test_package_does_not_export_walker_base_class(self):
+    def test_package_exports_walker_protocol_not_internal_builder(self):
         import code2petri
+        from code2petri.base_walker import _BaseControlFlowWalker
+        from code2petri.python_walker import PythonWalker
+        from code2petri.javascript_walker import JavascriptWalker
         self.assertNotIn("BaseControlFlowWalker", code2petri.__all__)
         self.assertNotIn("_BaseControlFlowWalker", code2petri.__all__)
+        self.assertIn("WalkerProtocol", code2petri.__all__)
+        self.assertTrue(issubclass(PythonWalker, (WalkerProtocol, _BaseControlFlowWalker)))
+        self.assertTrue(issubclass(JavascriptWalker, (WalkerProtocol, _BaseControlFlowWalker)))
 
 
 if __name__ == '__main__':

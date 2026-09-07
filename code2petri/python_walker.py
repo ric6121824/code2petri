@@ -211,29 +211,30 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
                 current_place = merge_place
 
             elif isinstance(stmt, (ast.While, ast.For, ast.AsyncFor)):
-                loop_head = current_place
                 loop_trans = self.new_transition(
                     label=_format_statement_label(stmt),
                     line_number=stmt.lineno,
                 )
-                self.net.add_arc(source=loop_head, target=loop_trans)
-
                 else_lineno = stmt.orelse[0].lineno if stmt.orelse and hasattr(stmt.orelse[0], "lineno") else stmt.lineno
                 exit_label = "else" if stmt.orelse else "exit"
                 exit_trans = self.new_transition(
                     label=exit_label,
                     line_number=else_lineno,
                 )
-                self.net.add_arc(source=loop_head, target=exit_trans)
 
                 if is_last:
                     loop_exit = target_exit
                 else:
                     loop_exit = self.new_place(label=f"exit_{loop_trans.id}", line_number=stmt.lineno)
 
-                self.loop_stack.append(LoopContext(head=loop_head, exit=loop_exit))
-                self._walk_branch(stmt.body, loop_trans, loop_head, stmt.lineno)
-                self.loop_stack.pop()
+                self._wire_standard_loop(
+                    loop_head=current_place,
+                    loop_trans=loop_trans,
+                    exit_trans=exit_trans,
+                    loop_exit=loop_exit,
+                    body_stmts=stmt.body,
+                    lineno=stmt.lineno,
+                )
 
                 if stmt.orelse:
                     else_exit = self._walk_branch(stmt.orelse, exit_trans, loop_exit, else_lineno)
@@ -335,8 +336,15 @@ class _PythonControlFlowWalker(_BaseControlFlowWalker):
         return current_place
 
 
-class PythonWalker(WalkerProtocol):
-    """Python AST walker implementing WalkerProtocol."""
+class PythonWalker(WalkerProtocol, _BaseControlFlowWalker):
+    """Python AST walker implementing WalkerProtocol and inheriting _BaseControlFlowWalker."""
+
+    def __init__(
+        self,
+        net: Optional[PetriNet] = None,
+        end_place: Optional[Place] = None,
+    ) -> None:
+        super().__init__(net=net, end_place=end_place)
 
     def parse_file(self, filepath: str) -> ast.AST:
         """Parses a Python source file into an AST using code2flow's Python.get_tree."""
@@ -423,9 +431,25 @@ class PythonWalker(WalkerProtocol):
         return net
 
 
-_default_walker = PythonWalker()
-parse_file = _default_walker.parse_file
-find_function = _default_walker.find_function
-find_all_functions = _default_walker.find_all_functions
-walk_function = _default_walker.walk_function
+def walk_function(ast_node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> PetriNet:
+    """Walks a Python function definition AST and constructs a PetriNet model."""
+    return PythonWalker().walk_function(ast_node)
+
+
+def parse_file(filepath: str) -> ast.AST:
+    """Parses a Python source file into an AST."""
+    return Python.get_tree(filepath, None)
+
+
+def find_function(
+    tree: ast.AST,
+    func_name: str,
+) -> Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]]:
+    """Locates a function or method definition AST node by name within an AST."""
+    return PythonWalker().find_function(tree, func_name)
+
+
+def find_all_functions(tree: ast.AST) -> List[str]:
+    """Finds all function and method definition names within an AST."""
+    return PythonWalker().find_all_functions(tree)
 
