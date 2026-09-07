@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [x] `JavascriptWalker` class is implemented, inheriting from the ABC and `_BaseControlFlowWalker`.
+- [x] `JavascriptWalker` class is implemented, implementing `WalkerProtocol` and composing `ControlFlowBuilder`.
 - [x] `engine.py` correctly routes `.js` files to `JavascriptWalker`.
 - [x] `parse_file` delegates to `code2flow`'s `Javascript.get_tree()`, automatically supplying the required `LanguageParams(source_type="script")` configuration and caching the raw source text.
 - [x] `find_function` supports a synthetic `(global)` wrapper for top-level code.

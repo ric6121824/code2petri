@@ -6,9 +6,9 @@
 
 **Status:** ready-for-agent
 
-- [x] `WalkerProtocol` is defined as an `abc.ABC` with `parse_file`, `find_function`, `find_all_functions`, and `walk_function` instance methods.
-- [x] `_BaseControlFlowWalker` is created, encapsulating `place_counter`, `trans_counter`, `loop_stack`, `try_stack`, `new_place()`, and `new_transition()`.
-- [x] `PythonWalker` inherits from the new ABC and base class.
+- [x] `WalkerProtocol` is defined as an `abc.ABC` with `parse_file`, `find_function`, `find_all_functions`, `walk_function`, and `get_node_lineno` instance methods.
+- [x] `ControlFlowBuilder` is created, encapsulating `place_counter`, `trans_counter`, `loop_stack`, `try_stack`, `new_place()`, and `new_transition()`.
+- [x] `PythonWalker` implements `WalkerProtocol` and composes `ControlFlowBuilder`.
 - [x] Python's `find_all_functions` is updated to return qualified names for class methods (e.g., `Class.method` instead of just `method`).
 - [x] Shared structural assertions (e.g., `assert_has_start_and_end`) are extracted into `tests/petri_assertions.py`.
 - [x] `engine.py` instantiates the walker (`walker = WALKERS[ext]()`) rather than calling static methods.

@@ -4,8 +4,16 @@ To comply with the project architecture rule ('Avoid: walker base class'), langu
 walkers compose this builder internally rather than inheriting from a walker base class.
 """
 
-from typing import Optional, List, NamedTuple, Any
-from code2petri.model import PetriNet, Place, Transition
+from typing import Optional, List, NamedTuple, Any, Union
+from code2petri.model import PetriNet, Place, Transition, Arc
+
+
+class StatementContext(NamedTuple):
+    """Context information for walking a single statement within a block."""
+    current_place: Place
+    is_last: bool
+    target_exit: Place
+    lineno: Optional[int] = None
 
 
 class LoopContext(NamedTuple):
@@ -78,6 +86,22 @@ class ControlFlowBuilder:
             self.net.add_arc(source=trans, target=self.try_stack[-1].except_entry)
         return trans
 
+    def add_arc(
+        self,
+        source: Union[Place, Transition],
+        target: Union[Place, Transition],
+    ) -> Arc:
+        """Adds an arc between a place and transition."""
+        return self.net.add_arc(source=source, target=target)
+
+    def push_try(self, try_context: TryContext) -> None:
+        """Pushes a try context onto the try stack."""
+        self.try_stack.append(try_context)
+
+    def pop_try(self) -> Optional[TryContext]:
+        """Pops and returns the innermost try context, or None if empty."""
+        return self.try_stack.pop() if self.try_stack else None
+
     def walk_branch(
         self,
         statements: Any,
@@ -126,6 +150,21 @@ class ControlFlowBuilder:
         self.loop_stack.append(LoopContext(head=routing.head, exit=routing.exit_place))
         self.walk_branch(body_stmts, routing.loop_trans, routing.head, walk_block_fn, lineno)
         self.loop_stack.pop()
+
+    def wire_sequential_statement(
+        self,
+        current_place: Place,
+        label: str,
+        lineno: Optional[int],
+        is_last: bool,
+        target_exit: Place,
+    ) -> Place:
+        """Wires a standard sequential statement from current_place to next place."""
+        next_place = target_exit if is_last else self.new_place(line_number=lineno)
+        trans = self.new_transition(label=label, line_number=lineno)
+        self.net.add_arc(source=current_place, target=trans)
+        self.net.add_arc(source=trans, target=next_place)
+        return next_place
 
     def wire_return(
         self,
@@ -193,7 +232,7 @@ class ControlFlowBuilder:
         trans = self.new_transition(label=label, line_number=line_number)
         self.net.add_arc(source=current_place, target=trans)
         if not self.try_stack:
-            target = self.get_active_finally() or self.end_place
+            target = self.end_place
             if target is not None:
                 self.net.add_arc(source=trans, target=target)
         return trans

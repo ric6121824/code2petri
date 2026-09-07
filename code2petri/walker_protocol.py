@@ -5,7 +5,7 @@ from code2petri.model import PetriNet
 
 
 class WalkerProtocol(ABC):
-    """Protocol interface establishing the contract for language-specific AST walkers."""
+    """Walker protocol establishing the contract for language-specific AST walkers."""
 
     @abstractmethod
     def parse_file(self, filepath: str) -> Any:
