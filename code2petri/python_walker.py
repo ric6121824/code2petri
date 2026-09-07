@@ -164,42 +164,15 @@ class _PythonControlFlowWalker:
         return None
 
     def _walk_if(self, stmt: ast.If, ctx: StatementContext) -> Optional[Place]:
-        true_trans = self.builder.new_transition(
-            label=_format_statement_label(stmt),
-            line_number=stmt.lineno,
-        )
-        self.builder.add_arc(source=ctx.current_place, target=true_trans)
-
         else_lineno = _get_block_lineno(stmt.orelse, stmt.lineno)
-        false_trans = self.builder.new_transition(
-            label="else",
-            line_number=else_lineno,
-        )
-        self.builder.add_arc(source=ctx.current_place, target=false_trans)
-
-        merge_place = ctx.target_exit if ctx.is_last else self.builder.new_place(
-            label=f"merge_{true_trans.id}", line_number=stmt.lineno
-        )
-
-        true_exit = self.builder.walk_branch(
-            stmt.body,
-            source_transition=true_trans,
-            target_exit=merge_place,
+        return self.builder.wire_if_split(
+            ctx=ctx,
+            true_label=_format_statement_label(stmt),
+            consequent_stmts=stmt.body,
+            false_lineno=else_lineno,
+            alternate_stmts=stmt.orelse,
             walk_block_fn=self.walk_block,
-            line_number=stmt.lineno,
         )
-        false_exit = self.builder.walk_branch(
-            stmt.orelse,
-            source_transition=false_trans,
-            target_exit=merge_place,
-            walk_block_fn=self.walk_block,
-            line_number=else_lineno,
-        )
-
-        if true_exit is None and false_exit is None:
-            return None
-
-        return merge_place
 
     def _walk_loop(self, stmt: Union[ast.While, ast.For, ast.AsyncFor], ctx: StatementContext) -> Optional[Place]:
         loop_trans = self.builder.new_transition(
@@ -238,71 +211,29 @@ class _PythonControlFlowWalker:
             line_number=else_lineno,
         )
 
-        has_exit_inflow = any(arc.target == loop_exit for arc in self.builder.net.arcs)
+        has_exit_inflow = self.builder.has_incoming_arcs(loop_exit)
         if else_exit is None and not has_exit_inflow:
             return None
 
         return loop_exit
 
     def _walk_try(self, stmt: ast.Try, ctx: StatementContext) -> Optional[Place]:
-        except_entry = self.builder.new_place(label="except_entry", line_number=stmt.lineno)
-        try_exit = ctx.target_exit if ctx.is_last else self.builder.new_place(label="try_exit", line_number=stmt.lineno)
-
-        if stmt.finalbody:
-            finally_lineno = _get_block_lineno(stmt.finalbody, stmt.lineno)
-            finally_entry = self.builder.new_place(label="finally_entry", line_number=finally_lineno)
-            finally_target = finally_entry
-        else:
-            finally_entry = None
-            finally_target = try_exit
-
-        if stmt.orelse:
-            else_lineno = _get_block_lineno(stmt.orelse, stmt.lineno)
-            else_entry = self.builder.new_place(label="else_entry", line_number=else_lineno)
-            try_normal_exit = else_entry
-        else:
-            try_normal_exit = finally_target
-
-        self.builder.push_try(TryContext(
-            except_entry=except_entry,
-            finally_entry=finally_entry,
-            loop_depth=len(self.builder.loop_stack),
-        ))
-        self.walk_block(stmt.body, current_place=ctx.current_place, target_exit=try_normal_exit)
-        self.builder.pop_try()
-
-        if stmt.orelse:
-            self.walk_block(stmt.orelse, current_place=else_entry, target_exit=finally_target)
-
-        if stmt.handlers:
-            for handler in stmt.handlers:
-                h_label = _format_handler_label(handler)
-                h_trans = self.builder.new_transition(
-                    label=h_label,
-                    line_number=handler.lineno,
-                    hook_exception=False,
-                )
-                self.builder.add_arc(source=except_entry, target=h_trans)
-                self.builder.walk_branch(
-                    handler.body,
-                    source_transition=h_trans,
-                    target_exit=finally_target,
-                    walk_block_fn=self.walk_block,
-                    line_number=handler.lineno,
-                )
-        elif stmt.finalbody:
-            exc_trans = self.builder.new_transition(
-                label="exception",
-                line_number=stmt.lineno,
-                hook_exception=False,
-            )
-            self.builder.add_arc(source=except_entry, target=exc_trans)
-            self.builder.add_arc(source=exc_trans, target=finally_entry)
-
-        if stmt.finalbody:
-            self.walk_block(stmt.finalbody, current_place=finally_entry, target_exit=try_exit)
-
-        return try_exit
+        handlers = [
+            (_format_handler_label(handler), handler.lineno, handler.body)
+            for handler in stmt.handlers
+        ]
+        finally_lineno = _get_block_lineno(stmt.finalbody, stmt.lineno)
+        else_lineno = _get_block_lineno(stmt.orelse, stmt.lineno)
+        return self.builder.wire_try_catch(
+            ctx=ctx,
+            try_body=stmt.body,
+            handlers=handlers,
+            finally_stmts=stmt.finalbody,
+            finally_lineno=finally_lineno,
+            walk_block_fn=self.walk_block,
+            else_stmts=stmt.orelse,
+            else_lineno=else_lineno,
+        )
 
     def _walk_default(self, stmt: ast.stmt, ctx: StatementContext) -> Optional[Place]:
         label = _format_statement_label(stmt)
@@ -405,6 +336,7 @@ class PythonWalker(WalkerProtocol):
     def walk_function(
         self,
         ast_node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+        func_name: str = "",
     ) -> PetriNet:
         """Walks a Python function definition AST and constructs a PetriNet model."""
         if not isinstance(ast_node, (ast.FunctionDef, ast.AsyncFunctionDef)):

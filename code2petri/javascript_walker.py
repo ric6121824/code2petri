@@ -41,15 +41,21 @@ def _to_stmt_list(node: Any) -> List[dict]:
     return []
 
 
+def get_nested(d: Any, *keys: str, default: Any = None) -> Any:
+    """Safely traverses nested dictionaries along given keys."""
+    curr = d
+    for k in keys:
+        if not isinstance(curr, dict):
+            return default
+        curr = curr.get(k)
+    return curr if curr is not None else default
+
+
 def _get_node_lineno(node: Optional[dict], default: Optional[int] = None) -> Optional[int]:
     """Extracts start line number from AST node's location metadata."""
-    if isinstance(node, dict):
-        loc = node.get("loc")
-        if isinstance(loc, dict):
-            start = loc.get("start")
-            if isinstance(start, dict):
-                return start.get("line", default)
-    return default
+    if not isinstance(node, dict):
+        return default
+    return get_nested(node, "loc", "start", "line", default=default)
 
 
 def _get_block_lineno(stmts: List[dict], default: Optional[int] = None) -> Optional[int]:
@@ -61,20 +67,12 @@ def _get_block_lineno(stmts: List[dict], default: Optional[int] = None) -> Optio
 
 def _get_class_name(node: dict) -> str:
     """Extracts class name from ClassDeclaration node, defaulting to (anonymous_class)."""
-    cls_id = node.get("id")
-    if isinstance(cls_id, dict):
-        return cls_id.get("name") or "(anonymous_class)"
-    return "(anonymous_class)"
+    return get_nested(node, "id", "name", default="(anonymous_class)")
 
 
 def _get_class_body_elements(node: dict) -> List[dict]:
     """Extracts method/property elements from ClassDeclaration body."""
-    body_node = node.get("body")
-    if isinstance(body_node, dict):
-        elements = body_node.get("body")
-        if isinstance(elements, list):
-            return elements
-    return []
+    return get_nested(node, "body", "body", default=[])
 
 
 class _JavascriptControlFlowWalker:
@@ -239,7 +237,7 @@ class _JavascriptControlFlowWalker:
 
     def _format_var_decl(self, stmt: dict) -> str:
         decls = stmt.get("declarations", [])
-        if len(decls) == 1 and decls[0].get("init", {}).get("type") == "CallExpression":
+        if len(decls) == 1 and get_nested(decls[0], "init", "type") == "CallExpression":
             kind = stmt.get("kind", "let")
             var_name = self._slice(decls[0].get("id"))
             call_str = self._format_call_expression(decls[0]["init"])
@@ -397,44 +395,16 @@ class _JavascriptControlFlowWalker:
         stmt: dict,
         ctx: StatementContext,
     ) -> Optional[Place]:
-        true_trans = self.builder.new_transition(
-            label=self._format_statement_label(stmt),
-            line_number=ctx.lineno,
-        )
-        self.builder.add_arc(source=ctx.current_place, target=true_trans)
-
         alternate = stmt.get("alternate")
         else_lineno = self._get_lineno(alternate, ctx.lineno)
-        false_trans = self.builder.new_transition(
-            label="else",
-            line_number=else_lineno,
-        )
-        self.builder.add_arc(source=ctx.current_place, target=false_trans)
-
-        merge_place = ctx.target_exit if ctx.is_last else self.builder.new_place(label=f"merge_{true_trans.id}", line_number=ctx.lineno)
-
-        consequent_stmts = _to_stmt_list(stmt.get("consequent"))
-        true_exit = self.builder.walk_branch(
-            consequent_stmts,
-            source_transition=true_trans,
-            target_exit=merge_place,
+        return self.builder.wire_if_split(
+            ctx=ctx,
+            true_label=self._format_statement_label(stmt),
+            consequent_stmts=_to_stmt_list(stmt.get("consequent")),
+            false_lineno=else_lineno,
+            alternate_stmts=_to_stmt_list(alternate),
             walk_block_fn=self.walk_block,
-            line_number=ctx.lineno,
         )
-
-        alternate_stmts = _to_stmt_list(alternate)
-        false_exit = self.builder.walk_branch(
-            alternate_stmts,
-            source_transition=false_trans,
-            target_exit=merge_place,
-            walk_block_fn=self.walk_block,
-            line_number=else_lineno,
-        )
-
-        if true_exit is None and false_exit is None:
-            return None
-
-        return merge_place
 
     def _walk_standard_loop(
         self,
@@ -472,32 +442,12 @@ class _JavascriptControlFlowWalker:
         stmt: dict,
         ctx: StatementContext,
     ) -> Optional[Place]:
-        except_entry = self.builder.new_place(label="except_entry", line_number=ctx.lineno)
-        try_exit = ctx.target_exit if ctx.is_last else self.builder.new_place(label="try_exit", line_number=ctx.lineno)
-
         finalizer = stmt.get("finalizer")
-        if finalizer:
-            finally_lineno = self._get_lineno(finalizer, ctx.lineno)
-            finally_entry = self.builder.new_place(label="finally_entry", line_number=finally_lineno)
-            finally_target = finally_entry
-            finally_stmts = _to_stmt_list(finalizer)
-        else:
-            finally_entry = None
-            finally_target = try_exit
-            finally_stmts = []
-
-        try_normal_exit = finally_target
-
-        self.builder.push_try(TryContext(
-            except_entry=except_entry,
-            finally_entry=finally_entry,
-            loop_depth=len(self.builder.loop_stack),
-        ))
-        try_stmts = _to_stmt_list(stmt.get("block"))
-        self.walk_block(try_stmts, current_place=ctx.current_place, target_exit=try_normal_exit)
-        self.builder.pop_try()
+        finally_stmts = _to_stmt_list(finalizer) if finalizer else None
+        finally_lineno = self._get_lineno(finalizer, ctx.lineno) if finalizer else None
 
         handler = stmt.get("handler")
+        handlers = []
         if handler:
             handler_lineno = self._get_lineno(handler, ctx.lineno)
             param = handler.get("param")
@@ -506,34 +456,16 @@ class _JavascriptControlFlowWalker:
                 handler_label = f"catch ({param_str})"
             else:
                 handler_label = "catch"
+            handlers.append((handler_label, handler_lineno, _to_stmt_list(handler.get("body"))))
 
-            handler_trans = self.builder.new_transition(
-                label=handler_label,
-                line_number=handler_lineno,
-                hook_exception=False,
-            )
-            self.builder.add_arc(source=except_entry, target=handler_trans)
-            catch_stmts = _to_stmt_list(handler.get("body"))
-            self.builder.walk_branch(
-                catch_stmts,
-                source_transition=handler_trans,
-                target_exit=finally_target,
-                walk_block_fn=self.walk_block,
-                line_number=handler_lineno,
-            )
-        elif finalizer:
-            exc_trans = self.builder.new_transition(
-                label="exception",
-                line_number=ctx.lineno,
-                hook_exception=False,
-            )
-            self.builder.add_arc(source=except_entry, target=exc_trans)
-            self.builder.add_arc(source=exc_trans, target=finally_target)
-
-        if finalizer:
-            self.walk_block(finally_stmts, current_place=finally_entry, target_exit=try_exit)
-
-        return try_exit
+        return self.builder.wire_try_catch(
+            ctx=ctx,
+            try_body=_to_stmt_list(stmt.get("block")),
+            handlers=handlers,
+            finally_stmts=finally_stmts,
+            finally_lineno=finally_lineno,
+            walk_block_fn=self.walk_block,
+        )
 
     def _walk_switch(
         self,
@@ -543,7 +475,7 @@ class _JavascriptControlFlowWalker:
         decision_place = ctx.current_place
         switch_exit = ctx.target_exit if ctx.is_last else self.builder.new_place(label="exit_switch", line_number=ctx.lineno)
 
-        self.builder.loop_stack.append(LoopContext(head=None, exit=switch_exit))
+        self.builder.push_loop(head=None, exit=switch_exit)
         cases = stmt.get("cases", [])
         has_default = any(case.get("test") is None for case in cases)
 
@@ -551,7 +483,7 @@ class _JavascriptControlFlowWalker:
             default_trans = self.builder.new_transition(label="default", line_number=ctx.lineno)
             self.builder.add_arc(source=decision_place, target=default_trans)
             self.builder.add_arc(source=default_trans, target=switch_exit)
-            self.builder.loop_stack.pop()
+            self.builder.pop_loop()
             return switch_exit
 
         case_entry_places: List[Place] = []
@@ -590,9 +522,9 @@ class _JavascriptControlFlowWalker:
             else:
                 self.walk_block(case_body, current_place=case_entry, target_exit=next_target)
 
-        self.builder.loop_stack.pop()
+        self.builder.pop_loop()
 
-        incoming_to_exit = any(a.target == switch_exit for a in self.builder.net.arcs)
+        incoming_to_exit = self.builder.has_incoming_arcs(switch_exit)
         if not incoming_to_exit:
             return None
 
@@ -609,10 +541,10 @@ class _JavascriptControlFlowWalker:
         check_place = self.builder.new_place(label="check_do_while", line_number=test_lineno)
         loop_exit = ctx.target_exit if ctx.is_last else self.builder.new_place(label="exit_do_while", line_number=ctx.lineno)
 
-        self.builder.loop_stack.append(LoopContext(head=check_place, exit=loop_exit))
+        self.builder.push_loop(head=check_place, exit=loop_exit)
         body_stmts = _to_stmt_list(stmt.get("body"))
         self.walk_block(body_stmts, current_place=body_head, target_exit=check_place)
-        self.builder.loop_stack.pop()
+        self.builder.pop_loop()
 
         cond_label = self._format_do_while(stmt)
         cond_trans = self.builder.new_transition(label=cond_label, line_number=test_lineno)
@@ -702,7 +634,6 @@ class JavascriptWalker(WalkerProtocol):
     def __init__(self) -> None:
         self.raw_source: str = ""
         self.tree: Optional[dict] = None
-        self._func_name_cache: dict[int, str] = {}
 
     def get_node_lineno(self, ast_node: Any) -> int:
         """Returns the start line number for a JavaScript AST node, defaulting to 0."""
@@ -762,12 +693,15 @@ class JavascriptWalker(WalkerProtocol):
                     cls_qual = f"{'.'.join(scope)}.{cls_name}" if scope else cls_name
                     for elem in body:
                         if elem.get("type") == "MethodDefinition":
-                            key = elem.get("key", {}).get("name")
+                            key = get_nested(elem, "key", "name")
                             if not key and "key" in elem:
                                 key = self._slice_node(elem["key"])
                             val = elem.get("value", {})
                             lineno = _get_node_lineno(elem) or _get_node_lineno(val, 0)
                             qual_name = f"{cls_qual}.{key}"
+                            if isinstance(val, dict):
+                                val["_qual_name"] = qual_name
+                                val["_bare_name"] = key
                             results.append(FunctionInfo(
                                 qual_name=qual_name,
                                 bare_name=key,
@@ -788,6 +722,9 @@ class JavascriptWalker(WalkerProtocol):
                     else:
                         qual_name = f"{'.'.join(scope)}.(anonymous@{lineno})" if scope else f"(anonymous@{lineno})"
                         bare_name = f"(anonymous@{lineno})"
+
+                    node["_qual_name"] = qual_name
+                    node["_bare_name"] = bare_name
 
                     results.append(FunctionInfo(
                         qual_name=qual_name,
@@ -838,7 +775,6 @@ class JavascriptWalker(WalkerProtocol):
                     "body": executable_stmts,
                 },
             }
-            self._func_name_cache[id(wrapper)] = "(global)"
             return wrapper
 
         collected = self._collect_all_functions(tree)
@@ -846,40 +782,39 @@ class JavascriptWalker(WalkerProtocol):
         # 1. Exact match on qualified name
         for item in collected:
             if item.qual_name == func_name:
-                self._func_name_cache[id(item.node)] = item.qual_name
                 return item.node
 
         # 2. Exact match on bare name
         for item in collected:
             if item.bare_name == func_name:
-                self._func_name_cache[id(item.node)] = item.qual_name
                 return item.node
 
         # 3. Anonymous callback substring match (e.g. (anonymous@151) in qual_name)
         if "(anonymous@" in func_name:
             for item in collected:
                 if func_name in item.qual_name or func_name in item.bare_name:
-                    self._func_name_cache[id(item.node)] = item.qual_name
                     return item.node
 
         return None
 
-    def walk_function(self, ast_node: dict, func_name: Optional[str] = None) -> PetriNet:
+    def walk_function(self, ast_node: dict, func_name: str = "") -> PetriNet:
         """Walks a JavaScript function AST node and constructs a PetriNet model."""
         if not isinstance(ast_node, dict):
             raise TypeError(f"walk_function expects a dict AST node, got {type(ast_node).__name__}")
 
         if ast_node.get("type") == "MethodDefinition":
             func_node = ast_node.get("value", {})
-            if func_name is None and ast_node.get("key"):
-                func_name = ast_node["key"].get("name")
+            if not func_name:
+                func_name = ast_node.get("_qual_name") or get_nested(ast_node, "key", "name", default="")
         else:
             func_node = ast_node
 
-        if func_name is None:
-            func_name = self._func_name_cache.get(id(func_node)) or self._func_name_cache.get(id(ast_node))
-            if func_name is None and func_node.get("id"):
-                func_name = func_node["id"].get("name")
+        if not func_name:
+            func_name = (
+                ast_node.get("_qual_name")
+                or get_nested(func_node, "_qual_name", default="")
+                or get_nested(func_node, "id", "name", default="")
+            )
 
         net = PetriNet()
         start_lineno = _get_node_lineno(func_node) or _get_node_lineno(ast_node, 1)
@@ -919,7 +854,7 @@ class JavascriptWalker(WalkerProtocol):
             builder=builder,
             start_place=start_place,
             raw_source=self.raw_source,
-            func_name=func_name,
+            func_name=func_name or None,
         )
         walker.walk_block(statements, current_place=start_place, target_exit=end_place)
 

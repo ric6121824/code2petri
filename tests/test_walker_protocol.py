@@ -39,7 +39,7 @@ class TestWalkerProtocolABC(unittest.TestCase):
             def find_all_functions(self, tree):
                 return []
 
-            def walk_function(self, ast_node):
+            def walk_function(self, ast_node, func_name=""):
                 return PetriNet()
 
             def get_node_lineno(self, ast_node):
@@ -83,6 +83,22 @@ class TestControlFlowBuilder(unittest.TestCase):
         t3 = self.builder.new_transition("no_hook", line_number=7, hook_exception=False)
         no_hook_arcs = [a for a in self.net.arcs if a.source == t3]
         self.assertEqual(len(no_hook_arcs), 0)
+
+    def test_loop_stack_helpers_and_incoming_arcs(self):
+        head = self.builder.new_place("head")
+        exit_p = self.builder.new_place("exit")
+        self.builder.push_loop(head=head, exit=exit_p)
+        self.assertEqual(len(self.builder.loop_stack), 1)
+        self.assertFalse(self.builder.has_incoming_arcs(head))
+
+        trans = self.builder.new_transition("step")
+        self.builder.add_arc(trans, head)
+        self.assertTrue(self.builder.has_incoming_arcs(head))
+
+        popped = self.builder.pop_loop()
+        self.assertIsNotNone(popped)
+        self.assertEqual(popped.head, head)
+        self.assertEqual(len(self.builder.loop_stack), 0)
 
 
 class TestPythonWalkerProtocolAndQualifiedNames(unittest.TestCase):

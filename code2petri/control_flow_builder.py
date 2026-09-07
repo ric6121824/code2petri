@@ -4,7 +4,7 @@ To comply with the project architecture rule ('Avoid: walker base class'), langu
 walkers compose this builder internally rather than inheriting from a walker base class.
 """
 
-from typing import Optional, List, NamedTuple, Any, Union
+from typing import Optional, List, NamedTuple, Any, Union, Tuple
 from code2petri.model import PetriNet, Place, Transition, Arc
 
 
@@ -102,6 +102,18 @@ class ControlFlowBuilder:
         """Pops and returns the innermost try context, or None if empty."""
         return self.try_stack.pop() if self.try_stack else None
 
+    def push_loop(self, head: Optional[Place], exit: Place) -> None:
+        """Pushes a loop context onto the loop stack."""
+        self.loop_stack.append(LoopContext(head=head, exit=exit))
+
+    def pop_loop(self) -> Optional[LoopContext]:
+        """Pops and returns the innermost loop context, or None if empty."""
+        return self.loop_stack.pop() if self.loop_stack else None
+
+    def has_incoming_arcs(self, node: Union[Place, Transition]) -> bool:
+        """Returns True if any arc in the net has node as its target."""
+        return any(arc.target == node for arc in self.net.arcs)
+
     def walk_branch(
         self,
         statements: Any,
@@ -165,6 +177,122 @@ class ControlFlowBuilder:
         self.net.add_arc(source=current_place, target=trans)
         self.net.add_arc(source=trans, target=next_place)
         return next_place
+
+    def wire_if_split(
+        self,
+        ctx: StatementContext,
+        true_label: str,
+        consequent_stmts: Any,
+        false_lineno: Optional[int],
+        alternate_stmts: Any,
+        walk_block_fn: Any,
+        false_label: str = "else",
+    ) -> Optional[Place]:
+        """Wires an if/else XOR branching split and merges paths."""
+        true_trans = self.new_transition(
+            label=true_label,
+            line_number=ctx.lineno,
+        )
+        self.add_arc(source=ctx.current_place, target=true_trans)
+
+        false_trans = self.new_transition(
+            label=false_label,
+            line_number=false_lineno,
+        )
+        self.add_arc(source=ctx.current_place, target=false_trans)
+
+        merge_place = ctx.target_exit if ctx.is_last else self.new_place(
+            label=f"merge_{true_trans.id}", line_number=ctx.lineno
+        )
+
+        true_exit = self.walk_branch(
+            consequent_stmts,
+            source_transition=true_trans,
+            target_exit=merge_place,
+            walk_block_fn=walk_block_fn,
+            line_number=ctx.lineno,
+        )
+        false_exit = self.walk_branch(
+            alternate_stmts,
+            source_transition=false_trans,
+            target_exit=merge_place,
+            walk_block_fn=walk_block_fn,
+            line_number=false_lineno,
+        )
+
+        if true_exit is None and false_exit is None:
+            return None
+
+        return merge_place
+
+    def wire_try_catch(
+        self,
+        ctx: StatementContext,
+        try_body: Any,
+        handlers: List[Tuple[str, Optional[int], Any]],
+        finally_stmts: Optional[Any],
+        finally_lineno: Optional[int],
+        walk_block_fn: Any,
+        else_stmts: Optional[Any] = None,
+        else_lineno: Optional[int] = None,
+    ) -> Place:
+        """Wires try/catch/else/finally exception handling constructs."""
+        except_entry = self.new_place(label="except_entry", line_number=ctx.lineno)
+        try_exit = ctx.target_exit if ctx.is_last else self.new_place(label="try_exit", line_number=ctx.lineno)
+
+        if finally_stmts:
+            finally_entry = self.new_place(label="finally_entry", line_number=finally_lineno)
+            finally_target = finally_entry
+        else:
+            finally_entry = None
+            finally_target = try_exit
+
+        if else_stmts:
+            else_entry = self.new_place(label="else_entry", line_number=else_lineno)
+            try_normal_exit = else_entry
+        else:
+            else_entry = None
+            try_normal_exit = finally_target
+
+        self.push_try(TryContext(
+            except_entry=except_entry,
+            finally_entry=finally_entry,
+            loop_depth=len(self.loop_stack),
+        ))
+        walk_block_fn(try_body, current_place=ctx.current_place, target_exit=try_normal_exit)
+        self.pop_try()
+
+        if else_stmts and else_entry is not None:
+            walk_block_fn(else_stmts, current_place=else_entry, target_exit=finally_target)
+
+        if handlers:
+            for h_label, h_lineno, h_body in handlers:
+                h_trans = self.new_transition(
+                    label=h_label,
+                    line_number=h_lineno,
+                    hook_exception=False,
+                )
+                self.add_arc(source=except_entry, target=h_trans)
+                self.walk_branch(
+                    h_body,
+                    source_transition=h_trans,
+                    target_exit=finally_target,
+                    walk_block_fn=walk_block_fn,
+                    line_number=h_lineno,
+                )
+        elif finally_stmts:
+            exc_trans = self.new_transition(
+                label="exception",
+                line_number=ctx.lineno,
+                hook_exception=False,
+            )
+            self.add_arc(source=except_entry, target=exc_trans)
+            self.add_arc(source=exc_trans, target=finally_target)
+
+        if finally_stmts and finally_entry is not None:
+            walk_block_fn(finally_stmts, current_place=finally_entry, target_exit=try_exit)
+
+        return try_exit
 
     def wire_return(
         self,

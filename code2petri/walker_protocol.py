@@ -23,7 +23,7 @@ class WalkerProtocol(ABC):
         ...
 
     @abstractmethod
-    def walk_function(self, ast_node: Any) -> PetriNet:
+    def walk_function(self, ast_node: Any, func_name: str = "") -> PetriNet:
         """Walks a function/method AST node and constructs a PetriNet model."""
         ...
 
