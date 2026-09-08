@@ -1,0 +1,52 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="merge_t1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="merge_t4"];
+    "p4" [shape=circle, label="p4"];
+    "p5" [shape=circle, label="merge_t6"];
+    "p6" [shape=circle, label="p6"];
+    "p7" [shape=circle, label="p7"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (!isRunning) (line 113)"];
+    "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 113)"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="return (line 113)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (timestamp - lastFrameTime > speed) (line 115)"];
+    "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 115)"];
+    "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (mode === 'gpu') (line 116)"];
+    "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 118)"];
+    "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: gpuEngine.step() (line 117)"];
+    "t9" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: stepCpu() (line 119)"];
+    "t10" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="lastFrameTime = timestamp (line 121)"];
+    "t11" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="animationId = call: requestAnimationFrame() (line 124)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "p0" -> "t2";
+    "t1" -> "p2";
+    "p2" -> "t3";
+    "t3" -> "p_end";
+    "t2" -> "p1";
+    "p1" -> "t4";
+    "p1" -> "t5";
+    "t4" -> "p4";
+    "p4" -> "t6";
+    "p4" -> "t7";
+    "t6" -> "p6";
+    "p6" -> "t8";
+    "t8" -> "p5";
+    "t7" -> "p7";
+    "p7" -> "t9";
+    "t9" -> "p5";
+    "p5" -> "t10";
+    "t10" -> "p3";
+    "t5" -> "p3";
+    "p3" -> "t11";
+    "t11" -> "p0";
+    "t11" -> "p_end";
+}

@@ -1,0 +1,70 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="exit_t2"];
+    "p3" [shape=circle, label="p3"];
+    "p4" [shape=circle, label="p4"];
+    "p5" [shape=circle, label="p5"];
+    "p6" [shape=circle, label="p6"];
+    "p7" [shape=circle, label="p7"];
+    "p8" [shape=circle, label="p8"];
+    "p9" [shape=circle, label="p9"];
+    "p10" [shape=circle, label="p10"];
+    "p11" [shape=circle, label="p11"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let nextGrid = call: createGrid() (line 92)"];
+    "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="for (let i = 0; i < ROWS; i++) (line 94)"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="exit (line 94)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="for (let j = 0; j < COLS; j++) (line 95)"];
+    "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="exit (line 95)"];
+    "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let state = grid[i][j] (line 96)"];
+    "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let neighbors = call: countNeighbors() (line 97)"];
+    "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (state === 0 && neighbors === 3) (line 99)"];
+    "t9" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 101)"];
+    "t10" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="nextGrid[i][j] = 1 (line 100)"];
+    "t11" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (state === 1 && (neighbors < 2 || neighbors > 3)) (line 101)"];
+    "t12" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 103)"];
+    "t13" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="nextGrid[i][j] = 0 (line 102)"];
+    "t14" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="nextGrid[i][j] = state (line 104)"];
+    "t15" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="grid = nextGrid (line 108)"];
+    "t16" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: drawCpuGrid() (line 109)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p1";
+    "p1" -> "t2";
+    "p1" -> "t3";
+    "t2" -> "p3";
+    "p3" -> "t4";
+    "p3" -> "t5";
+    "t4" -> "p4";
+    "p4" -> "t6";
+    "t6" -> "p5";
+    "p5" -> "t7";
+    "t7" -> "p6";
+    "p6" -> "t8";
+    "p6" -> "t9";
+    "t8" -> "p7";
+    "p7" -> "t10";
+    "t10" -> "p3";
+    "t9" -> "p8";
+    "p8" -> "t11";
+    "p8" -> "t12";
+    "t11" -> "p9";
+    "p9" -> "t13";
+    "t13" -> "p3";
+    "t12" -> "p10";
+    "p10" -> "t14";
+    "t14" -> "p3";
+    "t5" -> "p1";
+    "t3" -> "p2";
+    "p2" -> "t15";
+    "t15" -> "p11";
+    "p11" -> "t16";
+    "t16" -> "p_end";
+}
