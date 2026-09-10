@@ -12,7 +12,6 @@ from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
 from tests.petri_assertions import walk_net  # noqa: E402
 
 walker = PythonWalker()
-walk_function = lambda *args, **kwargs: walk_net(walker, *args, **kwargs)
 parse_file = walker.parse_file
 find_function = walker.find_function
 
@@ -32,7 +31,7 @@ class TestIfElseBranching(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_if_else_counts(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
         # 5 transitions: t_true_cond(if x > 0), t_true_body(y = 1),
         #                t_false_cond(else), t_false_body(y = 2), t_ret(return y)
@@ -43,7 +42,7 @@ class TestIfElseBranching(unittest.TestCase):
         self.assertEqual(len(net.arcs), 10)
 
     def test_fork_and_merge_structure(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         # Decision place (start place p0)
         start_place = next(p for p in net.places if p.initial_tokens == 1)
@@ -101,7 +100,7 @@ class TestIfElseBranching(unittest.TestCase):
 
     def test_choice_semantics_and_mutual_exclusion(self):
         """Verifies standard Petri net XOR-split: 1 decision place, 2 competing transitions, each with 1 output."""
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         start_place = next(p for p in net.places if p.initial_tokens == 1)
         competing_transitions = [a.target for a in net.arcs if a.source == start_place]
@@ -137,7 +136,7 @@ class TestIfNoElseBranching(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_if_no_else_counts(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
         # 5 transitions: y=0, if x > 0, y=1, else, return y
         self.assertEqual(len(net.transitions), 5)
@@ -147,7 +146,7 @@ class TestIfNoElseBranching(unittest.TestCase):
         self.assertEqual(len(net.arcs), 10)
 
     def test_false_branch_skips_directly_to_merge(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         # Transition for y = 0 feeds the decision place
         t_y0 = next(t for t in net.transitions if "y = 0" in t.label)
@@ -205,7 +204,7 @@ class TestIfElifElseBranching(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_if_elif_else_counts(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
         # 8 transitions:
         #   Outer if: t_if1(if x > 0), t_else1(else)
@@ -221,7 +220,7 @@ class TestIfElifElseBranching(unittest.TestCase):
         self.assertEqual(len(net.arcs), 16)
 
     def test_cascading_elif_and_shared_merge(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         start_place = next(p for p in net.places if p.initial_tokens == 1)
 

@@ -68,6 +68,7 @@ class Transition:
         line_number: Optional[int] = None,
         id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        resolution: Optional[CallResolution] = None,
     ) -> None:
         node_id = id if id is not None else id_
         if node_id is None:
@@ -76,17 +77,24 @@ class Transition:
         self.label = str(label)
         self.line_number = line_number
         self.metadata: Optional[Dict[str, Any]] = dict(metadata) if metadata is not None else None
+        if resolution is not None:
+            self.resolution: Optional[CallResolution] = resolution
+        elif self.metadata is not None:
+            self.resolution = CallResolution.from_metadata(self.metadata)
+        else:
+            self.resolution = None
 
     @property
     def call_resolution(self) -> Optional[CallResolution]:
-        """Returns typed CallResolution if call resolution metadata is present."""
-        return CallResolution.from_metadata(self.metadata)
+        """Returns typed CallResolution if call resolution is present."""
+        return self.resolution
 
     def __repr__(self) -> str:
         metadata_str = f", metadata={self.metadata!r}" if self.metadata is not None else ""
+        res_str = f", resolution={self.resolution!r}" if self.resolution is not None else ""
         return (
             f"Transition(id={self.id!r}, label={self.label!r}, "
-            f"line_number={self.line_number!r}{metadata_str})"
+            f"line_number={self.line_number!r}{metadata_str}{res_str})"
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -98,53 +106,43 @@ class Transition:
         }
         if self.metadata is not None:
             d["metadata"] = dict(self.metadata)
-            res = self.call_resolution
-            if res is not None:
-                d["resolved"] = res.resolved
-                if res.resolved_to is not None:
-                    d["resolved_to"] = res.resolved_to
-                if res.target_file is not None:
-                    d["target_file"] = res.target_file
-            else:
-                if "resolved_to" in self.metadata:
-                    d["resolved_to"] = self.metadata["resolved_to"]
-                if "target_file" in self.metadata:
-                    d["target_file"] = self.metadata["target_file"]
+        if self.resolution is not None:
+            d["resolved"] = self.resolution.resolved
+            if self.resolution.resolved_to is not None:
+                d["resolved_to"] = self.resolution.resolved_to
+            if self.resolution.target_file is not None:
+                d["target_file"] = self.resolution.target_file
         return d
 
     def add_pnml_toolspecific(self, parent_element: ET.Element) -> Optional[ET.Element]:
         """Appends <toolspecific> XML element with metadata properties to parent_element."""
-        if not self.metadata:
+        if not self.metadata and self.resolution is None:
             return None
         tool_el = ET.SubElement(parent_element, "toolspecific", tool="code2petri", version="1.0")
-        res = self.call_resolution
-        if res is not None:
-            if res.resolved:
-                target = str(res.resolved_to or "")
-                target_file = str(res.target_file or "")
+        if self.resolution is not None:
+            if self.resolution.resolved:
+                target = str(self.resolution.resolved_to or "")
+                target_file = str(self.resolution.target_file or "")
                 ET.SubElement(tool_el, "resolved", target=target, file=target_file)
             else:
                 ET.SubElement(tool_el, "unresolved")
 
         # Emit any other custom properties
         skip_keys = {"resolved", "resolved_to", "target_file"}
-        for k, v in self.metadata.items():
-            if k not in skip_keys:
-                ET.SubElement(tool_el, "property", name=str(k), value=str(v))
+        if self.metadata:
+            for k, v in self.metadata.items():
+                if k not in skip_keys:
+                    ET.SubElement(tool_el, "property", name=str(k), value=str(v))
         return tool_el
 
     def get_dot_attributes(self) -> Dict[str, str]:
-        """Returns Graphviz DOT attributes specific to this transition based on metadata."""
+        """Returns Graphviz DOT attributes specific to this transition based on resolution and metadata."""
         attrs: Dict[str, str] = {}
-        if not self.metadata:
-            return attrs
-
-        res = self.call_resolution
-        if res is not None:
-            if res.resolved:
+        if self.resolution is not None:
+            if self.resolution.resolved:
                 attrs["color"] = "#2e7d32"
-                target = res.resolved_to or ""
-                target_file = res.target_file or ""
+                target = self.resolution.resolved_to or ""
+                target_file = self.resolution.target_file or ""
                 tooltip_text = f"Resolved to {target} in {target_file}" if target_file else f"Resolved to {target}"
                 attrs["tooltip"] = tooltip_text
             else:
@@ -153,11 +151,13 @@ class Transition:
 
         # Tooltip fallback for generic metadata if not already set by call resolution
         if "tooltip" not in attrs:
-            if "tooltip" in self.metadata:
+            if self.metadata and "tooltip" in self.metadata:
                 attrs["tooltip"] = str(self.metadata["tooltip"])
             elif self.metadata:
-                items_str = ", ".join(f"{k}={v}" for k, v in self.metadata.items())
-                attrs["tooltip"] = items_str
+                skip_keys = {"resolved", "resolved_to", "target_file"}
+                items = [f"{k}={v}" for k, v in self.metadata.items() if k not in skip_keys]
+                if items:
+                    attrs["tooltip"] = ", ".join(items)
 
         return attrs
 
@@ -238,6 +238,7 @@ class PetriNet:
         line_number: Optional[int] = None,
         id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        resolution: Optional[CallResolution] = None,
     ) -> Transition:
         node_id = id if id is not None else id_
         transition = Transition(
@@ -245,6 +246,7 @@ class PetriNet:
             label=label,
             line_number=line_number,
             metadata=metadata,
+            resolution=resolution,
         )
         self.transitions.append(transition)
         return transition

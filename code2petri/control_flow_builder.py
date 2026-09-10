@@ -4,8 +4,8 @@ To comply with the project architecture rule ('Avoid: walker base class'), langu
 walkers compose this builder internally rather than inheriting from a walker base class.
 """
 
-from typing import Optional, List, NamedTuple, Any, Union, Tuple
-from code2petri.model import PetriNet, Place, Transition, Arc
+from typing import Optional, List, NamedTuple, Any, Union, Tuple, Dict
+from code2petri.model import PetriNet, Place, Transition, Arc, CallResolution
 
 
 class StatementContext(NamedTuple):
@@ -74,6 +74,7 @@ class ControlFlowBuilder:
         line_number: Optional[int] = None,
         hook_exception: bool = True,
         metadata: Optional[Dict[str, Any]] = None,
+        resolution: Optional[CallResolution] = None,
     ) -> Transition:
         """Creates and registers a new Transition with auto-incremented ID, hooking into try_stack if active."""
         self.trans_counter += 1
@@ -83,6 +84,7 @@ class ControlFlowBuilder:
             label=label,
             line_number=line_number,
             metadata=metadata,
+            resolution=resolution,
         )
         if hook_exception and self.try_stack:
             self.net.add_arc(source=trans, target=self.try_stack[-1].except_entry)

@@ -12,7 +12,6 @@ from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
 from tests.petri_assertions import walk_net  # noqa: E402
 
 walker = PythonWalker()
-walk_function = lambda *args, **kwargs: walk_net(walker, *args, **kwargs)
 parse_file = walker.parse_file
 find_function = walker.find_function
 
@@ -32,7 +31,7 @@ class TestTryExcept(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_try_except_counts(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
         # 6 transitions: a = 1, b = a + 1, c = b * 2, except, c = 0, return c
         self.assertEqual(len(net.transitions), 6)
@@ -42,7 +41,7 @@ class TestTryExcept(unittest.TestCase):
         self.assertEqual(len(net.arcs), 14)
 
     def test_exception_arcs_from_try_body_transitions(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         # Locate except_entry place
         p_except = next(p for p in net.places if "except_entry" in p.label)
@@ -59,7 +58,7 @@ class TestTryExcept(unittest.TestCase):
         self.assertIn(p_except, t_c_targets)
 
     def test_except_handler_and_merge(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         p_except = next(p for p in net.places if "except_entry" in p.label)
 
@@ -99,7 +98,7 @@ class TestTryExceptFinally(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_try_except_finally_counts(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
         # 6 transitions: x = 10, x = x + 1, except Exception as e, x = -1, x = x * 2, return x
         self.assertEqual(len(net.transitions), 6)
@@ -109,7 +108,7 @@ class TestTryExceptFinally(unittest.TestCase):
         self.assertEqual(len(net.arcs), 13)
 
     def test_finally_mandatory_convergence(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         p_finally = next(p for p in net.places if "finally_entry" in p.label)
         p_except = next(p for p in net.places if "except_entry" in p.label)
@@ -151,7 +150,7 @@ class TestTryMultiExcept(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_multi_except_counts(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
         # 9 transitions: val = 0, val = 1, except ValueError, val = 2, except TypeError, val = 3, except, val = 4, return val
         self.assertEqual(len(net.transitions), 9)
@@ -161,7 +160,7 @@ class TestTryMultiExcept(unittest.TestCase):
         self.assertEqual(len(net.arcs), 19)
 
     def test_parallel_except_paths(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         p_except = next(p for p in net.places if "except_entry" in p.label)
 
@@ -205,7 +204,7 @@ class TestTryElseAndNesting(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_try_else_flow(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         p_else = next(p for p in net.places if "else_entry" in p.label)
         p_finally = next(p for p in net.places if "finally_entry" in p.label)
@@ -246,7 +245,7 @@ class TestTryElseAndNesting(unittest.TestCase):
         )
         tree = ast.parse(code)
         func = tree.body[0]
-        net = walk_function(func)
+        net = walk_net(walker, func)
 
         # Identify the two except_entry places
         except_places = [p for p in net.places if "except_entry" in p.label]
@@ -282,7 +281,7 @@ class TestTryElseAndNesting(unittest.TestCase):
         )
         tree = ast.parse(code)
         func = tree.body[0]
-        net = walk_function(func)
+        net = walk_net(walker, func)
 
         p_except = next(p for p in net.places if p.label == "except_entry")
         p_finally = next(p for p in net.places if p.label == "finally_entry")
@@ -302,7 +301,7 @@ class TestTryElseAndNesting(unittest.TestCase):
         )
         tree = ast.parse(code)
         func = tree.body[0]
-        net = walk_function(func)
+        net = walk_net(walker, func)
 
         p_finally = next(p for p in net.places if p.label == "finally_entry")
         t_ret = next(t for t in net.transitions if "return" in t.label)

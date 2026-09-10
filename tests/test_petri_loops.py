@@ -12,7 +12,6 @@ from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
 from tests.petri_assertions import walk_net  # noqa: E402
 
 walker = PythonWalker()
-walk_function = lambda *args, **kwargs: walk_net(walker, *args, **kwargs)
 parse_file = walker.parse_file
 find_function = walker.find_function
 
@@ -62,7 +61,7 @@ class TestWhileLoop(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_while_loop_counts(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
         # 5 transitions: count = 0, while count < 10, count = count + 1, else, return count
         self.assertEqual(len(net.transitions), 5)
@@ -72,7 +71,7 @@ class TestWhileLoop(unittest.TestCase):
         self.assertEqual(len(net.arcs), 10)
 
     def test_while_loop_cycle_and_xor_split(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         # Transition for count = 0 leads to the loop head place
         t_init = next(t for t in net.transitions if "count = 0" in t.label)
@@ -140,7 +139,7 @@ class TestForLoop(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_for_loop_counts(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
         # 6 transitions: total = 0, items = [1, 2, 3], for item in items, else, total = total + item, return total
         self.assertEqual(len(net.transitions), 6)
@@ -150,7 +149,7 @@ class TestForLoop(unittest.TestCase):
         self.assertEqual(len(net.arcs), 12)
 
     def test_for_loop_cycle_and_xor_split(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         # Transition for items = [1, 2, 3] leads to loop head place
         t_items = next(t for t in net.transitions if "items = [1, 2, 3]" in t.label)
@@ -218,14 +217,14 @@ class TestLoopBreakContinue(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_break_continue_counts(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
         self.assertEqual(len(net.transitions), 11)
         self.assertEqual(len(net.places), 9)
         self.assertEqual(len(net.arcs), 22)
 
     def test_break_and_continue_targets(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
 
         t_while = next(t for t in net.transitions if "while i < 10" in t.label)
         loop_head = [a.source for a in net.arcs if a.target == t_while][0]
@@ -253,7 +252,7 @@ class TestLoopBreakContinue(unittest.TestCase):
         tree = ast.parse(code)
         func = tree.body[0]
         with self.assertRaises(SyntaxError):
-            walk_function(func)
+            walk_net(walker, func)
 
     def test_continue_outside_loop_raises(self):
         code = "def bad():\n    continue\n"
@@ -261,7 +260,7 @@ class TestLoopBreakContinue(unittest.TestCase):
         tree = ast.parse(code)
         func = tree.body[0]
         with self.assertRaises(SyntaxError):
-            walk_function(func)
+            walk_net(walker, func)
 
     def test_nested_loops_break_continue(self):
         code = (
@@ -281,7 +280,7 @@ class TestLoopBreakContinue(unittest.TestCase):
         import ast
         tree = ast.parse(code)
         func = tree.body[0]
-        net = walk_function(func)
+        net = walk_net(walker, func)
 
         # Outer while and inner while
         t_out_while = next(t for t in net.transitions if "while out < 5" in t.label)
@@ -331,7 +330,7 @@ class TestLoopElse(unittest.TestCase):
         self.assertIsNotNone(self.for_func)
 
     def test_while_else_structure(self):
-        net = walk_function(self.while_func)
+        net = walk_net(walker, self.while_func)
         t_while = next(t for t in net.transitions if "while i < 3" in t.label)
         loop_head = [a.source for a in net.arcs if a.target == t_while][0]
 
@@ -360,7 +359,7 @@ class TestLoopElse(unittest.TestCase):
         self.assertEqual([a.source for a in net.arcs if a.target == t_ret], [loop_exit])
 
     def test_for_else_structure(self):
-        net = walk_function(self.for_func)
+        net = walk_net(walker, self.for_func)
         t_for = next(t for t in net.transitions if "for item in items" in t.label)
         loop_head = [a.source for a in net.arcs if a.target == t_for][0]
 

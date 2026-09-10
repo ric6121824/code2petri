@@ -500,7 +500,52 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         self.assertEqual(tool_el.attrib.get("tool"), "code2petri")
         res_el = [el for el in tool_el.iter() if el.tag.endswith("resolved")]
         self.assertEqual(len(res_el), 1)
-        self.assertEqual(res_el[0].attrib.get("target"), "Worker.process")
+    def test_transition_first_class_resolution(self):
+        call_res = CallResolution(resolved=True, resolved_to="Renderer.render", target_file="renderer.js")
+        t = Transition(
+            id="t1",
+            label="renderer.render()",
+            resolution=call_res,
+        )
+        self.assertIs(t.resolution, call_res)
+        self.assertIs(t.call_resolution, call_res)
+        self.assertIsNone(t.metadata)
+
+        d = t.to_dict()
+        self.assertTrue(d["resolved"])
+        self.assertEqual(d["resolved_to"], "Renderer.render")
+        self.assertEqual(d["target_file"], "renderer.js")
+        self.assertNotIn("metadata", d)
+
+        # DOT attributes
+        dot_attrs = t.get_dot_attributes()
+        self.assertEqual(dot_attrs["color"], "#2e7d32")
+        self.assertEqual(dot_attrs["tooltip"], "Resolved to Renderer.render in renderer.js")
+
+        # PNML toolspecific
+        parent = ET.Element("transition", id="t1")
+        tool_el = t.add_pnml_toolspecific(parent)
+        self.assertIsNotNone(tool_el)
+        res_el = [el for el in tool_el.iter() if el.tag.endswith("resolved")]
+        self.assertEqual(len(res_el), 1)
+        self.assertEqual(res_el[0].attrib.get("target"), "Renderer.render")
+
+    def test_petri_net_add_transition_first_class_resolution(self):
+        net = PetriNet()
+        call_res = CallResolution(resolved=False)
+        t = net.add_transition(
+            id="t0",
+            label="external()",
+            resolution=call_res,
+        )
+        self.assertIs(t.resolution, call_res)
+        d = t.to_dict()
+        self.assertFalse(d["resolved"])
+        self.assertNotIn("resolved_to", d)
+
+        dot_attrs = t.get_dot_attributes()
+        self.assertEqual(dot_attrs["color"], "#e65100")
+        self.assertEqual(dot_attrs["tooltip"], "Unresolved call")
 
 
 if __name__ == '__main__':

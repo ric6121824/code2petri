@@ -11,7 +11,7 @@ from code2petri.javascript_walker import JavascriptWalker
 from code2petri.walker_protocol import WalkerProtocol, WalkResult, CallSite
 from code2petri.model import PetriNet
 from code2petri.engine import code2petri, WALKERS
-from tests.petri_assertions import assert_valid_petri_net, assert_has_start_and_end, assert_bipartite
+from tests.petri_assertions import assert_valid_petri_net, assert_has_start_and_end, assert_bipartite, walk_net
 
 
 class TestJavascriptWalkerSkeleton(unittest.TestCase):
@@ -121,14 +121,14 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
         )
         tree = self.walker.parse_file(fixture_path)
         node = self.walker.find_function(tree, "calc_caller")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         labels = [t.label for t in net.transitions]
         self.assertEqual(labels, ["let res = call: calculate()", "return res"])
 
     def test_walk_sequential_function(self):
         tree = self.walker.parse_file(self.seq_fixture)
         node = self.walker.find_function(tree, "sequential_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
 
         # 5 sequential statements + 1 return -> 6 transitions, 7 places, 12 arcs
         assert_valid_petri_net(self, net)
@@ -155,7 +155,7 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
     def test_walk_global_scope(self):
         tree = self.walker.parse_file(self.global_fixture)
         global_node = self.walker.find_function(tree, "(global)")
-        net = self.walker.walk_function(global_node).net
+        net = walk_net(self.walker, global_node)
 
         # 3 sequential statements, no return -> 3 transitions, 4 places, 6 arcs
         assert_valid_petri_net(self, net)
@@ -212,7 +212,7 @@ class TestJavascriptIfBranching(unittest.TestCase):
     def test_if_else(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "if_else.js"))
         node = self.walker.find_function(tree, "if_else_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_has_start_and_end(self, net)
         assert_bipartite(self, net)
@@ -241,7 +241,7 @@ class TestJavascriptIfBranching(unittest.TestCase):
     def test_if_elif_else(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "if_elif_else.js"))
         node = self.walker.find_function(tree, "if_elif_else_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -262,7 +262,7 @@ class TestJavascriptIfBranching(unittest.TestCase):
     def test_if_no_else(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "if_no_else.js"))
         node = self.walker.find_function(tree, "if_no_else_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -281,7 +281,7 @@ class TestJavascriptLoops(unittest.TestCase):
     def test_while_loop(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "while_loop.js"))
         node = self.walker.find_function(tree, "while_loop_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -299,7 +299,7 @@ class TestJavascriptLoops(unittest.TestCase):
     def test_for_loop(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "for_loop.js"))
         node = self.walker.find_function(tree, "for_loop_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -313,7 +313,7 @@ class TestJavascriptLoops(unittest.TestCase):
     def test_for_in_of_loops(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "for_in_of.js"))
         node = self.walker.find_function(tree, "for_in_of_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -331,7 +331,7 @@ class TestJavascriptLoops(unittest.TestCase):
     def test_loop_break_continue(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "loop_break_continue.js"))
         node = self.walker.find_function(tree, "loop_break_continue_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -369,7 +369,7 @@ class TestJavascriptTryCatch(unittest.TestCase):
     def test_try_catch(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "try_catch.js"))
         node = self.walker.find_function(tree, "try_catch_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -388,7 +388,7 @@ class TestJavascriptTryCatch(unittest.TestCase):
     def test_try_catch_finally(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "try_catch_finally.js"))
         node = self.walker.find_function(tree, "try_catch_finally_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -406,7 +406,7 @@ class TestJavascriptTryCatch(unittest.TestCase):
     def test_try_finally(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "try_finally.js"))
         node = self.walker.find_function(tree, "try_finally_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -433,7 +433,7 @@ class TestJavascriptTryCatch(unittest.TestCase):
         try:
             tree = self.walker.parse_file(temp_path)
             node = self.walker.find_function(tree, "try_finally_return")
-            net = self.walker.walk_function(node).net
+            net = walk_net(self.walker, node)
             assert_valid_petri_net(self, net)
             assert_bipartite(self, net)
 
@@ -465,7 +465,7 @@ class TestJavascriptTryCatch(unittest.TestCase):
         try:
             tree = self.walker.parse_file(temp_path)
             node = self.walker.find_function(tree, "loop_try_finally_break")
-            net = self.walker.walk_function(node).net
+            net = walk_net(self.walker, node)
             assert_valid_petri_net(self, net)
             assert_bipartite(self, net)
 
@@ -488,7 +488,7 @@ class TestJavascriptSwitch(unittest.TestCase):
     def test_switch_with_default(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "switch_case.js"))
         node = self.walker.find_function(tree, "switch_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -524,7 +524,7 @@ class TestJavascriptSwitch(unittest.TestCase):
     def test_switch_no_default(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "switch_case.js"))
         node = self.walker.find_function(tree, "switch_no_default")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -556,7 +556,7 @@ class TestJavascriptSwitch(unittest.TestCase):
         try:
             tree = self.walker.parse_file(temp_path)
             node = self.walker.find_function(tree, "fallthrough_func")
-            net = self.walker.walk_function(node).net
+            net = walk_net(self.walker, node)
             assert_valid_petri_net(self, net)
             assert_bipartite(self, net)
 
@@ -587,7 +587,7 @@ class TestJavascriptDoWhile(unittest.TestCase):
     def test_do_while_cycle(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "do_while.js"))
         node = self.walker.find_function(tree, "do_while_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -610,7 +610,7 @@ class TestJavascriptDoWhile(unittest.TestCase):
     def test_do_while_break_continue(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "do_while.js"))
         node = self.walker.find_function(tree, "do_while_break_continue")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -634,7 +634,7 @@ class TestJavascriptThrow(unittest.TestCase):
     def test_unhandled_throw(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "throw_exception.js"))
         node = self.walker.find_function(tree, "throw_func")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -647,7 +647,7 @@ class TestJavascriptThrow(unittest.TestCase):
     def test_throw_in_try(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "throw_exception.js"))
         node = self.walker.find_function(tree, "throw_in_try")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -697,7 +697,7 @@ class TestJavascriptClassMethods(unittest.TestCase):
     def test_walk_class_method(self):
         tree = self.walker.parse_file(self.fixture_path)
         node = self.walker.find_function(tree, "WebGLEngine.step")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -720,7 +720,7 @@ class TestJavascriptClassMethods(unittest.TestCase):
             self.assertIn("outerFactory.InnerService.performAction", funcs)
             node = self.walker.find_function(tree, "outerFactory.InnerService.performAction")
             self.assertIsNotNone(node)
-            net = self.walker.walk_function(node).net
+            net = walk_net(self.walker, node)
             assert_valid_petri_net(self, net)
         finally:
             if os.path.exists(temp_path):
@@ -757,7 +757,7 @@ class TestJavascriptAnonymousCallbacks(unittest.TestCase):
     def test_walk_anonymous_callback(self):
         tree = self.walker.parse_file(self.fixture_path)
         node = self.walker.find_function(tree, "(anonymous@151)")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -779,7 +779,7 @@ class TestJavascriptGameLoopRAF(unittest.TestCase):
     def test_loop_raf_cycle(self):
         tree = self.walker.parse_file(self.fixture_path)
         node = self.walker.find_function(tree, "loop")
-        net = self.walker.walk_function(node).net
+        net = walk_net(self.walker, node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
 
@@ -805,7 +805,7 @@ class TestJavascriptGameLoopRAF(unittest.TestCase):
         try:
             tree = self.walker.parse_file(temp_path)
             node = self.walker.find_function(tree, "gameLoop")
-            net = self.walker.walk_function(node).net
+            net = walk_net(self.walker, node)
             assert_valid_petri_net(self, net)
             assert_bipartite(self, net)
 
@@ -836,7 +836,7 @@ class TestJavascriptGameLoopRAF(unittest.TestCase):
         try:
             tree = self.walker.parse_file(temp_path)
             node = self.walker.find_function(tree, "gameLoop")
-            net = self.walker.walk_function(node).net
+            net = walk_net(self.walker, node)
             assert_valid_petri_net(self, net)
             assert_bipartite(self, net)
 
@@ -866,7 +866,7 @@ class TestJavascriptGameLoopRAF(unittest.TestCase):
         try:
             tree = self.walker.parse_file(temp_path)
             node = self.walker.find_function(tree, "Engine.step")
-            net = self.walker.walk_function(node).net
+            net = walk_net(self.walker, node)
             assert_valid_petri_net(self, net)
             assert_bipartite(self, net)
 

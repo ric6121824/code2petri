@@ -20,7 +20,6 @@ from tests.petri_assertions import (  # noqa: E402
 )
 
 walker = PythonWalker()
-walk_function = lambda *args, **kwargs: walk_net(walker, *args, **kwargs)
 parse_file = walker.parse_file
 find_function = walker.find_function
 find_all_functions = walker.find_all_functions
@@ -65,7 +64,7 @@ class TestPythonWalkerSequential(unittest.TestCase):
         self.assertEqual(bindings, {})
 
     def test_start_and_end_places(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         start_place, end_place = assert_has_start_and_end(self, net)
         assert_bipartite(self, net)
 
@@ -79,7 +78,7 @@ class TestPythonWalkerSequential(unittest.TestCase):
 
 
     def test_linear_connectivity(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         # Check that the net forms a strict linear alternating path
         current_place = [p for p in net.places if p.initial_tokens == 1][0]
         for t in net.transitions:
@@ -95,7 +94,7 @@ class TestPythonWalkerSequential(unittest.TestCase):
         self.assertEqual(current_place.label, "end")
 
     def test_statement_labels_and_line_numbers(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         labels = [t.label for t in net.transitions]
         expected_labels = [
             "a = 1",
@@ -120,7 +119,7 @@ class TestPythonWalkerSequential(unittest.TestCase):
 """
         tree = ast.parse(code)
         func_node = find_function(tree, "call_variations")
-        net = walk_function(func_node)
+        net = walk_net(walker, func_node)
         labels = [t.label for t in net.transitions]
         self.assertEqual(labels[0], "call: plain_call()")
         self.assertEqual(labels[1], "call: pkg.sub.func()")
@@ -144,7 +143,7 @@ class TestPythonWalkerMultiReturn(unittest.TestCase):
         self.assertIsNotNone(self.func_node)
 
     def test_all_returns_converge_on_single_end_place(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         # Find single terminal end place
         end_places = [p for p in net.places if p.label == "end"]
         self.assertEqual(len(end_places), 1, "There must be exactly one shared terminal 'end' place")
@@ -165,7 +164,7 @@ class TestPythonWalkerMultiReturn(unittest.TestCase):
             )
 
     def test_multi_return_pnml_and_dot_serialization(self):
-        net = walk_function(self.func_node)
+        net = walk_net(walker, self.func_node)
         pnml = net.to_pnml()
         root = ET.fromstring(pnml)
         self.assertIsNotNone(root)
@@ -179,7 +178,7 @@ class TestPythonWalkerEdgeCases(unittest.TestCase):
     def test_invalid_ast_node_type_raises(self):
         invalid_node = ast.Pass()
         with self.assertRaises(TypeError):
-            walk_function(invalid_node)  # type: ignore
+            walk_net(walker, invalid_node)  # type: ignore
 
     def test_find_function_not_found(self):
         tree = ast.parse("def existing_func(): pass")
@@ -193,7 +192,7 @@ class TestPythonWalkerEdgeCases(unittest.TestCase):
         tree = ast.parse(code)
         func_node = find_function(tree, "async_worker")
         self.assertIsNotNone(func_node)
-        net = walk_function(func_node)
+        net = walk_net(walker, func_node)
         self.assertEqual(len(net.places), 3)  # p0, p1, p_end
         self.assertEqual(len(net.transitions), 2)  # await, return
 
@@ -230,7 +229,7 @@ class TestPythonWalkerEdgeCases(unittest.TestCase):
         self.assertEqual(global_node.name, "(global)")
         self.assertEqual(len(global_node.body), 3)
 
-        net = walk_function(global_node)
+        net = walk_net(walker, global_node)
         assert_valid_petri_net(self, net)
         assert_bipartite(self, net)
         start_p, end_p = assert_has_start_and_end(self, net)
@@ -254,7 +253,7 @@ class TestPythonWalkerEdgeCases(unittest.TestCase):
         )
         tree = ast.parse(code)
         func_node = find_function(tree, "func_with_raise")
-        net = walk_function(func_node)
+        net = walk_net(walker, func_node)
         assert_valid_petri_net(self, net)
         start_p, end_p = assert_has_start_and_end(self, net)
 
@@ -275,7 +274,7 @@ class TestPythonWalkerEdgeCases(unittest.TestCase):
         )
         tree = ast.parse(code)
         func_node = find_function(tree, "func_with_try_raise")
-        net = walk_function(func_node)
+        net = walk_net(walker, func_node)
         assert_valid_petri_net(self, net)
 
         raise_trans = next(t for t in net.transitions if "raise" in t.label)
