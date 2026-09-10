@@ -3,16 +3,53 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Optional, List
+from typing import Optional, List, Sequence, Set
 
 from code2petri.javascript_walker import JavascriptWalker
 from code2petri.python_walker import PythonWalker
 from code2petri.model import PetriNet
+from code2petri.symbol_table import SymbolTable
 
 WALKERS = {
     ".py": PythonWalker,
     ".js": JavascriptWalker,
 }
+
+
+def discover_context_files(context_paths: Sequence[str]) -> List[str]:
+    """Recursively scans context paths and collects all supported source files (.py, .js)."""
+    discovered: List[str] = []
+    seen: Set[str] = set()
+
+    for path in context_paths:
+        if not os.path.exists(path):
+            raise AssertionError(f"Context path '{path}' does not exist.")
+
+        if os.path.isdir(path):
+            for root, _, files in os.walk(path):
+                for f in sorted(files):
+                    if f.startswith("._") or (f.startswith(".") and not f.endswith(tuple(WALKERS.keys()))):
+                        continue
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in WALKERS:
+                        abs_file = os.path.abspath(os.path.join(root, f))
+                        if abs_file not in seen:
+                            seen.add(abs_file)
+                            discovered.append(abs_file)
+        elif os.path.isfile(path):
+            ext = os.path.splitext(path)[1].lower()
+            if ext in WALKERS:
+                abs_file = os.path.abspath(path)
+                if abs_file not in seen:
+                    seen.add(abs_file)
+                    discovered.append(abs_file)
+            else:
+                supported_src = ", ".join(sorted(WALKERS.keys()))
+                raise AssertionError(
+                    f"Unsupported context file extension '{ext}' in '{path}'. "
+                    f"Supported extensions are: {supported_src}"
+                )
+    return discovered
 
 
 IMAGE_EXTENSIONS = {"png", "svg"}
@@ -41,6 +78,7 @@ def code2petri(
     target_function: Optional[str] = None,
     list_functions: bool = False,
     level: Optional[int] = None,
+    context: Optional[List[str]] = None,
 ) -> Optional[PetriNet]:
     """Generates a Petri net from a source file and writes the serialized output.
 
@@ -49,6 +87,7 @@ def code2petri(
     :param target_function: Name of the function to extract and convert.
     :param list_functions: If True, prints all function names found and exits without analyzing.
     :param level: Optional logging level to set on the logger.
+    :param context: Optional list of context file or directory paths for cross-file call resolution.
     :return: The generated PetriNet instance, or None if list_functions is True.
     """
     logger = logging.getLogger("code2petri")
@@ -64,6 +103,16 @@ def code2petri(
         raise AssertionError(
             f"Unsupported source extension '{src_ext}'. Supported extensions are: {supported_src}"
         )
+
+    symbol_table = None
+    if context:
+        logger.debug("Discovering context files from %s...", context)
+        context_files = discover_context_files(context)
+        logger.info("Found %d context file(s) for resolution.", len(context_files))
+        symbol_table = SymbolTable()
+        symbol_table.index_file(source_path)
+        for cf in context_files:
+            symbol_table.index_file(cf)
 
     walker = WALKERS[src_ext]()
 
@@ -100,9 +149,14 @@ def code2petri(
     lineno = walker.get_node_lineno(func_node)
     logger.info("Analyzing function '%s' at line %d...", target_function, lineno)
     logger.debug("Walking AST node for '%s'...", target_function)
-    walk_res = walker.walk_function(func_node, target_function)
+    walk_res = walker.walk_function(func_node, target_function, filepath=source_path)
     net, call_sites = walk_res.net, walk_res.call_sites
     logger.debug("Extracted %d call site(s) from '%s'", len(call_sites), target_function)
+
+    if symbol_table is not None:
+        logger.debug("Resolving %d call site(s) against symbol table...", len(call_sites))
+        symbol_table.resolve_call_sites(net, call_sites)
+
     logger.info(
         "Constructed Petri net with %d places, %d transitions, and %d arcs.",
         len(net.places),
@@ -176,6 +230,11 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
     )
 
     parser.add_argument(
+        "--context", "-c",
+        nargs="+",
+        help="One or more context file or directory paths for cross-file call resolution.",
+    )
+    parser.add_argument(
         "--quiet", "-q",
         action="store_true",
         help="Suppress informational logging.",
@@ -205,6 +264,7 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
         target_function=args.target_function,
         list_functions=args.list_functions,
         level=level,
+        context=args.context,
     )
 
 
