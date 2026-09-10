@@ -36,6 +36,24 @@ class Symbol:
     line_number: int = 0
     ast_node: Optional[Any] = None
 
+    @property
+    def is_method(self) -> bool:
+        """Returns True if the symbol is a class method."""
+        return self.class_name is not None
+
+
+def _find_unique_bare_symbol_match(
+    symbols: Sequence[Symbol],
+    callee_name: str,
+) -> Tuple[Optional[Symbol], int]:
+    """Matches free/standalone functions (never class methods) by name or bare_name."""
+    standalone = [s for s in symbols if not s.is_method]
+    exact = [s for s in standalone if s.name == callee_name]
+    matches = exact if exact else [s for s in standalone if s.bare_name == callee_name]
+    if len(matches) == 1:
+        return matches[0], 1
+    return None, len(matches)
+
 
 class SymbolTable:
     """Multi-file symbol table partitioning callable symbols by language and providing call resolution."""
@@ -242,19 +260,15 @@ class SymbolTable:
         # First priority: check local caller file definitions
         if norm_caller_file:
             local_symbols = self.get_symbols_for_file(norm_caller_file)
-            exact_local = [s for s in local_symbols if s.name == call_site.callee_name]
-            local_matches = exact_local if exact_local else [
-                s for s in local_symbols if s.bare_name == call_site.callee_name
-            ]
-
-            if len(local_matches) == 1:
-                return local_matches[0]
-            elif len(local_matches) > 1:
+            match, count = _find_unique_bare_symbol_match(local_symbols, call_site.callee_name)
+            if count == 1:
+                return match
+            elif count > 1:
                 self.logger.debug(
                     "Unresolved call site '%s' in '%s': ambiguous match (%d symbols found)",
                     call_site.callee_name,
                     call_site.caller_file,
-                    len(local_matches),
+                    count,
                 )
                 return None
 
@@ -263,19 +277,15 @@ class SymbolTable:
             s for s in self._symbols_by_language.get(norm_lang, [])
             if s.filepath != norm_caller_file
         ]
-        exact_context = [s for s in context_symbols if s.name == call_site.callee_name]
-        context_matches = exact_context if exact_context else [
-            s for s in context_symbols if s.bare_name == call_site.callee_name
-        ]
-
-        if len(context_matches) == 1:
-            return context_matches[0]
-        elif len(context_matches) > 1:
+        match, count = _find_unique_bare_symbol_match(context_symbols, call_site.callee_name)
+        if count == 1:
+            return match
+        elif count > 1:
             self.logger.debug(
                 "Unresolved call site '%s' in '%s': ambiguous match (%d symbols found)",
                 call_site.callee_name,
                 call_site.caller_file,
-                len(context_matches),
+                count,
             )
             return None
         else:
@@ -302,19 +312,24 @@ class SymbolTable:
 
             sym = self.resolve_call(cs, variable_bindings=variable_bindings)
             if sym is not None:
+                t.resolution = CallResolution(
+                    resolved=True,
+                    resolved_to=sym.name,
+                    target_file=sym.filepath,
+                )
                 res_meta: Dict[str, Any] = {
                     "resolved": True,
                     "resolved_to": sym.name,
                     "target_file": sym.filepath,
                 }
             else:
+                t.resolution = CallResolution(resolved=False)
                 res_meta = {
                     "resolved": False,
+                    "status": "[unresolved]",
                 }
 
             if t.metadata is not None:
                 t.metadata = {**t.metadata, **res_meta}
             else:
                 t.metadata = dict(res_meta)
-
-            t.resolution = CallResolution.from_metadata(t.metadata)

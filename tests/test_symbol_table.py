@@ -341,6 +341,50 @@ class TestBareFunctionCallResolution(unittest.TestCase):
         self.assertIsNone(resolved)
         self.assertTrue(any("unresolved" in msg.lower() for msg in log_ctx.output))
 
+    def test_bare_call_does_not_match_class_method(self):
+        # A file has a class with method `step()`.
+        # A bare call `step()` must not resolve to `MyClass.step`.
+        class_file = os.path.join(self.temp_dir.name, "my_class.py")
+        with open(class_file, "w", encoding="utf-8") as f:
+            f.write(
+                "class MyClass:\n"
+                "    def step(self):\n"
+                "        pass\n"
+            )
+        self.table.index_file(class_file)
+        cs = CallSite(
+            caller_function="caller",
+            caller_file=self.main_py,
+            callee_name="step",
+            callee_owner=None,
+            line_number=10,
+            transition_id="t_step",
+        )
+        resolved = self.table.resolve_call(cs)
+        self.assertIsNone(resolved)
+
+        # Also test local class method: if caller file itself has a class with a method,
+        # bare call still must not resolve to it.
+        local_class_file = os.path.join(self.temp_dir.name, "local_class.py")
+        with open(local_class_file, "w", encoding="utf-8") as f:
+            f.write(
+                "class LocalEngine:\n"
+                "    def run(self):\n"
+                "        pass\n"
+                "def caller():\n"
+                "    run()\n"
+            )
+        self.table.index_file(local_class_file)
+        cs_local = CallSite(
+            caller_function="caller",
+            caller_file=local_class_file,
+            callee_name="run",
+            callee_owner=None,
+            line_number=5,
+            transition_id="t_run",
+        )
+        self.assertIsNone(self.table.resolve_call(cs_local))
+
 
 class TestTransitionDecoration(unittest.TestCase):
     def setUp(self):

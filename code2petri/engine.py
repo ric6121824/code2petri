@@ -5,15 +5,10 @@ import subprocess
 import sys
 from typing import Optional, List, Sequence, Set
 
-from code2petri.javascript_walker import JavascriptWalker
-from code2petri.python_walker import PythonWalker
 from code2petri.model import PetriNet
-from code2petri.symbol_table import SymbolTable
+from code2petri.symbol_table import SymbolTable, SUPPORTED_WALKERS
 
-WALKERS = {
-    ".py": PythonWalker,
-    ".js": JavascriptWalker,
-}
+WALKERS = SUPPORTED_WALKERS
 
 
 def discover_context_files(context_paths: Sequence[str]) -> List[str]:

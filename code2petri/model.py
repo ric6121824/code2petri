@@ -61,6 +61,8 @@ class CallResolution:
 class Transition:
     """Represents a Petri net Transition (an action or statement execution)."""
 
+    RESERVED_METADATA_KEYS: Set[str] = {"resolved", "resolved_to", "target_file", "status"}
+
     def __init__(
         self,
         id_: Optional[str] = None,
@@ -128,10 +130,9 @@ class Transition:
                 ET.SubElement(tool_el, "unresolved")
 
         # Emit any other custom properties
-        skip_keys = {"resolved", "resolved_to", "target_file"}
         if self.metadata:
             for k, v in self.metadata.items():
-                if k not in skip_keys:
+                if k not in self.RESERVED_METADATA_KEYS:
                     ET.SubElement(tool_el, "property", name=str(k), value=str(v))
         return tool_el
 
@@ -154,8 +155,7 @@ class Transition:
             if self.metadata and "tooltip" in self.metadata:
                 attrs["tooltip"] = str(self.metadata["tooltip"])
             elif self.metadata:
-                skip_keys = {"resolved", "resolved_to", "target_file"}
-                items = [f"{k}={v}" for k, v in self.metadata.items() if k not in skip_keys]
+                items = [f"{k}={v}" for k, v in self.metadata.items() if k not in self.RESERVED_METADATA_KEYS]
                 if items:
                     attrs["tooltip"] = ", ".join(items)
 
