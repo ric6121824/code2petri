@@ -4,7 +4,7 @@ To comply with the project architecture rule ('Avoid: walker base class'), langu
 walkers compose this builder internally rather than inheriting from a walker base class.
 """
 
-from typing import Optional, List, NamedTuple, Any, Union, Tuple, Dict
+from typing import Optional, List, NamedTuple, Any, Union, Tuple, Dict, Callable
 from code2petri.model import PetriNet, Place, Transition, Arc, CallResolution
 
 
@@ -176,10 +176,13 @@ class ControlFlowBuilder:
         lineno: Optional[int],
         is_last: bool,
         target_exit: Place,
+        on_trans: Optional[Callable[[Transition], None]] = None,
     ) -> Place:
         """Wires a standard sequential statement from current_place to next place."""
         next_place = target_exit if is_last else self.new_place(line_number=lineno)
         trans = self.new_transition(label=label, line_number=lineno)
+        if on_trans is not None:
+            on_trans(trans)
         self.net.add_arc(source=current_place, target=trans)
         self.net.add_arc(source=trans, target=next_place)
         return next_place

@@ -229,13 +229,12 @@ class _PythonControlFlowWalker:
         return None
 
     def _walk_raise(self, stmt: ast.Raise, ctx: StatementContext) -> Optional[Place]:
-        self.builder.wire_terminal_exception(
+        trans = self.builder.wire_terminal_exception(
             current_place=ctx.current_place,
             label=_format_statement_label(stmt),
             line_number=stmt.lineno,
         )
-        if self.builder.last_transition:
-            self._record_calls_in_expr(stmt.exc, self.builder.last_transition.id, stmt.lineno)
+        self._record_calls_in_expr(stmt.exc, trans.id, stmt.lineno)
         return None
 
     def _walk_if(self, stmt: ast.If, ctx: StatementContext) -> Optional[Place]:
@@ -316,16 +315,14 @@ class _PythonControlFlowWalker:
 
     def _walk_default(self, stmt: ast.stmt, ctx: StatementContext) -> Optional[Place]:
         label = _format_statement_label(stmt)
-        res = self.builder.wire_sequential_statement(
+        return self.builder.wire_sequential_statement(
             current_place=ctx.current_place,
             label=label,
             lineno=stmt.lineno,
             is_last=ctx.is_last,
             target_exit=ctx.target_exit,
+            on_trans=lambda t: self._record_calls_in_expr(stmt, t.id, stmt.lineno),
         )
-        if self.builder.last_transition:
-            self._record_calls_in_expr(stmt, self.builder.last_transition.id, stmt.lineno)
-        return res
 
     def walk_block(
         self,

@@ -452,14 +452,14 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         self.assertIsNotNone(unres)
         self.assertFalse(unres.resolved)
 
-    def test_transition_call_resolution_property(self):
+    def test_transition_resolution_attribute(self):
         t_none = Transition(id="t0", label="op()")
-        self.assertIsNone(t_none.call_resolution)
+        self.assertIsNone(t_none.resolution)
 
         t_res = Transition(id="t1", label="foo()", metadata={"resolved": True, "resolved_to": "Foo.foo"})
-        self.assertIsNotNone(t_res.call_resolution)
-        self.assertTrue(t_res.call_resolution.resolved)
-        self.assertEqual(t_res.call_resolution.resolved_to, "Foo.foo")
+        self.assertIsNotNone(t_res.resolution)
+        self.assertTrue(t_res.resolution.resolved)
+        self.assertEqual(t_res.resolution.resolved_to, "Foo.foo")
 
     def test_pnml_serialization_avoids_literal_none_strings(self):
         net = PetriNet()
@@ -508,7 +508,6 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
             resolution=call_res,
         )
         self.assertIs(t.resolution, call_res)
-        self.assertIs(t.call_resolution, call_res)
         self.assertIsNone(t.metadata)
 
         d = t.to_dict()

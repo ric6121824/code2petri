@@ -86,11 +86,6 @@ class Transition:
         else:
             self.resolution = None
 
-    @property
-    def call_resolution(self) -> Optional[CallResolution]:
-        """Returns typed CallResolution if call resolution is present."""
-        return self.resolution
-
     def __repr__(self) -> str:
         metadata_str = f", metadata={self.metadata!r}" if self.metadata is not None else ""
         res_str = f", resolution={self.resolution!r}" if self.resolution is not None else ""

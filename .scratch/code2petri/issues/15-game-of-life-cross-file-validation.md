@@ -7,7 +7,7 @@
 **Status:** complete
 
 - [x] Integration test analyzes `loop` in `app.js` with `--context webgl-engine.js`, asserting `gpuEngine.step()` resolves to `WebGLEngine.step` in `webgl-engine.js`.
-- [x] Integration test analyzes `init` and `randomizeBoth` in `app.js` with directory context `--context ./tests/test_code/game_of_life/`, asserting `gpuEngine.randomize()` and `WebGLEngine.drawToScreen()` resolve to `WebGLEngine.randomize` and `WebGLEngine.drawToScreen`.
+- [x] Integration test analyzes `init` (which invokes `randomizeBoth`) and `randomizeBoth` in `app.js` with directory context `--context ./tests/test_code/game_of_life/`, asserting `gpuEngine.randomize()` in `randomizeBoth` resolves to `WebGLEngine.randomize` and `this.drawToScreen()` in `WebGLEngine.randomize` resolves to `WebGLEngine.drawToScreen`.
 - [x] Integration tests verify that calls to browser and WebGL APIs (`document.getElementById`, `gl.bindTexture`, `requestAnimationFrame`) are marked with `resolved: False`.
 - [x] Serialized PNML, DOT, and JSON outputs for `GameOfLife_Simulator` functions reflect correct cross-reference annotations.
 - [x] All unit, integration, and validation tests across the entire test suite pass cleanly.

@@ -181,6 +181,25 @@ class SymbolTable:
         norm_lang = normalize_language(language)
         return list(self._symbols_by_bare_name.get((norm_lang, bare_name), []))
 
+    def _resolve_bare_in_symbols(
+        self,
+        symbols: Sequence[Symbol],
+        call_site: CallSite,
+    ) -> Tuple[Optional[Symbol], bool]:
+        """Resolves a bare call in a symbol sequence. Returns (match, is_ambiguous)."""
+        match, count = _find_unique_bare_symbol_match(symbols, call_site.callee_name)
+        if count == 1:
+            return match, False
+        if count > 1:
+            self.logger.debug(
+                "Unresolved call site '%s' in '%s': ambiguous match (%d symbols found)",
+                call_site.callee_name,
+                call_site.caller_file,
+                count,
+            )
+            return None, True
+        return None, False
+
     def resolve_call(
         self,
         call_site: CallSite,
@@ -260,16 +279,10 @@ class SymbolTable:
         # First priority: check local caller file definitions
         if norm_caller_file:
             local_symbols = self.get_symbols_for_file(norm_caller_file)
-            match, count = _find_unique_bare_symbol_match(local_symbols, call_site.callee_name)
-            if count == 1:
+            match, ambiguous = self._resolve_bare_in_symbols(local_symbols, call_site)
+            if match:
                 return match
-            elif count > 1:
-                self.logger.debug(
-                    "Unresolved call site '%s' in '%s': ambiguous match (%d symbols found)",
-                    call_site.callee_name,
-                    call_site.caller_file,
-                    count,
-                )
+            if ambiguous:
                 return None
 
         # Second priority: check across context files of the same language
@@ -277,24 +290,18 @@ class SymbolTable:
             s for s in self._symbols_by_language.get(norm_lang, [])
             if s.filepath != norm_caller_file
         ]
-        match, count = _find_unique_bare_symbol_match(context_symbols, call_site.callee_name)
-        if count == 1:
+        match, ambiguous = self._resolve_bare_in_symbols(context_symbols, call_site)
+        if match:
             return match
-        elif count > 1:
-            self.logger.debug(
-                "Unresolved call site '%s' in '%s': ambiguous match (%d symbols found)",
-                call_site.callee_name,
-                call_site.caller_file,
-                count,
-            )
+        if ambiguous:
             return None
-        else:
-            self.logger.debug(
-                "Unresolved call site '%s' in '%s': no matching symbol found",
-                call_site.callee_name,
-                call_site.caller_file,
-            )
-            return None
+
+        self.logger.debug(
+            "Unresolved call site '%s' in '%s': no matching symbol found",
+            call_site.callee_name,
+            call_site.caller_file,
+        )
+        return None
 
     def resolve_call_sites(
         self,

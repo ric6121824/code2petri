@@ -458,13 +458,12 @@ class _JavascriptControlFlowWalker:
         stmt: dict,
         ctx: StatementContext,
     ) -> Optional[Place]:
-        self.builder.wire_terminal_exception(
+        trans = self.builder.wire_terminal_exception(
             current_place=ctx.current_place,
             label=self._format_statement_label(stmt),
             line_number=ctx.lineno,
         )
-        if self.builder.last_transition:
-            self._record_calls_in_node(stmt.get("argument"), self.builder.last_transition.id, ctx.lineno or 0)
+        self._record_calls_in_node(stmt.get("argument"), trans.id, ctx.lineno or 0)
         return None
 
     def _walk_if(
@@ -674,16 +673,14 @@ class _JavascriptControlFlowWalker:
         ctx: StatementContext,
     ) -> Optional[Place]:
         label = self._format_statement_label(stmt)
-        res = self.builder.wire_sequential_statement(
+        return self.builder.wire_sequential_statement(
             current_place=ctx.current_place,
             label=label,
             lineno=ctx.lineno,
             is_last=ctx.is_last,
             target_exit=ctx.target_exit,
+            on_trans=lambda t: self._record_calls_in_node(stmt, t.id, ctx.lineno or 0),
         )
-        if self.builder.last_transition:
-            self._record_calls_in_node(stmt, self.builder.last_transition.id, ctx.lineno or 0)
-        return res
 
     def walk_block(
         self,
