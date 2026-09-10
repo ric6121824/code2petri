@@ -51,7 +51,6 @@ class ControlFlowBuilder:
         self.trans_counter = 0
         self.loop_stack: List[LoopContext] = []
         self.try_stack: List[TryContext] = []
-        self.last_transition: Optional[Transition] = None
 
     def new_place(
         self,
@@ -87,7 +86,6 @@ class ControlFlowBuilder:
             metadata=metadata,
             resolution=resolution,
         )
-        self.last_transition = trans
         if hook_exception and self.try_stack:
             self.net.add_arc(source=trans, target=self.try_stack[-1].except_entry)
         return trans

@@ -97,7 +97,7 @@ When a function is analyzed with a resolution context, `code2petri` matches call
   - Verify JSON output contains resolution keys.
 - **Validation Target Seam**:
   - End-to-end integration test analyzing `app.js` with `--context webgl-engine.js` (and directory context `--context ./tests/test_code/game_of_life/`).
-  - Assert that calls to `gpuEngine.step()`, `gpuEngine.randomize()`, and `gpuEngine.drawToScreen()` in `loop` and `init` resolve precisely to `WebGLEngine.step`, `WebGLEngine.randomize`, and `WebGLEngine.drawToScreen` in `webgl-engine.js`.
+  - Assert that calls to `gpuEngine.step()` in `loop`, `gpuEngine.randomize()` in `randomizeBoth` (invoked by `init`), and `this.drawToScreen()` in `WebGLEngine.randomize` resolve precisely to `WebGLEngine.step`, `WebGLEngine.randomize`, and `WebGLEngine.drawToScreen` in `webgl-engine.js`.
   - Assert that calls to `document.getElementById` and `gl.bindTexture` remain cleanly marked as unresolved.
 
 ## Out of Scope

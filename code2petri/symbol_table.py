@@ -260,13 +260,6 @@ class SymbolTable:
                         len(matches),
                     )
                     return None
-                else:
-                    self.logger.debug(
-                        "Unresolved call site '%s' in '%s': no matching symbol found",
-                        call_site.callee_name,
-                        call_site.caller_file,
-                    )
-                    return None
 
             self.logger.debug(
                 "Unresolved call site '%s' in '%s': no matching symbol found",

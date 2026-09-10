@@ -349,9 +349,11 @@ class _PythonControlFlowWalker:
         return current_place
 
 
-def _extract_constructor_class_name(call_node: ast.Call) -> Optional[str]:
-    """Extracts class name if an ast.Call is an object constructor instantiation."""
-    func = call_node.func
+def _extract_constructor_class_name(value_node: Optional[ast.AST]) -> Optional[str]:
+    """Extracts class name if an AST expression is an object constructor instantiation (ast.Call)."""
+    if not isinstance(value_node, ast.Call):
+        return None
+    func = value_node.func
     if isinstance(func, ast.Name):
         if func.id and func.id[0].isupper():
             return func.id
@@ -445,20 +447,18 @@ class PythonWalker(WalkerProtocol):
         bindings: Dict[str, str] = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.Assign):
-                if isinstance(node.value, ast.Call):
-                    class_name = _extract_constructor_class_name(node.value)
-                    if class_name:
-                        for target in node.targets:
-                            target_name = _extract_target_name(target)
-                            if target_name:
-                                bindings[target_name] = class_name
+                targets = node.targets
             elif isinstance(node, ast.AnnAssign):
-                if isinstance(node.value, ast.Call):
-                    class_name = _extract_constructor_class_name(node.value)
-                    if class_name:
-                        target_name = _extract_target_name(node.target)
-                        if target_name:
-                            bindings[target_name] = class_name
+                targets = [node.target]
+            else:
+                continue
+
+            class_name = _extract_constructor_class_name(node.value)
+            if class_name:
+                for target in targets:
+                    target_name = _extract_target_name(target)
+                    if target_name:
+                        bindings[target_name] = class_name
         return bindings
 
     def walk_function(
