@@ -1,0 +1,26 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="p3"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: this.pos.add() (line 616)"];
+    "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: this.vel.mult() (line 617)"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.angle += this.angularVelocity (line 619)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.angularVelocity *= 0.999 (line 620)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p1";
+    "p1" -> "t2";
+    "t2" -> "p2";
+    "p2" -> "t3";
+    "t3" -> "p3";
+    "p3" -> "t4";
+    "t4" -> "p_end";
+}

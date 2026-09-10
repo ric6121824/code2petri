@@ -7,7 +7,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from code2petri.walker_protocol import WalkerProtocol
+from code2petri.walker_protocol import WalkerProtocol, WalkResult, CallSite
 from code2petri.control_flow_builder import ControlFlowBuilder, LoopContext, TryContext
 from code2petri.python_walker import PythonWalker
 from code2petri.model import PetriNet, Place, Transition
@@ -40,13 +40,75 @@ class TestWalkerProtocolABC(unittest.TestCase):
                 return []
 
             def walk_function(self, ast_node, func_name=""):
-                return PetriNet()
+                return WalkResult(net=PetriNet(), call_sites=[])
+
+            def collect_variable_bindings(self, tree):
+                return {}
 
             def get_node_lineno(self, ast_node):
                 return 0
 
         walker = CompleteWalker()
         self.assertIsInstance(walker, WalkerProtocol)
+
+    def test_missing_collect_variable_bindings_raises_type_error(self):
+        class MissingBindingsWalker(WalkerProtocol):
+            def parse_file(self, filepath):
+                return None
+
+            def find_function(self, tree, func_name):
+                return None
+
+            def find_all_functions(self, tree):
+                return []
+
+            def walk_function(self, ast_node, func_name=""):
+                return WalkResult(net=PetriNet(), call_sites=[])
+
+            def get_node_lineno(self, ast_node):
+                return 0
+
+        with self.assertRaises(TypeError):
+            MissingBindingsWalker()
+
+    def test_call_site_dataclass(self):
+        from code2petri.walker_protocol import CallSite
+        cs = CallSite(
+            caller_function="main",
+            caller_file="app.py",
+            callee_name="step",
+            callee_owner="gpuEngine",
+            line_number=42,
+            transition_id="t5",
+        )
+        self.assertEqual(cs.caller_function, "main")
+        self.assertEqual(cs.caller_file, "app.py")
+        self.assertEqual(cs.callee_name, "step")
+        self.assertEqual(cs.callee_owner, "gpuEngine")
+        self.assertEqual(cs.line_number, 42)
+        self.assertEqual(cs.transition_id, "t5")
+
+    def test_walk_result_namedtuple(self):
+        from code2petri.walker_protocol import CallSite, WalkResult
+        net = PetriNet()
+        cs = CallSite(
+            caller_function="run",
+            caller_file="index.js",
+            callee_name="log",
+            callee_owner="console",
+            line_number=10,
+            transition_id="t1",
+        )
+        res = WalkResult(net=net, call_sites=[cs])
+        self.assertIs(res.net, net)
+        self.assertEqual(res.call_sites, [cs])
+        # Unpacking support
+        unpacked_net, unpacked_calls = res
+        self.assertIs(unpacked_net, net)
+        self.assertEqual(unpacked_calls, [cs])
+        # Index access
+        self.assertIs(res[0], net)
+        self.assertEqual(res[1], [cs])
 
 
 class TestControlFlowBuilder(unittest.TestCase):
@@ -170,8 +232,10 @@ class TestPythonWalkerProtocolAndQualifiedNames(unittest.TestCase):
         )
         tree = ast.parse(code)
         node = self.walker.find_function(tree, "sample")
-        net = self.walker.walk_function(node)
-        assert_valid_petri_net(self, net)
+        walk_res = self.walker.walk_function(node)
+        self.assertIsInstance(walk_res, WalkResult)
+        self.assertEqual(walk_res.call_sites, [])
+        assert_valid_petri_net(self, walk_res.net)
 
     def test_python_walker_global_discovery_and_walk(self):
         code = (
@@ -187,8 +251,10 @@ class TestPythonWalkerProtocolAndQualifiedNames(unittest.TestCase):
         global_node = self.walker.find_function(tree, "(global)")
         self.assertIsNotNone(global_node)
         self.assertEqual(global_node.name, "(global)")
-        net = self.walker.walk_function(global_node)
-        assert_valid_petri_net(self, net)
+        walk_res = self.walker.walk_function(global_node)
+        self.assertIsInstance(walk_res, WalkResult)
+        self.assertEqual(walk_res.call_sites, [])
+        assert_valid_petri_net(self, walk_res.net)
 
 
 class TestEngineLanguageDispatch(unittest.TestCase):
@@ -237,6 +303,24 @@ class TestEngineLanguageDispatch(unittest.TestCase):
         js_node = {"type": "Identifier", "loc": {"start": {"line": 42, "column": 0}}}
         self.assertEqual(js_walker.get_node_lineno(js_node), 42)
         self.assertEqual(js_walker.get_node_lineno({}), 0)
+
+    def test_package_exports_call_site_and_walk_result(self):
+        import code2petri
+        self.assertIn("CallSite", code2petri.__all__)
+        self.assertIn("WalkResult", code2petri.__all__)
+        self.assertTrue(hasattr(code2petri, "CallSite"))
+        self.assertTrue(hasattr(code2petri, "WalkResult"))
+
+    def test_walkers_baseline_collect_variable_bindings(self):
+        import ast
+        from code2petri.python_walker import PythonWalker
+        from code2petri.javascript_walker import JavascriptWalker
+
+        py_walker = PythonWalker()
+        self.assertEqual(py_walker.collect_variable_bindings(ast.parse("x = 1")), {})
+
+        js_walker = JavascriptWalker()
+        self.assertEqual(js_walker.collect_variable_bindings({}), {})
 
 
 if __name__ == '__main__':

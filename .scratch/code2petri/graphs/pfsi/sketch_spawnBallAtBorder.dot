@@ -1,0 +1,86 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="exit_switch"];
+    "p4" [shape=circle, label="case_entry"];
+    "p5" [shape=circle, label="case_entry"];
+    "p6" [shape=circle, label="case_entry"];
+    "p7" [shape=circle, label="case_entry"];
+    "p8" [shape=circle, label="p8"];
+    "p9" [shape=circle, label="p9"];
+    "p10" [shape=circle, label="p10"];
+    "p11" [shape=circle, label="p11"];
+    "p12" [shape=circle, label="p12"];
+    "p13" [shape=circle, label="p13"];
+    "p14" [shape=circle, label="p14"];
+    "p15" [shape=circle, label="p15"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let edge = call: floor() (line 129)"];
+    "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let x, y (line 130)"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="case 0 (line 133)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="case 1 (line 137)"];
+    "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="case 2 (line 141)"];
+    "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="case 3 (line 145)"];
+    "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="default (line 132)"];
+    "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="x = call: random() (line 134)"];
+    "t9" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="y = -20 (line 135)"];
+    "t10" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="break (line 136)"];
+    "t11" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="x = width + 20 (line 138)"];
+    "t12" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="y = call: random() (line 139)"];
+    "t13" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="break (line 140)"];
+    "t14" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="x = call: random() (line 142)"];
+    "t15" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="y = height + 20 (line 143)"];
+    "t16" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="break (line 144)"];
+    "t17" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="x = -20 (line 146)"];
+    "t18" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="y = call: random() (line 147)"];
+    "t19" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="break (line 148)"];
+    "t20" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: balls.push() (line 151)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p1";
+    "p1" -> "t2";
+    "t2" -> "p2";
+    "p2" -> "t3";
+    "t3" -> "p4";
+    "p2" -> "t4";
+    "t4" -> "p5";
+    "p2" -> "t5";
+    "t5" -> "p6";
+    "p2" -> "t6";
+    "t6" -> "p7";
+    "p2" -> "t7";
+    "t7" -> "p3";
+    "p4" -> "t8";
+    "t8" -> "p8";
+    "p8" -> "t9";
+    "t9" -> "p9";
+    "p9" -> "t10";
+    "t10" -> "p3";
+    "p5" -> "t11";
+    "t11" -> "p10";
+    "p10" -> "t12";
+    "t12" -> "p11";
+    "p11" -> "t13";
+    "t13" -> "p3";
+    "p6" -> "t14";
+    "t14" -> "p12";
+    "p12" -> "t15";
+    "t15" -> "p13";
+    "p13" -> "t16";
+    "t16" -> "p3";
+    "p7" -> "t17";
+    "t17" -> "p14";
+    "p14" -> "t18";
+    "t18" -> "p15";
+    "p15" -> "t19";
+    "t19" -> "p3";
+    "p3" -> "t20";
+    "t20" -> "p_end";
+}

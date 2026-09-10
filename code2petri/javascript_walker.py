@@ -1,5 +1,5 @@
 import shutil
-from typing import Optional, List, Any, Union, NamedTuple
+from typing import Optional, List, Any, Union, NamedTuple, Dict
 from code2flow.engine import LanguageParams
 from code2flow.javascript import Javascript
 from code2petri.control_flow_builder import (
@@ -10,7 +10,7 @@ from code2petri.control_flow_builder import (
     TryContext,
 )
 from code2petri.model import PetriNet, Place, Transition
-from code2petri.walker_protocol import WalkerProtocol
+from code2petri.walker_protocol import WalkerProtocol, WalkResult, CallSite
 
 
 class FunctionInfo(NamedTuple):
@@ -797,8 +797,12 @@ class JavascriptWalker(WalkerProtocol):
 
         return None
 
-    def walk_function(self, ast_node: dict, func_name: str = "") -> PetriNet:
-        """Walks a JavaScript function AST node and constructs a PetriNet model."""
+    def collect_variable_bindings(self, tree: Any) -> Dict[str, str]:
+        """Collects variable to class name bindings from constructor calls in the AST."""
+        return {}
+
+    def walk_function(self, ast_node: Any, func_name: str = "") -> WalkResult:
+        """Walks a JavaScript function AST node and constructs a PetriNet model packaged in a WalkResult."""
         if not isinstance(ast_node, dict):
             raise TypeError(f"walk_function expects a dict AST node, got {type(ast_node).__name__}")
 
@@ -858,5 +862,5 @@ class JavascriptWalker(WalkerProtocol):
         )
         walker.walk_block(statements, current_place=start_place, target_exit=end_place)
 
-        return net
+        return WalkResult(net=net, call_sites=[])
 

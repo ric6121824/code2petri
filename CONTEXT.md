@@ -31,3 +31,15 @@ _Avoid_: Merged graph, global net
 **Faithful Translation**:
 The principle of modeling the exact control flow present in the source AST, including dead ends and infinite loops, without attempting to sanitize or fix broken logic.
 _Avoid_: Normalization, cleanup
+
+**Call Site**:
+A structured metadata record capturing the callee name, resolved owner, line number, and transition ID for a function call within a Petri net.
+_Avoid_: Call transition info, call point
+
+**Resolution Context**:
+The set of source files provided via `--context` parsed to build a symbol table for cross-file call resolution, without being analysis targets.
+_Avoid_: Secondary files, include paths, library files
+
+**Variable Binding**:
+A constructor-assignment mapping (`variable → class`) extracted from file scope to resolve instance method calls to their class definitions.
+_Avoid_: Type inference, symbol alias

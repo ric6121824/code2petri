@@ -1,0 +1,73 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="merge_t1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="p3"];
+    "p4" [shape=circle, label="p4"];
+    "p5" [shape=circle, label="p5"];
+    "p6" [shape=circle, label="p6"];
+    "p7" [shape=circle, label="p7"];
+    "p8" [shape=circle, label="p8"];
+    "p9" [shape=circle, label="p9"];
+    "p10" [shape=circle, label="p10"];
+    "p11" [shape=circle, label="p11"];
+    "p12" [shape=circle, label="p12"];
+    "p13" [shape=circle, label="p13"];
+    "p14" [shape=circle, label="p14"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (shieldOn) (line 157)"];
+    "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 157)"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let healRate = 0.005 (line 158)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let newHue = call: lerp() (line 159)"];
+    "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let newSat = call: lerp() (line 160)"];
+    "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let newBri = call: lerp() (line 161)"];
+    "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="redBall.color = call: color() (line 162)"];
+    "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="redBall.wearFactor = call: min() (line 163)"];
+    "t9" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let center = call: createVector() (line 167)"];
+    "t10" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let toCenter = call: p5.Vector.sub() (line 168)"];
+    "t11" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let centerForce = call: toCenter.setMag() (line 169)"];
+    "t12" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: redBall.vel.add() (line 170)"];
+    "t13" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: redBall.pos.add() (line 171)"];
+    "t14" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: redBall.vel.mult() (line 172)"];
+    "t15" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="redBall.angle += redBall.angularVelocity (line 173)"];
+    "t16" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="redBall.angularVelocity *= 0.99 (line 174)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "p0" -> "t2";
+    "t1" -> "p2";
+    "p2" -> "t3";
+    "t3" -> "p3";
+    "p3" -> "t4";
+    "t4" -> "p4";
+    "p4" -> "t5";
+    "t5" -> "p5";
+    "p5" -> "t6";
+    "t6" -> "p6";
+    "p6" -> "t7";
+    "t7" -> "p7";
+    "p7" -> "t8";
+    "t8" -> "p1";
+    "t2" -> "p1";
+    "p1" -> "t9";
+    "t9" -> "p8";
+    "p8" -> "t10";
+    "t10" -> "p9";
+    "p9" -> "t11";
+    "t11" -> "p10";
+    "p10" -> "t12";
+    "t12" -> "p11";
+    "p11" -> "t13";
+    "t13" -> "p12";
+    "p12" -> "t14";
+    "t14" -> "p13";
+    "p13" -> "t15";
+    "t15" -> "p14";
+    "p14" -> "t16";
+    "t16" -> "p_end";
+}

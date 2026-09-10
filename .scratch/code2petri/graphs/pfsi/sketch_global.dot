@@ -1,0 +1,98 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="p3"];
+    "p4" [shape=circle, label="p4"];
+    "p5" [shape=circle, label="p5"];
+    "p6" [shape=circle, label="p6"];
+    "p7" [shape=circle, label="p7"];
+    "p8" [shape=circle, label="p8"];
+    "p9" [shape=circle, label="p9"];
+    "p10" [shape=circle, label="p10"];
+    "p11" [shape=circle, label="p11"];
+    "p12" [shape=circle, label="p12"];
+    "p13" [shape=circle, label="p13"];
+    "p14" [shape=circle, label="p14"];
+    "p15" [shape=circle, label="p15"];
+    "p16" [shape=circle, label="p16"];
+    "p17" [shape=circle, label="p17"];
+    "p18" [shape=circle, label="p18"];
+    "p19" [shape=circle, label="p19"];
+    "p20" [shape=circle, label="p20"];
+    "p21" [shape=circle, label="p21"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let started = false (line 1)"];
+    "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let socket (line 3)"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let alpha = 0, beta = 0, gamma = 0 (line 4)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let dataReceived = false (line 5)"];
+    "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let redBall (line 7)"];
+    "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let balls = [] (line 8)"];
+    "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let initialBallCount = 0 (line 9)"];
+    "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let maxBalls = 100 (line 10)"];
+    "t9" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let firstSpawnDelay = 800 (line 11)"];
+    "t10" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let regularSpawnInterval = 400 (line 12)"];
+    "t11" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let frameCounter = 0 (line 13)"];
+    "t12" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let firstSpawnDone = false (line 15)"];
+    "t13" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let shieldOn = false (line 17)"];
+    "t14" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let shieldButton (line 18)"];
+    "t15" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let scratches = [] (line 20)"];
+    "t16" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let bgMusic (line 22)"];
+    "t17" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let slashSound (line 23)"];
+    "t18" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let hitSound (line 24)"];
+    "t19" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let vol = 1.0 (line 25)"];
+    "t20" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let lastHitSoundTime = 0 (line 26)"];
+    "t21" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const hitCooldown = 50 (line 27)"];
+    "t22" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="Ball.nextID = 0 (line 642)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p1";
+    "p1" -> "t2";
+    "t2" -> "p2";
+    "p2" -> "t3";
+    "t3" -> "p3";
+    "p3" -> "t4";
+    "t4" -> "p4";
+    "p4" -> "t5";
+    "t5" -> "p5";
+    "p5" -> "t6";
+    "t6" -> "p6";
+    "p6" -> "t7";
+    "t7" -> "p7";
+    "p7" -> "t8";
+    "t8" -> "p8";
+    "p8" -> "t9";
+    "t9" -> "p9";
+    "p9" -> "t10";
+    "t10" -> "p10";
+    "p10" -> "t11";
+    "t11" -> "p11";
+    "p11" -> "t12";
+    "t12" -> "p12";
+    "p12" -> "t13";
+    "t13" -> "p13";
+    "p13" -> "t14";
+    "t14" -> "p14";
+    "p14" -> "t15";
+    "t15" -> "p15";
+    "p15" -> "t16";
+    "t16" -> "p16";
+    "p16" -> "t17";
+    "t17" -> "p17";
+    "p17" -> "t18";
+    "t18" -> "p18";
+    "p18" -> "t19";
+    "t19" -> "p19";
+    "p19" -> "t20";
+    "t20" -> "p20";
+    "p20" -> "t21";
+    "t21" -> "p21";
+    "p21" -> "t22";
+    "t22" -> "p_end";
+}

@@ -99,7 +99,9 @@ def code2petri(
     lineno = walker.get_node_lineno(func_node)
     logger.info("Analyzing function '%s' at line %d...", target_function, lineno)
     logger.debug("Walking AST node for '%s'...", target_function)
-    net = walker.walk_function(func_node, target_function)
+    walk_res = walker.walk_function(func_node, target_function)
+    net, call_sites = walk_res.net, walk_res.call_sites
+    logger.debug("Extracted %d call site(s) from '%s'", len(call_sites), target_function)
     logger.info(
         "Constructed Petri net with %d places, %d transitions, and %d arcs.",
         len(net.places),

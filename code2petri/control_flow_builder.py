@@ -73,6 +73,7 @@ class ControlFlowBuilder:
         label: str,
         line_number: Optional[int] = None,
         hook_exception: bool = True,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Transition:
         """Creates and registers a new Transition with auto-incremented ID, hooking into try_stack if active."""
         self.trans_counter += 1
@@ -81,6 +82,7 @@ class ControlFlowBuilder:
             id_=t_id,
             label=label,
             line_number=line_number,
+            metadata=metadata,
         )
         if hook_exception and self.try_stack:
             self.net.add_arc(source=trans, target=self.try_stack[-1].except_entry)

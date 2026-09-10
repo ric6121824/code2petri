@@ -1,5 +1,5 @@
 import ast
-from typing import Optional, Union, List
+from typing import Optional, Union, List, Dict, Any
 
 from code2flow.python import Python
 from code2petri.control_flow_builder import (
@@ -9,7 +9,7 @@ from code2petri.control_flow_builder import (
     TryContext,
 )
 from code2petri.model import PetriNet, Place, Transition, Arc
-from code2petri.walker_protocol import WalkerProtocol
+from code2petri.walker_protocol import WalkerProtocol, WalkResult, CallSite
 
 
 def _get_executable_statements(tree: ast.AST) -> List[ast.stmt]:
@@ -333,12 +333,16 @@ class PythonWalker(WalkerProtocol):
         funcs.extend([name for name, _ in _collect_functions(tree)])
         return funcs
 
+    def collect_variable_bindings(self, tree: Any) -> Dict[str, str]:
+        """Collects variable to class name bindings from constructor calls in the AST."""
+        return {}
+
     def walk_function(
         self,
-        ast_node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+        ast_node: Any,
         func_name: str = "",
-    ) -> PetriNet:
-        """Walks a Python function definition AST and constructs a PetriNet model."""
+    ) -> WalkResult:
+        """Walks a Python function definition AST and constructs a PetriNet model packaged in a WalkResult."""
         if not isinstance(ast_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             raise TypeError(
                 f"walk_function expects an ast.FunctionDef or ast.AsyncFunctionDef, "
@@ -364,4 +368,4 @@ class PythonWalker(WalkerProtocol):
         walker = _PythonControlFlowWalker(builder=builder)
         walker.walk_block(ast_node.body, current_place=start_place, target_exit=end_place)
 
-        return net
+        return WalkResult(net=net, call_sites=[])

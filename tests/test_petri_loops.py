@@ -10,7 +10,7 @@ if REPO_ROOT not in sys.path:
 from code2petri.python_walker import PythonWalker  # noqa: E402
 
 walker = PythonWalker()
-walk_function = walker.walk_function
+walk_function = lambda *args, **kwargs: walker.walk_function(*args, **kwargs).net
 parse_file = walker.parse_file
 find_function = walker.find_function
 from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402

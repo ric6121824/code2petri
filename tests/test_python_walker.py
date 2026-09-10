@@ -10,9 +10,10 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from code2petri.python_walker import PythonWalker  # noqa: E402
+from code2petri.walker_protocol import WalkResult, CallSite  # noqa: E402
 
 walker = PythonWalker()
-walk_function = walker.walk_function
+walk_function = lambda *args, **kwargs: walker.walk_function(*args, **kwargs).net
 parse_file = walker.parse_file
 find_function = walker.find_function
 find_all_functions = walker.find_all_functions
@@ -40,12 +41,19 @@ class TestPythonWalkerSequential(unittest.TestCase):
         self.assertIsInstance(self.func_node, (ast.FunctionDef, ast.AsyncFunctionDef))
 
     def test_sequential_counts(self):
-        net = walk_function(self.func_node)
+        walk_res = walker.walk_function(self.func_node)
+        self.assertIsInstance(walk_res, WalkResult)
+        self.assertEqual(walk_res.call_sites, [])
+        net = walk_res.net
         self.assertIsInstance(net, PetriNet)
         # 5 sequential statements + 1 return: 6 transitions, 7 places, 12 arcs
         self.assertEqual(len(net.transitions), 6)
         self.assertEqual(len(net.places), 7)
         self.assertEqual(len(net.arcs), 12)
+
+    def test_collect_variable_bindings_baseline(self):
+        bindings = walker.collect_variable_bindings(self.tree)
+        self.assertEqual(bindings, {})
 
     def test_start_and_end_places(self):
         net = walk_function(self.func_node)

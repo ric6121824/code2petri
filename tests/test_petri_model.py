@@ -284,5 +284,147 @@ class TestPetriJsonSerialization(unittest.TestCase):
         self.assertEqual(parsed, self.net.to_dict())
 
 
+class TestTransitionMetadataAndSerialization(unittest.TestCase):
+    def test_transition_metadata_default_is_none(self):
+        t = Transition(id="t1", label="run()")
+        self.assertIsNone(t.metadata)
+        d = t.to_dict()
+        self.assertNotIn("metadata", d)
+        self.assertNotIn("resolved", d)
+
+    def test_transition_metadata_explicit(self):
+        meta = {"resolved": True, "resolved_to": "Worker.process", "target_file": "worker.py"}
+        t = Transition(id="t1", label="worker.process()", line_number=5, metadata=meta)
+        self.assertEqual(t.metadata, meta)
+        d = t.to_dict()
+        self.assertEqual(d["metadata"], meta)
+        self.assertTrue(d["resolved"])
+        self.assertEqual(d["resolved_to"], "Worker.process")
+        self.assertEqual(d["target_file"], "worker.py")
+
+    def test_petri_net_add_transition_forwards_metadata(self):
+        net = PetriNet()
+        meta = {"resolved": False}
+        t = net.add_transition(id="t0", label="external()", line_number=3, metadata=meta)
+        self.assertEqual(t.metadata, meta)
+        self.assertEqual(len(net.transitions), 1)
+        self.assertIs(net.transitions[0], t)
+
+    def test_pnml_serialization_with_resolved_and_unresolved_metadata(self):
+        net = PetriNet()
+        p0 = net.add_place("p0", "start", initial_tokens=1)
+        p1 = net.add_place("p1", "mid")
+        p2 = net.add_place("p2", "end")
+
+        t_res = net.add_transition(
+            id="t1",
+            label="call: gpuEngine.step()",
+            metadata={"resolved": True, "resolved_to": "WebGLEngine.step", "target_file": "webgl-engine.js"},
+        )
+        t_unres = net.add_transition(
+            id="t2",
+            label="call: document.getElementById()",
+            metadata={"resolved": False},
+        )
+        net.add_arc(p0, t_res)
+        net.add_arc(t_res, p1)
+        net.add_arc(p1, t_unres)
+        net.add_arc(t_unres, p2)
+
+        pnml_xml = net.to_pnml()
+        root = ET.fromstring(pnml_xml)
+
+        transitions = {t.attrib["id"]: t for t in root.iter() if t.tag.endswith("transition")}
+        self.assertIn("t1", transitions)
+        self.assertIn("t2", transitions)
+
+        # t1: resolved
+        tool_t1 = [el for el in transitions["t1"].iter() if el.tag.endswith("toolspecific")]
+        self.assertEqual(len(tool_t1), 1)
+        self.assertEqual(tool_t1[0].attrib.get("tool"), "code2petri")
+        self.assertEqual(tool_t1[0].attrib.get("version"), "1.0")
+        resolved_el = [el for el in tool_t1[0].iter() if el.tag.endswith("resolved")]
+        self.assertEqual(len(resolved_el), 1)
+        self.assertEqual(resolved_el[0].attrib.get("target"), "WebGLEngine.step")
+        self.assertEqual(resolved_el[0].attrib.get("file"), "webgl-engine.js")
+
+        # t2: unresolved
+        tool_t2 = [el for el in transitions["t2"].iter() if el.tag.endswith("toolspecific")]
+        self.assertEqual(len(tool_t2), 1)
+        unresolved_el = [el for el in tool_t2[0].iter() if el.tag.endswith("unresolved")]
+        self.assertEqual(len(unresolved_el), 1)
+
+    def test_dot_serialization_with_resolved_and_unresolved_metadata(self):
+        net = PetriNet()
+        p0 = net.add_place("p0", "start", initial_tokens=1)
+        p1 = net.add_place("p1", "end")
+
+        t_res = net.add_transition(
+            id="t1",
+            label="call: foo()",
+            metadata={"resolved": True, "resolved_to": "Foo.foo", "target_file": "foo.py"},
+        )
+        t_unres = net.add_transition(
+            id="t2",
+            label="call: bar()",
+            metadata={"resolved": False},
+        )
+        net.add_arc(p0, t_res)
+        net.add_arc(t_res, p1)
+        net.add_arc(p1, t_unres)
+
+        dot = net.to_dot()
+        self.assertIn('color="#2e7d32"', dot)
+        self.assertIn('tooltip="Resolved to Foo.foo in foo.py"', dot)
+        self.assertIn('color="#e65100"', dot)
+        self.assertIn('tooltip="Unresolved call"', dot)
+
+    def test_json_serialization_preserves_metadata(self):
+        net = PetriNet()
+        meta = {"resolved": True, "resolved_to": "App.start", "target_file": "app.js"}
+        net.add_transition(id="t0", label="start()", metadata=meta)
+
+        data = json.loads(net.to_json())
+        t0_data = data["transitions"][0]
+        self.assertEqual(t0_data["metadata"], meta)
+        self.assertTrue(t0_data["resolved"])
+        self.assertEqual(t0_data["resolved_to"], "App.start")
+        self.assertEqual(t0_data["target_file"], "app.js")
+
+    def test_generic_metadata_serialization(self):
+        net = PetriNet()
+        p0 = net.add_place("p0", "start", initial_tokens=1)
+        p1 = net.add_place("p1", "end")
+        t = net.add_transition(
+            id="t0",
+            label="custom_op()",
+            metadata={"tag": "critical", "cost": 42, "tooltip": "Custom Cost Op"},
+        )
+        net.add_arc(p0, t)
+        net.add_arc(t, p1)
+
+        # Dict / JSON
+        d = t.to_dict()
+        self.assertEqual(d["metadata"]["tag"], "critical")
+        self.assertEqual(d["metadata"]["cost"], 42)
+        json_data = json.loads(net.to_json())
+        self.assertEqual(json_data["transitions"][0]["metadata"]["tag"], "critical")
+
+        # PNML
+        pnml_xml = net.to_pnml()
+        root = ET.fromstring(pnml_xml)
+        props = {
+            el.attrib["name"]: el.attrib["value"]
+            for el in root.iter()
+            if el.tag.endswith("property")
+        }
+        self.assertEqual(props.get("tag"), "critical")
+        self.assertEqual(props.get("cost"), "42")
+
+        # DOT
+        dot = net.to_dot()
+        self.assertIn('tooltip="Custom Cost Op"', dot)
+
+
 if __name__ == '__main__':
     unittest.main()

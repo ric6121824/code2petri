@@ -47,6 +47,7 @@ class Transition:
         label: str = "",
         line_number: Optional[int] = None,
         id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         node_id = id if id is not None else id_
         if node_id is None:
@@ -54,20 +55,31 @@ class Transition:
         self.id = str(node_id)
         self.label = str(label)
         self.line_number = line_number
+        self.metadata: Optional[Dict[str, Any]] = dict(metadata) if metadata is not None else None
 
     def __repr__(self) -> str:
+        metadata_str = f", metadata={self.metadata!r}" if self.metadata is not None else ""
         return (
             f"Transition(id={self.id!r}, label={self.label!r}, "
-            f"line_number={self.line_number!r})"
+            f"line_number={self.line_number!r}{metadata_str})"
         )
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the Transition into a dictionary."""
-        return {
+        d: Dict[str, Any] = {
             "id": self.id,
             "label": self.label,
             "line_number": self.line_number,
         }
+        if self.metadata is not None:
+            d["metadata"] = dict(self.metadata)
+            if "resolved" in self.metadata:
+                d["resolved"] = self.metadata["resolved"]
+            if "resolved_to" in self.metadata:
+                d["resolved_to"] = self.metadata["resolved_to"]
+            if "target_file" in self.metadata:
+                d["target_file"] = self.metadata["target_file"]
+        return d
 
 
 class Arc:
@@ -145,12 +157,14 @@ class PetriNet:
         label: str = "",
         line_number: Optional[int] = None,
         id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> Transition:
         node_id = id if id is not None else id_
         transition = Transition(
             id=node_id,
             label=label,
             line_number=line_number,
+            metadata=metadata,
         )
         self.transitions.append(transition)
         return transition
@@ -196,6 +210,23 @@ class PetriNet:
             t_name = ET.SubElement(t_el, "name")
             t_text = ET.SubElement(t_name, "text")
             t_text.text = transition.label
+            if transition.metadata:
+                tool_el = ET.SubElement(t_el, "toolspecific", tool="code2petri", version="1.0")
+                if transition.metadata.get("resolved"):
+                    ET.SubElement(
+                        tool_el,
+                        "resolved",
+                        target=str(transition.metadata.get("resolved_to", "")),
+                        file=str(transition.metadata.get("target_file", "")),
+                    )
+                elif transition.metadata.get("resolved") is False:
+                    ET.SubElement(tool_el, "unresolved")
+
+                # Emit any other custom properties
+                skip_keys = {"resolved", "resolved_to", "target_file"}
+                for k, v in transition.metadata.items():
+                    if k not in skip_keys:
+                        ET.SubElement(tool_el, "property", name=str(k), value=str(v))
 
         for i, arc in enumerate(self.arcs):
             arc_id = f"a{i+1}"
@@ -247,9 +278,33 @@ class PetriNet:
                 label = f"{label} (line {transition.line_number})"
             escaped_label = escape_dot(label)
             escaped_id = escape_dot(transition.id)
+            extra_attrs = ""
+            if transition.metadata:
+                attrs_list = []
+                if transition.metadata.get("resolved"):
+                    attrs_list.append('color="#2e7d32"')
+                elif transition.metadata.get("resolved") is False:
+                    attrs_list.append('color="#e65100"')
+
+                # Tooltip resolution
+                if transition.metadata.get("resolved") and transition.metadata.get("resolved_to"):
+                    target = transition.metadata.get("resolved_to", "")
+                    file_ = transition.metadata.get("target_file", "")
+                    tooltip_text = f"Resolved to {target} in {file_}" if file_ else f"Resolved to {target}"
+                    attrs_list.append(f'tooltip="{escape_dot(tooltip_text)}"')
+                elif transition.metadata.get("resolved") is False:
+                    attrs_list.append('tooltip="Unresolved call"')
+                elif "tooltip" in transition.metadata:
+                    attrs_list.append(f'tooltip="{escape_dot(str(transition.metadata["tooltip"]))}"')
+                elif transition.metadata:
+                    items_str = ", ".join(f"{k}={v}" for k, v in transition.metadata.items())
+                    attrs_list.append(f'tooltip="{escape_dot(items_str)}"')
+
+                if attrs_list:
+                    extra_attrs = ", " + ", ".join(attrs_list)
             lines.append(
                 f'    "{escaped_id}" [shape=rect, style=filled, fillcolor=black, '
-                f'fontcolor=white, label="{escaped_label}"];'
+                f'fontcolor=white, label="{escaped_label}"{extra_attrs}];'
             )
 
         lines.append("")

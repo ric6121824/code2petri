@@ -1,0 +1,14 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.lifespan -= 5 (line 795)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p_end";
+}

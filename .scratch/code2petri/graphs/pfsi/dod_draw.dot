@@ -1,0 +1,46 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="p3"];
+    "p4" [shape=circle, label="p4"];
+    "p5" [shape=circle, label="p5"];
+    "p6" [shape=circle, label="p6"];
+    "p7" [shape=circle, label="p7"];
+    "p8" [shape=circle, label="p8"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: background() (line 133)"];
+    "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: updateShieldStatus() (line 136)"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: updateRedBallState() (line 137)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: spawnNewBall() (line 138)"];
+    "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: handleCollisionsAndInteractions() (line 139)"];
+    "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: updateAndDrawScratches() (line 140)"];
+    "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: updateAndDrawBalls() (line 141)"];
+    "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: drawRedBall() (line 142)"];
+    "t9" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: drawDebugInfo() (line 143)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p1";
+    "p1" -> "t2";
+    "t2" -> "p2";
+    "p2" -> "t3";
+    "t3" -> "p3";
+    "p3" -> "t4";
+    "t4" -> "p4";
+    "p4" -> "t5";
+    "t5" -> "p5";
+    "p5" -> "t6";
+    "t6" -> "p6";
+    "p6" -> "t7";
+    "t7" -> "p7";
+    "p7" -> "t8";
+    "t8" -> "p8";
+    "p8" -> "t9";
+    "t9" -> "p_end";
+}

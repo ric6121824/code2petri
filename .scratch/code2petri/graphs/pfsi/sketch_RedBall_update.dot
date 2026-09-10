@@ -1,0 +1,53 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="p3"];
+    "p4" [shape=circle, label="p4"];
+    "p5" [shape=circle, label="p5"];
+    "p6" [shape=circle, label="p6"];
+    "p7" [shape=circle, label="p7"];
+    "p8" [shape=circle, label="p8"];
+    "p9" [shape=circle, label="p9"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let center = call: createVector() (line 423)"];
+    "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let toCenter = call: p5.Vector.sub() (line 424)"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let centerForce = call: toCenter.setMag() (line 425)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: this.vel.add() (line 426)"];
+    "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: this.pos.add() (line 428)"];
+    "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: this.vel.mult() (line 429)"];
+    "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.angle += this.angularVelocity (line 431)"];
+    "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.angularVelocity *= 0.99 - (100 - this.wearFactor)/1000 (line 432)"];
+    "t9" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (shieldOn) (line 435)"];
+    "t10" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 435)"];
+    "t11" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.wearFactor = call: min() (line 436)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p1";
+    "p1" -> "t2";
+    "t2" -> "p2";
+    "p2" -> "t3";
+    "t3" -> "p3";
+    "p3" -> "t4";
+    "t4" -> "p4";
+    "p4" -> "t5";
+    "t5" -> "p5";
+    "p5" -> "t6";
+    "t6" -> "p6";
+    "p6" -> "t7";
+    "t7" -> "p7";
+    "p7" -> "t8";
+    "t8" -> "p8";
+    "p8" -> "t9";
+    "p8" -> "t10";
+    "t9" -> "p9";
+    "p9" -> "t11";
+    "t11" -> "p_end";
+    "t10" -> "p_end";
+}

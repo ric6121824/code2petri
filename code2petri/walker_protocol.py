@@ -1,7 +1,25 @@
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, NamedTuple, Optional
 
-from code2petri.model import PetriNet
+from code2petri.model import PetriNet, Place, Transition, Arc
+
+
+@dataclass
+class CallSite:
+    """Represents an extracted function call site within an analyzed function."""
+    caller_function: str
+    caller_file: str
+    callee_name: str
+    callee_owner: Optional[str]
+    line_number: int
+    transition_id: str
+
+
+class WalkResult(NamedTuple):
+    """Container packaging the generated PetriNet and extracted CallSite records."""
+    net: PetriNet
+    call_sites: List[CallSite]
 
 
 class WalkerProtocol(ABC):
@@ -23,8 +41,13 @@ class WalkerProtocol(ABC):
         ...
 
     @abstractmethod
-    def walk_function(self, ast_node: Any, func_name: str = "") -> PetriNet:
-        """Walks a function/method AST node and constructs a PetriNet model."""
+    def walk_function(self, ast_node: Any, func_name: str = "") -> WalkResult:
+        """Walks a function/method AST node and constructs a PetriNet model packaged in a WalkResult."""
+        ...
+
+    @abstractmethod
+    def collect_variable_bindings(self, tree: Any) -> Dict[str, str]:
+        """Scans the complete file AST and returns a mapping of variable names to class names."""
         ...
 
     @abstractmethod

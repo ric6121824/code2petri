@@ -1,0 +1,36 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="exit_t4"];
+    "p4" [shape=circle, label="p4"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="for (let i = 0; i < balls.pos.length; i++) (line 222)"];
+    "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="exit (line 222)"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: collideRedBallAndBall() (line 224)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="for (let j = i + 1; j < balls.pos.length; j++) (line 227)"];
+    "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="exit (line 227)"];
+    "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: resolveSquareCollision() (line 228)"];
+    "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="call: applyAttack() (line 232)"];
+
+    // Arcs
+    "p0" -> "t1";
+    "p0" -> "t2";
+    "t1" -> "p1";
+    "p1" -> "t3";
+    "t3" -> "p2";
+    "p2" -> "t4";
+    "p2" -> "t5";
+    "t4" -> "p4";
+    "p4" -> "t6";
+    "t6" -> "p2";
+    "t5" -> "p3";
+    "p3" -> "t7";
+    "t7" -> "p0";
+    "t2" -> "p_end";
+}
