@@ -51,6 +51,7 @@ class ControlFlowBuilder:
         self.trans_counter = 0
         self.loop_stack: List[LoopContext] = []
         self.try_stack: List[TryContext] = []
+        self.last_transition: Optional[Transition] = None
 
     def new_place(
         self,
@@ -86,6 +87,7 @@ class ControlFlowBuilder:
             metadata=metadata,
             resolution=resolution,
         )
+        self.last_transition = trans
         if hook_exception and self.try_stack:
             self.net.add_arc(source=trans, target=self.try_stack[-1].except_entry)
         return trans
@@ -191,12 +193,15 @@ class ControlFlowBuilder:
         alternate_stmts: Any,
         walk_block_fn: Any,
         false_label: str = "else",
+        on_true_trans: Optional[Any] = None,
     ) -> Optional[Place]:
         """Wires an if/else XOR branching split and merges paths."""
         true_trans = self.new_transition(
             label=true_label,
             line_number=ctx.lineno,
         )
+        if on_true_trans is not None:
+            on_true_trans(true_trans)
         self.add_arc(source=ctx.current_place, target=true_trans)
 
         false_trans = self.new_transition(

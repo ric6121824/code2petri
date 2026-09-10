@@ -40,7 +40,8 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
         self.assertIsInstance(res, WalkResult)
         self.assertIsInstance(res.net, PetriNet)
         self.assertIsInstance(res.call_sites, list)
-        self.assertEqual(res.call_sites, [])
+        self.assertEqual(len(res.call_sites), 1)
+        self.assertEqual(res.call_sites[0].callee_name, "print")
         assert_valid_petri_net(self, res.net)
 
     def test_walk_function_returns_walk_result_for_other_fixtures(self):
@@ -58,14 +59,16 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
         self.assertIsInstance(res, WalkResult)
         self.assertIsInstance(res.net, PetriNet)
         self.assertIsInstance(res.call_sites, list)
-        self.assertEqual(res.call_sites, [])
+        self.assertEqual(len(res.call_sites), 1)
+        self.assertEqual(res.call_sites[0].callee_name, "calculate")
 
         global_tree = self.walker.parse_file(self.global_fixture)
         global_node = self.walker.find_function(global_tree, "(global)")
         res_global = self.walker.walk_function(global_node, "(global)")
         self.assertIsInstance(res_global, WalkResult)
         self.assertIsInstance(res_global.net, PetriNet)
-        self.assertEqual(res_global.call_sites, [])
+        self.assertEqual(len(res_global.call_sites), 1)
+        self.assertEqual(res_global.call_sites[0].callee_name, "init")
 
     def test_collect_variable_bindings_baseline(self):
         tree = self.walker.parse_file(self.seq_fixture)
@@ -978,6 +981,162 @@ class TestGameOfLifeSimulatorIntegration(unittest.TestCase):
         self.assertTrue(any("modeRadios.forEach" in l or "addEventListener" in l for l in labels))
 
 
+class TestJavascriptVariableBindings(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.app_js = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "game_of_life",
+            "app.js",
+        )
+
+    def test_variable_declarations_with_new_expression(self):
+        tree = {
+            "type": "Program",
+            "body": [
+                {
+                    "type": "VariableDeclaration",
+                    "kind": "const",
+                    "declarations": [
+                        {
+                            "type": "VariableDeclarator",
+                            "id": {"type": "Identifier", "name": "engine"},
+                            "init": {
+                                "type": "NewExpression",
+                                "callee": {"type": "Identifier", "name": "WebGLEngine"},
+                                "arguments": [],
+                            },
+                        },
+                        {
+                            "type": "VariableDeclarator",
+                            "id": {"type": "Identifier", "name": "normal"},
+                            "init": {
+                                "type": "CallExpression",
+                                "callee": {"type": "Identifier", "name": "getEngine"},
+                                "arguments": [],
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+        bindings = self.walker.collect_variable_bindings(tree)
+        self.assertEqual(bindings, {"engine": "WebGLEngine"})
+
+    def test_assignment_expressions_this_and_obj(self):
+        tree = {
+            "type": "Program",
+            "body": [
+                {
+                    "type": "ExpressionStatement",
+                    "expression": {
+                        "type": "AssignmentExpression",
+                        "operator": "=",
+                        "left": {
+                            "type": "MemberExpression",
+                            "object": {"type": "ThisExpression"},
+                            "property": {"type": "Identifier", "name": "renderer"},
+                        },
+                        "right": {
+                            "type": "NewExpression",
+                            "callee": {"type": "Identifier", "name": "Renderer"},
+                            "arguments": [],
+                        },
+                    },
+                },
+                {
+                    "type": "ExpressionStatement",
+                    "expression": {
+                        "type": "AssignmentExpression",
+                        "operator": "=",
+                        "left": {
+                            "type": "MemberExpression",
+                            "object": {"type": "Identifier", "name": "globalState"},
+                            "property": {"type": "Identifier", "name": "cache"},
+                        },
+                        "right": {
+                            "type": "NewExpression",
+                            "callee": {"type": "Identifier", "name": "MemoryCache"},
+                            "arguments": [],
+                        },
+                    },
+                },
+            ],
+        }
+        bindings = self.walker.collect_variable_bindings(tree)
+        self.assertEqual(bindings, {
+            "this.renderer": "Renderer",
+            "globalState.cache": "MemoryCache",
+        })
+
+    def test_game_of_life_app_bindings(self):
+        tree = self.walker.parse_file(self.app_js)
+        bindings = self.walker.collect_variable_bindings(tree)
+        self.assertIn("gpuEngine", bindings)
+        self.assertEqual(bindings["gpuEngine"], "WebGLEngine")
+        self.assertIn("newGrid", bindings)
+        self.assertEqual(bindings["newGrid"], "Array")
+        # normal assignments should NOT be in bindings
+        self.assertNotIn("ctx", bindings)
+        self.assertNotIn("canvasCpu", bindings)
+
+
+class TestJavascriptCallSiteExtraction(unittest.TestCase):
+    def setUp(self):
+        self.walker = JavascriptWalker()
+        self.app_js = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "game_of_life",
+            "app.js",
+        )
+        self.webgl_js = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "game_of_life",
+            "webgl-engine.js",
+        )
+
+    def test_app_loop_call_sites(self):
+        tree = self.walker.parse_file(self.app_js)
+        node = self.walker.find_function(tree, "loop")
+        res = self.walker.walk_function(node, "loop")
+        self.assertIsInstance(res, WalkResult)
+
+        callee_tuples = [(cs.callee_name, cs.callee_owner) for cs in res.call_sites]
+        # In loop(timestamp):
+        # gpuEngine.step() -> ('step', 'gpuEngine')
+        # stepCpu() -> ('stepCpu', None)
+        # requestAnimationFrame(loop) -> ('requestAnimationFrame', None)
+        self.assertIn(("step", "gpuEngine"), callee_tuples)
+        self.assertIn(("stepCpu", None), callee_tuples)
+        self.assertIn(("requestAnimationFrame", None), callee_tuples)
+
+        # Verify all call site transition IDs exist in the net
+        net_t_ids = {t.id for t in res.net.transitions}
+        for cs in res.call_sites:
+            self.assertIn(cs.transition_id, net_t_ids)
+            self.assertEqual(cs.caller_function, "loop")
+            self.assertEqual(cs.caller_file, self.app_js)
+            self.assertGreater(cs.line_number, 0)
+
+    def test_webgl_engine_this_call_sites(self):
+        tree = self.walker.parse_file(self.webgl_js)
+        node = self.walker.find_function(tree, "WebGLEngine.step")
+        res = self.walker.walk_function(node, "WebGLEngine.step")
+        self.assertIsInstance(res, WalkResult)
+
+        callee_tuples = [(cs.callee_name, cs.callee_owner) for cs in res.call_sites]
+        self.assertIn(("drawToScreen", "this"), callee_tuples)
+
+        net_t_ids = {t.id for t in res.net.transitions}
+        for cs in res.call_sites:
+            self.assertIn(cs.transition_id, net_t_ids)
+
+
 if __name__ == '__main__':
     unittest.main()
+
+
 

@@ -253,7 +253,8 @@ class TestPythonWalkerProtocolAndQualifiedNames(unittest.TestCase):
         self.assertEqual(global_node.name, "(global)")
         walk_res = self.walker.walk_function(global_node)
         self.assertIsInstance(walk_res, WalkResult)
-        self.assertEqual(walk_res.call_sites, [])
+        self.assertEqual(len(walk_res.call_sites), 1)
+        self.assertEqual(walk_res.call_sites[0].callee_name, "print")
         assert_valid_petri_net(self, walk_res.net)
 
 

@@ -126,11 +126,64 @@ def _get_block_lineno(stmts: List[ast.AST], default: Optional[int] = None) -> Op
     return default
 
 
+def _find_calls_in_expr(node: Optional[ast.AST]) -> List[ast.Call]:
+    """Finds all ast.Call nodes within an expression subtree."""
+    if node is None:
+        return []
+    calls: List[ast.Call] = []
+    for subnode in ast.walk(node):
+        if isinstance(subnode, ast.Call):
+            calls.append(subnode)
+    calls.sort(key=lambda c: (getattr(c, "lineno", 0), getattr(c, "col_offset", 0)))
+    return calls
+
+
+def _extract_call_site_from_ast_call(
+    call_node: ast.Call,
+    caller_function: str,
+    caller_file: str,
+    transition_id: str,
+    default_lineno: int = 0,
+) -> CallSite:
+    func = call_node.func
+    callee_owner = None
+    if isinstance(func, ast.Name):
+        callee_name = func.id
+    elif isinstance(func, ast.Attribute):
+        callee_name = func.attr
+        if isinstance(func.value, ast.Name):
+            callee_owner = func.value.id
+        elif hasattr(ast, "unparse"):
+            callee_owner = ast.unparse(func.value)
+        else:
+            callee_owner = "attr"
+    else:
+        callee_name = ast.unparse(func) if hasattr(ast, "unparse") else "call"
+
+    line_number = getattr(call_node, "lineno", default_lineno)
+    return CallSite(
+        caller_function=caller_function,
+        caller_file=caller_file,
+        callee_name=callee_name,
+        callee_owner=callee_owner,
+        line_number=line_number,
+        transition_id=transition_id,
+    )
+
+
 class _PythonControlFlowWalker:
     """Internal recursive walker constructing PetriNet places, transitions, and arcs."""
 
-    def __init__(self, builder: ControlFlowBuilder) -> None:
+    def __init__(
+        self,
+        builder: ControlFlowBuilder,
+        func_name: str = "",
+        filepath: str = "",
+    ) -> None:
         self.builder = builder
+        self.func_name = func_name
+        self.filepath = filepath
+        self.call_sites: List[CallSite] = []
         self._statement_handlers = {
             ast.Return: self._walk_return,
             ast.Break: self._walk_break,
@@ -143,8 +196,28 @@ class _PythonControlFlowWalker:
             ast.Raise: self._walk_raise,
         }
 
+    def _record_calls_in_expr(
+        self,
+        expr_node: Optional[ast.AST],
+        transition_id: str,
+        default_lineno: int = 0,
+    ) -> None:
+        if expr_node is None:
+            return
+        calls = _find_calls_in_expr(expr_node)
+        for call in calls:
+            cs = _extract_call_site_from_ast_call(
+                call_node=call,
+                caller_function=self.func_name,
+                caller_file=self.filepath,
+                transition_id=transition_id,
+                default_lineno=default_lineno,
+            )
+            self.call_sites.append(cs)
+
     def _walk_return(self, stmt: ast.Return, ctx: StatementContext) -> Optional[Place]:
-        self.builder.wire_return(ctx.current_place, _format_statement_label(stmt), stmt.lineno)
+        trans = self.builder.wire_return(ctx.current_place, _format_statement_label(stmt), stmt.lineno)
+        self._record_calls_in_expr(stmt.value, trans.id, stmt.lineno)
         return None
 
     def _walk_break(self, stmt: ast.Break, ctx: StatementContext) -> Optional[Place]:
@@ -161,6 +234,8 @@ class _PythonControlFlowWalker:
             label=_format_statement_label(stmt),
             line_number=stmt.lineno,
         )
+        if self.builder.last_transition:
+            self._record_calls_in_expr(stmt.exc, self.builder.last_transition.id, stmt.lineno)
         return None
 
     def _walk_if(self, stmt: ast.If, ctx: StatementContext) -> Optional[Place]:
@@ -172,6 +247,7 @@ class _PythonControlFlowWalker:
             false_lineno=else_lineno,
             alternate_stmts=stmt.orelse,
             walk_block_fn=self.walk_block,
+            on_true_trans=lambda t: self._record_calls_in_expr(stmt.test, t.id, stmt.lineno),
         )
 
     def _walk_loop(self, stmt: Union[ast.While, ast.For, ast.AsyncFor], ctx: StatementContext) -> Optional[Place]:
@@ -179,6 +255,9 @@ class _PythonControlFlowWalker:
             label=_format_statement_label(stmt),
             line_number=stmt.lineno,
         )
+        test_expr = stmt.test if isinstance(stmt, ast.While) else getattr(stmt, "iter", None)
+        self._record_calls_in_expr(test_expr, loop_trans.id, stmt.lineno)
+
         else_lineno = stmt.orelse[0].lineno if stmt.orelse and hasattr(stmt.orelse[0], "lineno") else stmt.lineno
         exit_label = "else" if stmt.orelse else "exit"
         exit_trans = self.builder.new_transition(
@@ -237,13 +316,16 @@ class _PythonControlFlowWalker:
 
     def _walk_default(self, stmt: ast.stmt, ctx: StatementContext) -> Optional[Place]:
         label = _format_statement_label(stmt)
-        return self.builder.wire_sequential_statement(
+        res = self.builder.wire_sequential_statement(
             current_place=ctx.current_place,
             label=label,
             lineno=stmt.lineno,
             is_last=ctx.is_last,
             target_exit=ctx.target_exit,
         )
+        if self.builder.last_transition:
+            self._record_calls_in_expr(stmt, self.builder.last_transition.id, stmt.lineno)
+        return res
 
     def walk_block(
         self,
@@ -270,11 +352,35 @@ class _PythonControlFlowWalker:
         return current_place
 
 
+def _extract_constructor_class_name(call_node: ast.Call) -> Optional[str]:
+    """Extracts class name if an ast.Call is an object constructor instantiation."""
+    func = call_node.func
+    if isinstance(func, ast.Name):
+        if func.id and func.id[0].isupper():
+            return func.id
+    elif isinstance(func, ast.Attribute):
+        if func.attr and func.attr[0].isupper():
+            return func.attr
+    return None
+
+
+def _extract_target_name(target_node: ast.AST) -> Optional[str]:
+    """Extracts variable name identifier or attribute path (e.g. 'x', 'self.engine')."""
+    if isinstance(target_node, ast.Name):
+        return target_node.id
+    if isinstance(target_node, ast.Attribute):
+        if isinstance(target_node.value, ast.Name):
+            return f"{target_node.value.id}.{target_node.attr}"
+        if hasattr(ast, "unparse"):
+            return ast.unparse(target_node)
+    return None
+
+
 class PythonWalker(WalkerProtocol):
     """Python AST walker implementing WalkerProtocol."""
 
     def __init__(self) -> None:
-        pass
+        self.filepath: Optional[str] = None
 
     def get_node_lineno(self, ast_node: Any) -> int:
         """Returns the line number for an AST node, defaulting to 0."""
@@ -282,6 +388,7 @@ class PythonWalker(WalkerProtocol):
 
     def parse_file(self, filepath: str) -> ast.AST:
         """Parses a Python source file into an AST."""
+        self.filepath = filepath
         return Python.get_tree(filepath, None)
 
     def find_function(
@@ -335,12 +442,33 @@ class PythonWalker(WalkerProtocol):
 
     def collect_variable_bindings(self, tree: Any) -> Dict[str, str]:
         """Collects variable to class name bindings from constructor calls in the AST."""
-        return {}
+        if not isinstance(tree, ast.AST):
+            return {}
+
+        bindings: Dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                if isinstance(node.value, ast.Call):
+                    class_name = _extract_constructor_class_name(node.value)
+                    if class_name:
+                        for target in node.targets:
+                            target_name = _extract_target_name(target)
+                            if target_name:
+                                bindings[target_name] = class_name
+            elif isinstance(node, ast.AnnAssign):
+                if isinstance(node.value, ast.Call):
+                    class_name = _extract_constructor_class_name(node.value)
+                    if class_name:
+                        target_name = _extract_target_name(node.target)
+                        if target_name:
+                            bindings[target_name] = class_name
+        return bindings
 
     def walk_function(
         self,
         ast_node: Any,
         func_name: str = "",
+        filepath: Optional[str] = None,
     ) -> WalkResult:
         """Walks a Python function definition AST and constructs a PetriNet model packaged in a WalkResult."""
         if not isinstance(ast_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -348,6 +476,9 @@ class PythonWalker(WalkerProtocol):
                 f"walk_function expects an ast.FunctionDef or ast.AsyncFunctionDef, "
                 f"got {type(ast_node).__name__}"
             )
+
+        active_func_name = func_name or getattr(ast_node, "name", "")
+        active_filepath = filepath or getattr(self, "filepath", "") or ""
 
         net = PetriNet()
 
@@ -365,7 +496,11 @@ class PythonWalker(WalkerProtocol):
         )
 
         builder = ControlFlowBuilder(net=net, end_place=end_place)
-        walker = _PythonControlFlowWalker(builder=builder)
+        walker = _PythonControlFlowWalker(
+            builder=builder,
+            func_name=active_func_name,
+            filepath=active_filepath,
+        )
         walker.walk_block(ast_node.body, current_place=start_place, target_exit=end_place)
 
-        return WalkResult(net=net, call_sites=[])
+        return WalkResult(net=net, call_sites=walker.call_sites)

@@ -75,6 +75,29 @@ def _get_class_body_elements(node: dict) -> List[dict]:
     return get_nested(node, "body", "body", default=[])
 
 
+def _find_js_calls_in_node(node: Any) -> List[dict]:
+    """Recursively finds CallExpression nodes within an expression subtree (avoiding nested functions)."""
+    calls: List[dict] = []
+
+    def _visit(n: Any) -> None:
+        if isinstance(n, dict):
+            ntype = n.get("type")
+            if ntype in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"):
+                return
+            if ntype == "CallExpression":
+                calls.append(n)
+            for k, v in n.items():
+                if k != "loc":
+                    _visit(v)
+        elif isinstance(n, list):
+            for item in n:
+                _visit(item)
+
+    _visit(node)
+    calls.sort(key=lambda c: _get_node_lineno(c, 0) or 0)
+    return calls
+
+
 class _JavascriptControlFlowWalker:
     """Internal recursive walker constructing PetriNet places, transitions, and arcs for JavaScript."""
 
@@ -84,11 +107,14 @@ class _JavascriptControlFlowWalker:
         start_place: Place,
         raw_source: str,
         func_name: Optional[str] = None,
+        filepath: str = "",
     ) -> None:
         self.builder = builder
         self.start_place = start_place
         self.raw_source = raw_source
         self.func_name = func_name
+        self.filepath = filepath
+        self.call_sites: List[CallSite] = []
         self._statement_formatters = {
             "ReturnStatement": self._format_return,
             "BreakStatement": lambda s: "break",
@@ -119,6 +145,54 @@ class _JavascriptControlFlowWalker:
             "SwitchStatement": self._walk_switch,
             "DoWhileStatement": self._walk_do_while,
         }
+
+    def _extract_js_call_site(
+        self,
+        call_expr: dict,
+        transition_id: str,
+        default_lineno: int = 0,
+    ) -> CallSite:
+        callee = call_expr.get("callee", {})
+        callee_type = callee.get("type")
+        callee_owner = None
+
+        if callee_type == "Identifier":
+            callee_name = callee.get("name", "")
+        elif callee_type == "MemberExpression":
+            prop = callee.get("property", {})
+            callee_name = prop.get("name") if prop.get("type") == "Identifier" else self._slice(prop)
+            obj = callee.get("object", {})
+            obj_type = obj.get("type")
+            if obj_type == "ThisExpression":
+                callee_owner = "this"
+            elif obj_type == "Identifier":
+                callee_owner = obj.get("name")
+            else:
+                callee_owner = self._slice(obj)
+        else:
+            callee_name = self._slice(callee)
+
+        line_number = _get_node_lineno(call_expr) or default_lineno
+        return CallSite(
+            caller_function=self.func_name or "",
+            caller_file=self.filepath or "",
+            callee_name=callee_name,
+            callee_owner=callee_owner,
+            line_number=line_number,
+            transition_id=transition_id,
+        )
+
+    def _record_calls_in_node(
+        self,
+        node: Any,
+        transition_id: str,
+        default_lineno: int = 0,
+    ) -> None:
+        if not node:
+            return
+        calls = _find_js_calls_in_node(node)
+        for c in calls:
+            self.call_sites.append(self._extract_js_call_site(c, transition_id, default_lineno))
 
     def _slice(self, node: Optional[dict]) -> str:
         """Extracts source text substring for an AST node using character offsets."""
@@ -347,11 +421,12 @@ class _JavascriptControlFlowWalker:
         stmt: dict,
         ctx: StatementContext,
     ) -> Optional[Place]:
-        self.builder.wire_return(
+        trans = self.builder.wire_return(
             current_place=ctx.current_place,
             label=self._format_statement_label(stmt),
             line_number=ctx.lineno,
         )
+        self._record_calls_in_node(stmt.get("argument"), trans.id, ctx.lineno or 0)
         return None
 
     def _walk_break(
@@ -388,6 +463,8 @@ class _JavascriptControlFlowWalker:
             label=self._format_statement_label(stmt),
             line_number=ctx.lineno,
         )
+        if self.builder.last_transition:
+            self._record_calls_in_node(stmt.get("argument"), self.builder.last_transition.id, ctx.lineno or 0)
         return None
 
     def _walk_if(
@@ -404,6 +481,7 @@ class _JavascriptControlFlowWalker:
             false_lineno=else_lineno,
             alternate_stmts=_to_stmt_list(alternate),
             walk_block_fn=self.walk_block,
+            on_true_trans=lambda t: self._record_calls_in_node(stmt.get("test"), t.id, ctx.lineno or 0),
         )
 
     def _walk_standard_loop(
@@ -415,6 +493,16 @@ class _JavascriptControlFlowWalker:
             label=self._format_statement_label(stmt),
             line_number=ctx.lineno,
         )
+        stmt_type = stmt.get("type")
+        if stmt_type == "WhileStatement":
+            self._record_calls_in_node(stmt.get("test"), loop_trans.id, ctx.lineno or 0)
+        elif stmt_type == "ForStatement":
+            self._record_calls_in_node(stmt.get("init"), loop_trans.id, ctx.lineno or 0)
+            self._record_calls_in_node(stmt.get("test"), loop_trans.id, ctx.lineno or 0)
+            self._record_calls_in_node(stmt.get("update"), loop_trans.id, ctx.lineno or 0)
+        elif stmt_type in ("ForInStatement", "ForOfStatement"):
+            self._record_calls_in_node(stmt.get("right"), loop_trans.id, ctx.lineno or 0)
+
         exit_trans = self.builder.new_transition(
             label="exit",
             line_number=ctx.lineno,
@@ -548,6 +636,7 @@ class _JavascriptControlFlowWalker:
 
         cond_label = self._format_do_while(stmt)
         cond_trans = self.builder.new_transition(label=cond_label, line_number=test_lineno)
+        self._record_calls_in_node(test_node, cond_trans.id, test_lineno or 0)
         self.builder.add_arc(source=check_place, target=cond_trans)
         self.builder.add_arc(source=cond_trans, target=body_head)
 
@@ -564,6 +653,7 @@ class _JavascriptControlFlowWalker:
     ) -> Optional[Place]:
         label = self._format_statement_label(stmt)
         trans = self.builder.new_transition(label=label, line_number=ctx.lineno)
+        self._record_calls_in_node(stmt, trans.id, ctx.lineno or 0)
         self.builder.add_arc(source=ctx.current_place, target=trans)
         self.builder.add_arc(source=trans, target=self.start_place)
 
@@ -584,13 +674,16 @@ class _JavascriptControlFlowWalker:
         ctx: StatementContext,
     ) -> Optional[Place]:
         label = self._format_statement_label(stmt)
-        return self.builder.wire_sequential_statement(
+        res = self.builder.wire_sequential_statement(
             current_place=ctx.current_place,
             label=label,
             lineno=ctx.lineno,
             is_last=ctx.is_last,
             target_exit=ctx.target_exit,
         )
+        if self.builder.last_transition:
+            self._record_calls_in_node(stmt, self.builder.last_transition.id, ctx.lineno or 0)
+        return res
 
     def walk_block(
         self,
@@ -634,6 +727,7 @@ class JavascriptWalker(WalkerProtocol):
     def __init__(self) -> None:
         self.raw_source: str = ""
         self.tree: Optional[dict] = None
+        self.filepath: Optional[str] = None
 
     def get_node_lineno(self, ast_node: Any) -> int:
         """Returns the start line number for a JavaScript AST node, defaulting to 0."""
@@ -650,6 +744,7 @@ class JavascriptWalker(WalkerProtocol):
                 "Please ensure Node.js is installed and available in PATH."
             )
 
+        self.filepath = filepath
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 self.raw_source = f.read()
@@ -799,9 +894,78 @@ class JavascriptWalker(WalkerProtocol):
 
     def collect_variable_bindings(self, tree: Any) -> Dict[str, str]:
         """Collects variable to class name bindings from constructor calls in the AST."""
-        return {}
+        if not tree:
+            return {}
 
-    def walk_function(self, ast_node: Any, func_name: str = "") -> WalkResult:
+        bindings: Dict[str, str] = {}
+
+        def _traverse(node: Any) -> None:
+            if isinstance(node, dict):
+                ntype = node.get("type")
+                if ntype == "VariableDeclaration":
+                    for decl in node.get("declarations", []):
+                        init = decl.get("init")
+                        if isinstance(init, dict) and init.get("type") == "NewExpression":
+                            callee = init.get("callee", {})
+                            class_name = (
+                                callee.get("name")
+                                if callee.get("type") == "Identifier"
+                                else self._slice_node(callee)
+                            )
+                            id_node = decl.get("id", {})
+                            if id_node.get("type") == "Identifier":
+                                var_name = id_node.get("name")
+                                if var_name and class_name:
+                                    bindings[var_name] = class_name
+                elif ntype == "AssignmentExpression" and node.get("operator") == "=":
+                    right = node.get("right")
+                    if isinstance(right, dict) and right.get("type") == "NewExpression":
+                        callee = right.get("callee", {})
+                        class_name = (
+                            callee.get("name")
+                            if callee.get("type") == "Identifier"
+                            else self._slice_node(callee)
+                        )
+                        left = node.get("left", {})
+                        left_type = left.get("type")
+                        var_name = None
+                        if left_type == "Identifier":
+                            var_name = left.get("name")
+                        elif left_type == "MemberExpression":
+                            obj = left.get("object", {})
+                            prop = left.get("property", {})
+                            prop_name = (
+                                prop.get("name")
+                                if prop.get("type") == "Identifier"
+                                else self._slice_node(prop)
+                            )
+                            if obj.get("type") == "ThisExpression":
+                                var_name = f"this.{prop_name}"
+                            elif obj.get("type") == "Identifier":
+                                var_name = f"{obj.get('name')}.{prop_name}"
+                            else:
+                                sliced_obj = self._slice_node(obj)
+                                if sliced_obj:
+                                    var_name = f"{sliced_obj}.{prop_name}"
+                        if var_name and class_name:
+                            bindings[var_name] = class_name
+
+                for k, v in node.items():
+                    if k != "loc":
+                        _traverse(v)
+            elif isinstance(node, list):
+                for item in node:
+                    _traverse(item)
+
+        _traverse(tree)
+        return bindings
+
+    def walk_function(
+        self,
+        ast_node: Any,
+        func_name: str = "",
+        filepath: Optional[str] = None,
+    ) -> WalkResult:
         """Walks a JavaScript function AST node and constructs a PetriNet model packaged in a WalkResult."""
         if not isinstance(ast_node, dict):
             raise TypeError(f"walk_function expects a dict AST node, got {type(ast_node).__name__}")
@@ -819,6 +983,8 @@ class JavascriptWalker(WalkerProtocol):
                 or get_nested(func_node, "_qual_name", default="")
                 or get_nested(func_node, "id", "name", default="")
             )
+
+        active_filepath = filepath or getattr(self, "filepath", "") or ""
 
         net = PetriNet()
         start_lineno = _get_node_lineno(func_node) or _get_node_lineno(ast_node, 1)
@@ -859,8 +1025,9 @@ class JavascriptWalker(WalkerProtocol):
             start_place=start_place,
             raw_source=self.raw_source,
             func_name=func_name or None,
+            filepath=active_filepath,
         )
         walker.walk_block(statements, current_place=start_place, target_exit=end_place)
 
-        return WalkResult(net=net, call_sites=[])
+        return WalkResult(net=net, call_sites=walker.call_sites)
 

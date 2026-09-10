@@ -45,13 +45,15 @@ class TestPythonWalkerSequential(unittest.TestCase):
         self.assertIsInstance(walk_res, WalkResult)
         self.assertIsInstance(walk_res.net, PetriNet)
         self.assertIsInstance(walk_res.call_sites, list)
-        self.assertEqual(walk_res.call_sites, [])
+        self.assertEqual(len(walk_res.call_sites), 1)
+        self.assertEqual(walk_res.call_sites[0].callee_name, "print")
         assert_valid_petri_net(self, walk_res.net)
 
     def test_sequential_counts(self):
         walk_res = walker.walk_function(self.func_node)
         self.assertIsInstance(walk_res, WalkResult)
-        self.assertEqual(walk_res.call_sites, [])
+        self.assertEqual(len(walk_res.call_sites), 1)
+        self.assertEqual(walk_res.call_sites[0].callee_name, "print")
         net = walk_res.net
         self.assertIsInstance(net, PetriNet)
         # 5 sequential statements + 1 return: 6 transitions, 7 places, 12 arcs
@@ -282,5 +284,125 @@ class TestPythonWalkerEdgeCases(unittest.TestCase):
         self.assertTrue(any(a.source == raise_trans and a.target == except_place for a in net.arcs))
 
 
+class TestPythonWalkerVariableBindings(unittest.TestCase):
+    def setUp(self):
+        self.walker = PythonWalker()
+
+    def test_top_level_variable_bindings(self):
+        code = (
+            "x = Foo()\n"
+            "self.engine = WebGLEngine(width=100)\n"
+            "normal_var = 42\n"
+            "func_call = get_data()\n"
+        )
+        tree = ast.parse(code)
+        bindings = self.walker.collect_variable_bindings(tree)
+        self.assertEqual(bindings, {"x": "Foo", "self.engine": "WebGLEngine"})
+
+    def test_chained_and_annotated_assignments(self):
+        code = (
+            "a = b = Bar()\n"
+            "typed_var: Service = Service('config')\n"
+        )
+        tree = ast.parse(code)
+        bindings = self.walker.collect_variable_bindings(tree)
+        self.assertEqual(bindings, {"a": "Bar", "b": "Bar", "typed_var": "Service"})
+
+    def test_bindings_inside_classes_and_functions(self):
+        code = (
+            "class App:\n"
+            "    def __init__(self):\n"
+            "        self.model = Model()\n"
+            "        temp = Controller(self.model)\n"
+            "def worker():\n"
+            "    runner = TaskRunner()\n"
+        )
+        tree = ast.parse(code)
+        bindings = self.walker.collect_variable_bindings(tree)
+        self.assertEqual(bindings, {
+            "self.model": "Model",
+            "temp": "Controller",
+            "runner": "TaskRunner",
+        })
+
+    def test_module_qualified_constructor(self):
+        code = "client = pkg.submodule.ApiClient()"
+        tree = ast.parse(code)
+        bindings = self.walker.collect_variable_bindings(tree)
+        self.assertEqual(bindings, {"client": "ApiClient"})
+
+
+class TestPythonWalkerCallSiteExtraction(unittest.TestCase):
+    def setUp(self):
+        self.walker = PythonWalker()
+
+    def test_bare_function_call_site(self):
+        code = (
+            "def worker():\n"
+            "    data = fetch_records()\n"
+            "    process(data)\n"
+        )
+        tree = ast.parse(code)
+        func_node = self.walker.find_function(tree, "worker")
+        res = self.walker.walk_function(func_node, "worker", filepath="app.py")
+        self.assertIsInstance(res, WalkResult)
+        self.assertEqual(len(res.call_sites), 2)
+
+        cs0 = res.call_sites[0]
+        self.assertEqual(cs0.caller_function, "worker")
+        self.assertEqual(cs0.caller_file, "app.py")
+        self.assertEqual(cs0.callee_name, "fetch_records")
+        self.assertIsNone(cs0.callee_owner)
+        self.assertEqual(cs0.line_number, 2)
+        # Verify transition_id points to an actual transition in the net
+        t0 = next((t for t in res.net.transitions if t.id == cs0.transition_id), None)
+        self.assertIsNotNone(t0)
+        self.assertIn("fetch_records", t0.label)
+
+        cs1 = res.call_sites[1]
+        self.assertEqual(cs1.callee_name, "process")
+        self.assertIsNone(cs1.callee_owner)
+        self.assertEqual(cs1.line_number, 3)
+        t1 = next((t for t in res.net.transitions if t.id == cs1.transition_id), None)
+        self.assertIsNotNone(t1)
+        self.assertIn("process", t1.label)
+
+    def test_method_and_attribute_call_site(self):
+        code = (
+            "def update():\n"
+            "    engine.step()\n"
+            "    self.renderer.draw()\n"
+        )
+        tree = ast.parse(code)
+        func_node = self.walker.find_function(tree, "update")
+        res = self.walker.walk_function(func_node, "update", filepath="game.py")
+        self.assertEqual(len(res.call_sites), 2)
+
+        cs0 = res.call_sites[0]
+        self.assertEqual(cs0.callee_name, "step")
+        self.assertEqual(cs0.callee_owner, "engine")
+        self.assertEqual(cs0.line_number, 2)
+
+        cs1 = res.call_sites[1]
+        self.assertEqual(cs1.callee_name, "draw")
+        self.assertEqual(cs1.callee_owner, "self.renderer")
+        self.assertEqual(cs1.line_number, 3)
+
+    def test_calls_in_conditions_and_returns(self):
+        code = (
+            "def check_and_run():\n"
+            "    if is_ready():\n"
+            "        return compute()\n"
+            "    return None\n"
+        )
+        tree = ast.parse(code)
+        func_node = self.walker.find_function(tree, "check_and_run")
+        res = self.walker.walk_function(func_node, "check_and_run", filepath="logic.py")
+        callee_names = [cs.callee_name for cs in res.call_sites]
+        self.assertIn("is_ready", callee_names)
+        self.assertIn("compute", callee_names)
+
+
 if __name__ == '__main__':
     unittest.main()
+
