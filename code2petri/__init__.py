@@ -3,6 +3,7 @@ from code2petri.model import Place, Transition, Arc, PetriNet, CallResolution
 from code2petri.walker_protocol import WalkerProtocol, CallSite, WalkResult
 from code2petri.javascript_walker import JavascriptWalker
 from code2petri.python_walker import PythonWalker
+from code2petri.symbol_table import Symbol, SymbolTable
 
 __all__ = [
     "Place",
@@ -15,6 +16,8 @@ __all__ = [
     "WalkerProtocol",
     "PythonWalker",
     "JavascriptWalker",
+    "Symbol",
+    "SymbolTable",
     "code2petri",
 ]
 
