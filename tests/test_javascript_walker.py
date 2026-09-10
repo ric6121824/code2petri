@@ -9,6 +9,7 @@ if REPO_ROOT not in sys.path:
 
 from code2petri.javascript_walker import JavascriptWalker
 from code2petri.walker_protocol import WalkerProtocol, WalkResult, CallSite
+from code2petri.model import PetriNet
 from code2petri.engine import code2petri, WALKERS
 from tests.petri_assertions import assert_valid_petri_net, assert_has_start_and_end, assert_bipartite
 
@@ -37,8 +38,34 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
         node = self.walker.find_function(tree, "sequential_func")
         res = self.walker.walk_function(node)
         self.assertIsInstance(res, WalkResult)
+        self.assertIsInstance(res.net, PetriNet)
+        self.assertIsInstance(res.call_sites, list)
         self.assertEqual(res.call_sites, [])
         assert_valid_petri_net(self, res.net)
+
+    def test_walk_function_returns_walk_result_for_other_fixtures(self):
+        call_path = os.path.join(
+            os.path.dirname(__file__),
+            "test_code",
+            "petri_js",
+            "assign_call.js",
+        )
+        tree = self.walker.parse_file(call_path)
+        funcs = self.walker.find_all_functions(tree)
+        self.assertGreater(len(funcs), 0)
+        node = self.walker.find_function(tree, funcs[0])
+        res = self.walker.walk_function(node, funcs[0])
+        self.assertIsInstance(res, WalkResult)
+        self.assertIsInstance(res.net, PetriNet)
+        self.assertIsInstance(res.call_sites, list)
+        self.assertEqual(res.call_sites, [])
+
+        global_tree = self.walker.parse_file(self.global_fixture)
+        global_node = self.walker.find_function(global_tree, "(global)")
+        res_global = self.walker.walk_function(global_node, "(global)")
+        self.assertIsInstance(res_global, WalkResult)
+        self.assertIsInstance(res_global.net, PetriNet)
+        self.assertEqual(res_global.call_sites, [])
 
     def test_collect_variable_bindings_baseline(self):
         tree = self.walker.parse_file(self.seq_fixture)

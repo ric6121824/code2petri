@@ -1,5 +1,14 @@
+from typing import Any
 import unittest
 from code2petri.model import PetriNet, Place, Transition, Arc
+
+
+def walk_net(walker: Any, ast_node: Any, func_name: str = "") -> PetriNet:
+    """Invokes walker.walk_function and extracts the PetriNet from WalkResult."""
+    res = walker.walk_function(ast_node, func_name)
+    if isinstance(res, PetriNet):
+        return res
+    return res.net
 
 
 def assert_has_start_and_end(test_case: unittest.TestCase, net: PetriNet) -> tuple[Place, Place]:

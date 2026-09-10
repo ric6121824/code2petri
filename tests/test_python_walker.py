@@ -11,18 +11,19 @@ if REPO_ROOT not in sys.path:
 
 from code2petri.python_walker import PythonWalker  # noqa: E402
 from code2petri.walker_protocol import WalkResult, CallSite  # noqa: E402
-
-walker = PythonWalker()
-walk_function = lambda *args, **kwargs: walker.walk_function(*args, **kwargs).net
-parse_file = walker.parse_file
-find_function = walker.find_function
-find_all_functions = walker.find_all_functions
 from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
 from tests.petri_assertions import (  # noqa: E402
     assert_has_start_and_end,
     assert_bipartite,
     assert_valid_petri_net,
+    walk_net,
 )
+
+walker = PythonWalker()
+walk_function = lambda *args, **kwargs: walk_net(walker, *args, **kwargs)
+parse_file = walker.parse_file
+find_function = walker.find_function
+find_all_functions = walker.find_all_functions
 
 
 class TestPythonWalkerSequential(unittest.TestCase):
@@ -39,6 +40,14 @@ class TestPythonWalkerSequential(unittest.TestCase):
     def test_fixture_loaded(self):
         self.assertIsNotNone(self.func_node)
         self.assertIsInstance(self.func_node, (ast.FunctionDef, ast.AsyncFunctionDef))
+
+    def test_walk_function_returns_walk_result(self):
+        walk_res = walker.walk_function(self.func_node, "sequential_func")
+        self.assertIsInstance(walk_res, WalkResult)
+        self.assertIsInstance(walk_res.net, PetriNet)
+        self.assertIsInstance(walk_res.call_sites, list)
+        self.assertEqual(walk_res.call_sites, [])
+        assert_valid_petri_net(self, walk_res.net)
 
     def test_sequential_counts(self):
         walk_res = walker.walk_function(self.func_node)

@@ -7,6 +7,7 @@ from typing import Optional, List
 
 from code2petri.javascript_walker import JavascriptWalker
 from code2petri.python_walker import PythonWalker
+from code2petri.model import PetriNet
 
 WALKERS = {
     ".py": PythonWalker,

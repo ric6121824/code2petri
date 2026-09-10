@@ -9,7 +9,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from code2petri.model import Place, Transition, Arc, PetriNet  # noqa: E402
+from code2petri.model import Place, Transition, Arc, PetriNet, CallResolution  # noqa: E402
 
 
 
@@ -424,6 +424,83 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         # DOT
         dot = net.to_dot()
         self.assertIn('tooltip="Custom Cost Op"', dot)
+
+    def test_call_resolution_dataclass(self):
+        res = CallResolution(resolved=True, resolved_to="Foo.bar", target_file="foo.py")
+        self.assertTrue(res.resolved)
+        self.assertEqual(res.resolved_to, "Foo.bar")
+        self.assertEqual(res.target_file, "foo.py")
+
+        res_unresolved = CallResolution(resolved=False)
+        self.assertFalse(res_unresolved.resolved)
+        self.assertIsNone(res_unresolved.resolved_to)
+        self.assertIsNone(res_unresolved.target_file)
+
+    def test_call_resolution_from_metadata(self):
+        self.assertIsNone(CallResolution.from_metadata(None))
+        self.assertIsNone(CallResolution.from_metadata({"tag": "no_resolved_key"}))
+
+        meta_res = {"resolved": True, "resolved_to": "Bar.baz", "target_file": "bar.py"}
+        res = CallResolution.from_metadata(meta_res)
+        self.assertIsNotNone(res)
+        self.assertTrue(res.resolved)
+        self.assertEqual(res.resolved_to, "Bar.baz")
+        self.assertEqual(res.target_file, "bar.py")
+
+        meta_unres = {"resolved": False}
+        unres = CallResolution.from_metadata(meta_unres)
+        self.assertIsNotNone(unres)
+        self.assertFalse(unres.resolved)
+
+    def test_transition_call_resolution_property(self):
+        t_none = Transition(id="t0", label="op()")
+        self.assertIsNone(t_none.call_resolution)
+
+        t_res = Transition(id="t1", label="foo()", metadata={"resolved": True, "resolved_to": "Foo.foo"})
+        self.assertIsNotNone(t_res.call_resolution)
+        self.assertTrue(t_res.call_resolution.resolved)
+        self.assertEqual(t_res.call_resolution.resolved_to, "Foo.foo")
+
+    def test_pnml_serialization_avoids_literal_none_strings(self):
+        net = PetriNet()
+        p0 = net.add_place("p0", "start", initial_tokens=1)
+        p1 = net.add_place("p1", "end")
+        t = net.add_transition(
+            id="t0",
+            label="call()",
+            metadata={"resolved": True, "resolved_to": None, "target_file": None},
+        )
+        net.add_arc(p0, t)
+        net.add_arc(t, p1)
+
+        pnml_xml = net.to_pnml()
+        self.assertNotIn('target="None"', pnml_xml)
+        self.assertNotIn('file="None"', pnml_xml)
+        root = ET.fromstring(pnml_xml)
+        resolved_els = [el for el in root.iter() if el.tag.endswith("resolved")]
+        self.assertEqual(len(resolved_els), 1)
+        self.assertEqual(resolved_els[0].attrib.get("target"), "")
+        self.assertEqual(resolved_els[0].attrib.get("file"), "")
+
+    def test_transition_delegated_formatting_methods(self):
+        t = Transition(
+            id="t1",
+            label="worker.process()",
+            metadata={"resolved": True, "resolved_to": "Worker.process", "target_file": "worker.py"},
+        )
+        # DOT attributes
+        dot_attrs = t.get_dot_attributes()
+        self.assertEqual(dot_attrs["color"], "#2e7d32")
+        self.assertEqual(dot_attrs["tooltip"], "Resolved to Worker.process in worker.py")
+
+        # PNML toolspecific
+        parent = ET.Element("transition", id="t1")
+        tool_el = t.add_pnml_toolspecific(parent)
+        self.assertIsNotNone(tool_el)
+        self.assertEqual(tool_el.attrib.get("tool"), "code2petri")
+        res_el = [el for el in tool_el.iter() if el.tag.endswith("resolved")]
+        self.assertEqual(len(res_el), 1)
+        self.assertEqual(res_el[0].attrib.get("target"), "Worker.process")
 
 
 if __name__ == '__main__':

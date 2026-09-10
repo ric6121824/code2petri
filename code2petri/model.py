@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import json
 from typing import Optional, Union, List, Dict, Any
 import xml.etree.ElementTree as ET
@@ -38,6 +39,25 @@ class Place:
         }
 
 
+@dataclass(frozen=True)
+class CallResolution:
+    """Encapsulates call resolution metadata for a Transition."""
+    resolved: bool
+    resolved_to: Optional[str] = None
+    target_file: Optional[str] = None
+
+    @classmethod
+    def from_metadata(cls, metadata: Optional[Dict[str, Any]]) -> Optional["CallResolution"]:
+        """Constructs a CallResolution from a transition metadata mapping if resolution keys exist."""
+        if not metadata or "resolved" not in metadata:
+            return None
+        return cls(
+            resolved=bool(metadata["resolved"]),
+            resolved_to=metadata.get("resolved_to"),
+            target_file=metadata.get("target_file"),
+        )
+
+
 class Transition:
     """Represents a Petri net Transition (an action or statement execution)."""
 
@@ -57,6 +77,11 @@ class Transition:
         self.line_number = line_number
         self.metadata: Optional[Dict[str, Any]] = dict(metadata) if metadata is not None else None
 
+    @property
+    def call_resolution(self) -> Optional[CallResolution]:
+        """Returns typed CallResolution if call resolution metadata is present."""
+        return CallResolution.from_metadata(self.metadata)
+
     def __repr__(self) -> str:
         metadata_str = f", metadata={self.metadata!r}" if self.metadata is not None else ""
         return (
@@ -73,13 +98,68 @@ class Transition:
         }
         if self.metadata is not None:
             d["metadata"] = dict(self.metadata)
-            if "resolved" in self.metadata:
-                d["resolved"] = self.metadata["resolved"]
-            if "resolved_to" in self.metadata:
-                d["resolved_to"] = self.metadata["resolved_to"]
-            if "target_file" in self.metadata:
-                d["target_file"] = self.metadata["target_file"]
+            res = self.call_resolution
+            if res is not None:
+                d["resolved"] = res.resolved
+                if res.resolved_to is not None:
+                    d["resolved_to"] = res.resolved_to
+                if res.target_file is not None:
+                    d["target_file"] = res.target_file
+            else:
+                if "resolved_to" in self.metadata:
+                    d["resolved_to"] = self.metadata["resolved_to"]
+                if "target_file" in self.metadata:
+                    d["target_file"] = self.metadata["target_file"]
         return d
+
+    def add_pnml_toolspecific(self, parent_element: ET.Element) -> Optional[ET.Element]:
+        """Appends <toolspecific> XML element with metadata properties to parent_element."""
+        if not self.metadata:
+            return None
+        tool_el = ET.SubElement(parent_element, "toolspecific", tool="code2petri", version="1.0")
+        res = self.call_resolution
+        if res is not None:
+            if res.resolved:
+                target = str(res.resolved_to or "")
+                target_file = str(res.target_file or "")
+                ET.SubElement(tool_el, "resolved", target=target, file=target_file)
+            else:
+                ET.SubElement(tool_el, "unresolved")
+
+        # Emit any other custom properties
+        skip_keys = {"resolved", "resolved_to", "target_file"}
+        for k, v in self.metadata.items():
+            if k not in skip_keys:
+                ET.SubElement(tool_el, "property", name=str(k), value=str(v))
+        return tool_el
+
+    def get_dot_attributes(self) -> Dict[str, str]:
+        """Returns Graphviz DOT attributes specific to this transition based on metadata."""
+        attrs: Dict[str, str] = {}
+        if not self.metadata:
+            return attrs
+
+        res = self.call_resolution
+        if res is not None:
+            if res.resolved:
+                attrs["color"] = "#2e7d32"
+                target = res.resolved_to or ""
+                target_file = res.target_file or ""
+                tooltip_text = f"Resolved to {target} in {target_file}" if target_file else f"Resolved to {target}"
+                attrs["tooltip"] = tooltip_text
+            else:
+                attrs["color"] = "#e65100"
+                attrs["tooltip"] = "Unresolved call"
+
+        # Tooltip fallback for generic metadata if not already set by call resolution
+        if "tooltip" not in attrs:
+            if "tooltip" in self.metadata:
+                attrs["tooltip"] = str(self.metadata["tooltip"])
+            elif self.metadata:
+                items_str = ", ".join(f"{k}={v}" for k, v in self.metadata.items())
+                attrs["tooltip"] = items_str
+
+        return attrs
 
 
 class Arc:
@@ -210,23 +290,7 @@ class PetriNet:
             t_name = ET.SubElement(t_el, "name")
             t_text = ET.SubElement(t_name, "text")
             t_text.text = transition.label
-            if transition.metadata:
-                tool_el = ET.SubElement(t_el, "toolspecific", tool="code2petri", version="1.0")
-                if transition.metadata.get("resolved"):
-                    ET.SubElement(
-                        tool_el,
-                        "resolved",
-                        target=str(transition.metadata.get("resolved_to", "")),
-                        file=str(transition.metadata.get("target_file", "")),
-                    )
-                elif transition.metadata.get("resolved") is False:
-                    ET.SubElement(tool_el, "unresolved")
-
-                # Emit any other custom properties
-                skip_keys = {"resolved", "resolved_to", "target_file"}
-                for k, v in transition.metadata.items():
-                    if k not in skip_keys:
-                        ET.SubElement(tool_el, "property", name=str(k), value=str(v))
+            transition.add_pnml_toolspecific(t_el)
 
         for i, arc in enumerate(self.arcs):
             arc_id = f"a{i+1}"
@@ -279,29 +343,18 @@ class PetriNet:
             escaped_label = escape_dot(label)
             escaped_id = escape_dot(transition.id)
             extra_attrs = ""
-            if transition.metadata:
-                attrs_list = []
-                if transition.metadata.get("resolved"):
-                    attrs_list.append('color="#2e7d32"')
-                elif transition.metadata.get("resolved") is False:
-                    attrs_list.append('color="#e65100"')
-
-                # Tooltip resolution
-                if transition.metadata.get("resolved") and transition.metadata.get("resolved_to"):
-                    target = transition.metadata.get("resolved_to", "")
-                    file_ = transition.metadata.get("target_file", "")
-                    tooltip_text = f"Resolved to {target} in {file_}" if file_ else f"Resolved to {target}"
-                    attrs_list.append(f'tooltip="{escape_dot(tooltip_text)}"')
-                elif transition.metadata.get("resolved") is False:
-                    attrs_list.append('tooltip="Unresolved call"')
-                elif "tooltip" in transition.metadata:
-                    attrs_list.append(f'tooltip="{escape_dot(str(transition.metadata["tooltip"]))}"')
-                elif transition.metadata:
-                    items_str = ", ".join(f"{k}={v}" for k, v in transition.metadata.items())
-                    attrs_list.append(f'tooltip="{escape_dot(items_str)}"')
-
-                if attrs_list:
-                    extra_attrs = ", " + ", ".join(attrs_list)
+            dot_attrs = transition.get_dot_attributes()
+            if dot_attrs:
+                attrs_parts = []
+                if "color" in dot_attrs:
+                    attrs_parts.append(f'color="{dot_attrs["color"]}"')
+                if "tooltip" in dot_attrs:
+                    attrs_parts.append(f'tooltip="{escape_dot(dot_attrs["tooltip"])}"')
+                for k, v in dot_attrs.items():
+                    if k not in ("color", "tooltip"):
+                        attrs_parts.append(f'{k}="{escape_dot(v)}"')
+                if attrs_parts:
+                    extra_attrs = ", " + ", ".join(attrs_parts)
             lines.append(
                 f'    "{escaped_id}" [shape=rect, style=filled, fillcolor=black, '
                 f'fontcolor=white, label="{escaped_label}"{extra_attrs}];'

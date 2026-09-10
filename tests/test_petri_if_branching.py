@@ -8,12 +8,13 @@ if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
 from code2petri.python_walker import PythonWalker  # noqa: E402
+from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
+from tests.petri_assertions import walk_net  # noqa: E402
 
 walker = PythonWalker()
-walk_function = lambda *args, **kwargs: walker.walk_function(*args, **kwargs).net
+walk_function = lambda *args, **kwargs: walk_net(walker, *args, **kwargs)
 parse_file = walker.parse_file
 find_function = walker.find_function
-from code2petri.model import PetriNet, Place, Transition, Arc  # noqa: E402
 
 
 class TestIfElseBranching(unittest.TestCase):

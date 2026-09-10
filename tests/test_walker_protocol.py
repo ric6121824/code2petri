@@ -308,8 +308,10 @@ class TestEngineLanguageDispatch(unittest.TestCase):
         import code2petri
         self.assertIn("CallSite", code2petri.__all__)
         self.assertIn("WalkResult", code2petri.__all__)
+        self.assertIn("CallResolution", code2petri.__all__)
         self.assertTrue(hasattr(code2petri, "CallSite"))
         self.assertTrue(hasattr(code2petri, "WalkResult"))
+        self.assertTrue(hasattr(code2petri, "CallResolution"))
 
     def test_walkers_baseline_collect_variable_bindings(self):
         import ast
