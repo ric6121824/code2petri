@@ -1,0 +1,54 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="p3"];
+    "p4" [shape=circle, label="p4"];
+    "p5" [shape=circle, label="p5"];
+    "p6" [shape=circle, label="p6"];
+    "p7" [shape=circle, label="p7"];
+    "p8" [shape=circle, label="p8"];
+    "p9" [shape=circle, label="p9"];
+    "p10" [shape=circle, label="p10"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const gl = this.gl (line 198)"];
+    "t2" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.useProgram() (line 200)", color="#e65100", tooltip="Unresolved call"];
+    "t3" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.bindFramebuffer() (line 201)", color="#e65100", tooltip="Unresolved call"];
+    "t4" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.viewport() (line 202)", color="#e65100", tooltip="Unresolved call"];
+    "t5" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.enableVertexAttribArray() (line 204)", color="#e65100", tooltip="Unresolved call"];
+    "t6" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.vertexAttribPointer() (line 205)", color="#e65100", tooltip="Unresolved call"];
+    "t7" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.activeTexture() (line 207)", color="#e65100", tooltip="Unresolved call"];
+    "t8" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.bindTexture() (line 208)", color="#e65100", tooltip="Unresolved call"];
+    "t9" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const stateLoc = call: gl.getUniformLocation() (line 210)", color="#e65100", tooltip="Unresolved call"];
+    "t10" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.uniform1i() (line 211)", color="#e65100", tooltip="Unresolved call"];
+    "t11" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.drawArrays() (line 213)", color="#e65100", tooltip="Unresolved call"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p1";
+    "p1" -> "t2";
+    "t2" -> "p2";
+    "p2" -> "t3";
+    "t3" -> "p3";
+    "p3" -> "t4";
+    "t4" -> "p4";
+    "p4" -> "t5";
+    "t5" -> "p5";
+    "p5" -> "t6";
+    "t6" -> "p6";
+    "p6" -> "t7";
+    "t7" -> "p7";
+    "p7" -> "t8";
+    "t8" -> "p8";
+    "p8" -> "t9";
+    "t9" -> "p9";
+    "p9" -> "t10";
+    "t10" -> "p10";
+    "p10" -> "t11";
+    "t11" -> "p_end";
+}

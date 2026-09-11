@@ -1,0 +1,202 @@
+{
+  "places": [
+    {
+      "id": "p0",
+      "label": "start",
+      "line_number": 152,
+      "initial_tokens": 1
+    },
+    {
+      "id": "p_end",
+      "label": "end",
+      "line_number": null,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p1",
+      "label": "p1",
+      "line_number": 153,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p2",
+      "label": "p2",
+      "line_number": 154,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p3",
+      "label": "exit_t3",
+      "line_number": 155,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p4",
+      "label": "p4",
+      "line_number": 155,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p5",
+      "label": "p5",
+      "line_number": 159,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p6",
+      "label": "p6",
+      "line_number": 160,
+      "initial_tokens": 0
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t1",
+      "label": "const gl = this.gl",
+      "line_number": 153
+    },
+    {
+      "id": "t2",
+      "label": "const data = new Uint8Array(this.width * this.height)",
+      "line_number": 154
+    },
+    {
+      "id": "t3",
+      "label": "for(let i=0; i<data.length; i++)",
+      "line_number": 155
+    },
+    {
+      "id": "t4",
+      "label": "exit",
+      "line_number": 155
+    },
+    {
+      "id": "t5",
+      "label": "data[i] = Math.random() > 0.8 ? 255 : 0",
+      "line_number": 156,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t6",
+      "label": "call: gl.bindTexture()",
+      "line_number": 159,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t7",
+      "label": "call: gl.texSubImage2D()",
+      "line_number": 160,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t8",
+      "label": "call: this.drawToScreen()",
+      "line_number": 161,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "WebGLEngine.drawToScreen",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+      },
+      "resolved": true,
+      "resolved_to": "WebGLEngine.drawToScreen",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+    }
+  ],
+  "arcs": [
+    {
+      "source": "p0",
+      "target": "t1",
+      "weight": 1
+    },
+    {
+      "source": "t1",
+      "target": "p1",
+      "weight": 1
+    },
+    {
+      "source": "p1",
+      "target": "t2",
+      "weight": 1
+    },
+    {
+      "source": "t2",
+      "target": "p2",
+      "weight": 1
+    },
+    {
+      "source": "p2",
+      "target": "t3",
+      "weight": 1
+    },
+    {
+      "source": "p2",
+      "target": "t4",
+      "weight": 1
+    },
+    {
+      "source": "t3",
+      "target": "p4",
+      "weight": 1
+    },
+    {
+      "source": "p4",
+      "target": "t5",
+      "weight": 1
+    },
+    {
+      "source": "t5",
+      "target": "p2",
+      "weight": 1
+    },
+    {
+      "source": "t4",
+      "target": "p3",
+      "weight": 1
+    },
+    {
+      "source": "p3",
+      "target": "t6",
+      "weight": 1
+    },
+    {
+      "source": "t6",
+      "target": "p5",
+      "weight": 1
+    },
+    {
+      "source": "p5",
+      "target": "t7",
+      "weight": 1
+    },
+    {
+      "source": "t7",
+      "target": "p6",
+      "weight": 1
+    },
+    {
+      "source": "p6",
+      "target": "t8",
+      "weight": 1
+    },
+    {
+      "source": "t8",
+      "target": "p_end",
+      "weight": 1
+    }
+  ]
+}

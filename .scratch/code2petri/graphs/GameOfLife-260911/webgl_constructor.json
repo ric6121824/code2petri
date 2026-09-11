@@ -1,0 +1,246 @@
+{
+  "places": [
+    {
+      "id": "p0",
+      "label": "start",
+      "line_number": 2,
+      "initial_tokens": 1
+    },
+    {
+      "id": "p_end",
+      "label": "end",
+      "line_number": null,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p1",
+      "label": "p1",
+      "line_number": 3,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p2",
+      "label": "p2",
+      "line_number": 4,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p3",
+      "label": "merge_t3",
+      "line_number": 5,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p4",
+      "label": "p4",
+      "line_number": 5,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p5",
+      "label": "p5",
+      "line_number": 6,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p6",
+      "label": "p6",
+      "line_number": 10,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p7",
+      "label": "p7",
+      "line_number": 11,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p8",
+      "label": "p8",
+      "line_number": 13,
+      "initial_tokens": 0
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t1",
+      "label": "this.canvas = canvas",
+      "line_number": 3
+    },
+    {
+      "id": "t2",
+      "label": "this.gl = call: canvas.getContext()",
+      "line_number": 4,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t3",
+      "label": "if (!this.gl)",
+      "line_number": 5
+    },
+    {
+      "id": "t4",
+      "label": "else",
+      "line_number": 5
+    },
+    {
+      "id": "t5",
+      "label": "call: alert()",
+      "line_number": 6,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t6",
+      "label": "return",
+      "line_number": 7
+    },
+    {
+      "id": "t7",
+      "label": "this.width = width",
+      "line_number": 10
+    },
+    {
+      "id": "t8",
+      "label": "this.height = height",
+      "line_number": 11
+    },
+    {
+      "id": "t9",
+      "label": "call: this.initShaders()",
+      "line_number": 13,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "WebGLEngine.initShaders",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+      },
+      "resolved": true,
+      "resolved_to": "WebGLEngine.initShaders",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+    },
+    {
+      "id": "t10",
+      "label": "call: this.initBuffers()",
+      "line_number": 14,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "WebGLEngine.initBuffers",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+      },
+      "resolved": true,
+      "resolved_to": "WebGLEngine.initBuffers",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+    }
+  ],
+  "arcs": [
+    {
+      "source": "p0",
+      "target": "t1",
+      "weight": 1
+    },
+    {
+      "source": "t1",
+      "target": "p1",
+      "weight": 1
+    },
+    {
+      "source": "p1",
+      "target": "t2",
+      "weight": 1
+    },
+    {
+      "source": "t2",
+      "target": "p2",
+      "weight": 1
+    },
+    {
+      "source": "p2",
+      "target": "t3",
+      "weight": 1
+    },
+    {
+      "source": "p2",
+      "target": "t4",
+      "weight": 1
+    },
+    {
+      "source": "t3",
+      "target": "p4",
+      "weight": 1
+    },
+    {
+      "source": "p4",
+      "target": "t5",
+      "weight": 1
+    },
+    {
+      "source": "t5",
+      "target": "p5",
+      "weight": 1
+    },
+    {
+      "source": "p5",
+      "target": "t6",
+      "weight": 1
+    },
+    {
+      "source": "t6",
+      "target": "p_end",
+      "weight": 1
+    },
+    {
+      "source": "t4",
+      "target": "p3",
+      "weight": 1
+    },
+    {
+      "source": "p3",
+      "target": "t7",
+      "weight": 1
+    },
+    {
+      "source": "t7",
+      "target": "p6",
+      "weight": 1
+    },
+    {
+      "source": "p6",
+      "target": "t8",
+      "weight": 1
+    },
+    {
+      "source": "t8",
+      "target": "p7",
+      "weight": 1
+    },
+    {
+      "source": "p7",
+      "target": "t9",
+      "weight": 1
+    },
+    {
+      "source": "t9",
+      "target": "p8",
+      "weight": 1
+    },
+    {
+      "source": "p8",
+      "target": "t10",
+      "weight": 1
+    },
+    {
+      "source": "t10",
+      "target": "p_end",
+      "weight": 1
+    }
+  ]
+}

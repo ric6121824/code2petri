@@ -1,0 +1,86 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="p3"];
+    "p4" [shape=circle, label="p4"];
+    "p5" [shape=circle, label="p5"];
+    "p6" [shape=circle, label="p6"];
+    "p7" [shape=circle, label="p7"];
+    "p8" [shape=circle, label="p8"];
+    "p9" [shape=circle, label="p9"];
+    "p10" [shape=circle, label="p10"];
+    "p11" [shape=circle, label="p11"];
+    "p12" [shape=circle, label="p12"];
+    "p13" [shape=circle, label="p13"];
+    "p14" [shape=circle, label="p14"];
+    "p15" [shape=circle, label="p15"];
+    "p16" [shape=circle, label="p16"];
+    "p17" [shape=circle, label="p17"];
+    "p18" [shape=circle, label="p18"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const gl = this.gl (line 165)"];
+    "t2" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.useProgram() (line 168)", color="#e65100", tooltip="Unresolved call"];
+    "t3" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.bindFramebuffer() (line 169)", color="#e65100", tooltip="Unresolved call"];
+    "t4" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.viewport() (line 170)", color="#e65100", tooltip="Unresolved call"];
+    "t5" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.enableVertexAttribArray() (line 172)", color="#e65100", tooltip="Unresolved call"];
+    "t6" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.vertexAttribPointer() (line 173)", color="#e65100", tooltip="Unresolved call"];
+    "t7" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.activeTexture() (line 175)", color="#e65100", tooltip="Unresolved call"];
+    "t8" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.bindTexture() (line 176)", color="#e65100", tooltip="Unresolved call"];
+    "t9" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const stateLoc = call: gl.getUniformLocation() (line 178)", color="#e65100", tooltip="Unresolved call"];
+    "t10" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const sizeLoc = call: gl.getUniformLocation() (line 179)", color="#e65100", tooltip="Unresolved call"];
+    "t11" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.uniform1i() (line 180)", color="#e65100", tooltip="Unresolved call"];
+    "t12" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.uniform2f() (line 181)", color="#e65100", tooltip="Unresolved call"];
+    "t13" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.drawArrays() (line 183)", color="#e65100", tooltip="Unresolved call"];
+    "t14" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let tempTex = this.readTex (line 186)"];
+    "t15" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.readTex = this.writeTex (line 187)"];
+    "t16" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.writeTex = tempTex (line 188)"];
+    "t17" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let tempFb = this.fbA === this.writeFb ? this.fbB : this.fbA (line 190)"];
+    "t18" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.writeFb = tempFb (line 191)"];
+    "t19" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: this.drawToScreen() (line 194)", color="#2e7d32", tooltip="Resolved to WebGLEngine.drawToScreen in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p1";
+    "p1" -> "t2";
+    "t2" -> "p2";
+    "p2" -> "t3";
+    "t3" -> "p3";
+    "p3" -> "t4";
+    "t4" -> "p4";
+    "p4" -> "t5";
+    "t5" -> "p5";
+    "p5" -> "t6";
+    "t6" -> "p6";
+    "p6" -> "t7";
+    "t7" -> "p7";
+    "p7" -> "t8";
+    "t8" -> "p8";
+    "p8" -> "t9";
+    "t9" -> "p9";
+    "p9" -> "t10";
+    "t10" -> "p10";
+    "p10" -> "t11";
+    "t11" -> "p11";
+    "p11" -> "t12";
+    "t12" -> "p12";
+    "p12" -> "t13";
+    "t13" -> "p13";
+    "p13" -> "t14";
+    "t14" -> "p14";
+    "p14" -> "t15";
+    "t15" -> "p15";
+    "p15" -> "t16";
+    "t16" -> "p16";
+    "p16" -> "t17";
+    "t17" -> "p17";
+    "p17" -> "t18";
+    "t18" -> "p18";
+    "p18" -> "t19";
+    "t19" -> "p_end";
+}

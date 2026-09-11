@@ -1,19 +1,24 @@
 # code2petri — Grand Roadmap to Unity/Unreal Analysis
 
-## Current State (Tickets 01–10 Complete — Phase 1 Delivered)
+## Current State (Tickets 01–15 Complete — Phases 1 & 2 Delivered)
 
 We have a fully working, multi-language `code2petri` CLI and Python package that:
 - Parses **Python (`.py`)** and **JavaScript (`.js`)** source files, targeting individual functions, methods, callbacks, or global scripts.
-- Implements a formal `WalkerProtocol` (`abc.ABC`) defining `parse_file`, `find_function`, `find_all_functions`, `walk_function`, and `get_node_lineno`.
+- Implements a formal `WalkerProtocol` (`abc.ABC`) returning `WalkResult(net, call_sites)` with `CallSite` inventory records.
 - Composes shared graph-building and state-management infrastructure via `ControlFlowBuilder` (counters, try/loop context stacks, `wire_sequential_statement`, `wire_if_split`, `wire_try_catch`, `wire_standard_loop`, `wire_terminal_exception`).
 - Decouples AST traversal and statement dispatch via `StatementContext` parameter objects and safe property extractors, eliminating Feature Envy and Message Chains.
-- Translates the full spectrum of control-flow structures in both languages: sequential statements, `if/elif/else`, `while`, `for` (including JS `for..in`/`for..of`), `do..while`, `switch/case/default`, `try/catch/finally` (and Python `try/except/else/finally`), `break`, `continue`, `return`, `raise`/`throw`, and opaque function calls.
+- Translates the full spectrum of control-flow structures in both languages: sequential statements, `if/elif/else`, `while`, `for` (including JS `for..in`/`for..of`), `do..while`, `switch/case/default`, `try/catch/finally` (and Python `try/except/else/finally`), `break`, `continue`, `return`, `raise`/`throw`, and function calls.
 - Provides cross-language parity for synthetic `(global)` execution scope, allowing top-level script code to be targeted and visualized as standalone Petri nets.
 - Supports qualified function targeting for class methods (`ClassName.methodName`) and synthetic addressing for anonymous arrow/callback functions (`(anonymous@line)`).
 - Detects `requestAnimationFrame` game-loop recursion patterns and maps them to Petri net back-arcs from terminal execution states to the function start place.
+- Performs **Cross-File Reference Tracing (Phase 2)**:
+  - Harvests constructor variable bindings (`x = Foo()` / `const x = new Foo()`) per [ADR 0001: Constructor-Only Variable Resolution](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0001-constructor-only-variable-resolution.md).
+  - Indexes context files in a dedicated `SymbolTable`, resolving qualified method calls (`gpuEngine.step()` → `WebGLEngine.step`) and bare function calls while enforcing same-language boundaries.
+  - Ingests `--context` file paths or recursive directories with platform-safe filtering (`._*` AppleDouble skip).
+  - Serializes call resolutions across formats: PNML `<toolspecific>` XML tags (`<resolved>` / `<unresolved>`), Graphviz DOT (`tooltip` and color coding: `#2e7d32` for resolved, `#e65100` for unresolved), and JSON (`resolved`, `resolved_to`, `target_file`, and root `"status": "[unresolved]"`).
 - Outputs PNML (ISO/IEC 15909 compliant XML), Graphviz DOT, JSON, PNG, and SVG.
-- Fully verified with **166 passing unit and integration tests**, including end-to-end structural validation on real-world multi-file targets ([GameOfLife_Simulator](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator): `app.js` and `webgl-engine.js`).
-- Concluded Phase 1 code review (Tickets 07–10, Round 8) with **0 Hard Violations**, **0 Missing Requirements**, and **0 Logic Defects**.
+- Fully verified with **235 passing unit, integration, and cross-file validation tests**, including end-to-end multi-file validation on real-world targets ([GameOfLife_Simulator](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator): `app.js` and `webgl-engine.js`).
+- Concluded Phase 2 code review (Tickets 11–15, Round 6) with **0 Hard Violations**, **0 Missing Requirements**, and **0 Logic Defects**.
 
 ## End Goal
 
@@ -37,14 +42,16 @@ This project exercises: global-scope code, class methods, cross-file calls (`app
 
 ```mermaid
 graph LR
-    P1["Phase 1 ✅\nJS Walker +\nAbstraction Layer"] --> P2["Phase 2\nCross-File\nReference Tracing"]
-    P2 --> P2H["Phase 2.5\nHTML Viewer +\nFolding & SM"]
+    P1["Phase 1 ✅\nJS Walker +\nAbstraction Layer"] --> P2["Phase 2 ✅\nCross-File\nReference Tracing"]
+    P2 --> P2H["Phase 2.5 ⏳\nHTML Viewer +\nFolding & SM"]
     P2H --> P3["Phase 3\nC# Walker +\nUnity Lifecycle"]
     P2H --> P4["Phase 4\nC++ Walker +\nUnreal Lifecycle"]
     P3 --> P5["Phase 5\nProject-Scale\nComposite Nets"]
     P4 --> P5
     P5 --> P6["Phase 6 — Future\nColoured Petri Nets\nGame State Modeling"]
     style P1 fill:#2d6a2d,color:#fff
+    style P2 fill:#2d6a2d,color:#fff
+    style P2H fill:#148f77,color:#fff
     style P6 stroke-dasharray: 5 5
 ```
 
@@ -130,7 +137,7 @@ The Phase 1 implementation concluded with Code Review Round 8 ([`tickets-07-10-r
 
 ---
 
-## Phase 2 — Cross-File Reference Tracing (Active Next Phase)
+## Phase 2 — Cross-File Reference Tracing (Completed — Tickets 11–15, Round 6)
 
 ### Why this comes before C#/C++
 
@@ -139,63 +146,73 @@ The Phase 1 implementation concluded with Code Review Round 8 ([`tickets-07-10-r
 >
 > The GameOfLife_Simulator specifically needs this: `app.js` calls `gpuEngine.step()`, `gpuEngine.randomize()`, and `gpuEngine.drawToScreen()` across the file boundary into `webgl-engine.js`.
 
-### What to build
+### Design Decisions & Implementation Reality
 
-#### 2A — Call-site inventory
-
-Extend each walker to return **call metadata** alongside the PetriNet:
-
-```python
-@dataclass
-class CallSite:
-    caller_function: str
-    caller_file: str
-    callee_name: str           # e.g., "foo" or "obj.method"
-    callee_owner: Optional[str]  # e.g., "MyClass" or module name
-    line_number: int
-    transition_id: str         # The transition in the caller's net that represents this call
-```
-
-The walker already labels call transitions as `call: foo()`. Phase 2 promotes these from opaque labels to structured `CallSite` records that can be resolved.
-
-#### 2B — Multi-file scanning & symbol table
-
-- Accept a **directory** (or list of files) as input
-- Parse all files, build a global **symbol table**: `{qualified_name -> (file, function_ast_node)}`
-- Reuse code2flow's existing resolution logic from [engine.py](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2flow/engine.py) `_find_link_for_call()` as a reference, but adapted for Petri net expansion
-
-#### 2C — Call expansion modes
-
-Three expansion strategies (CLI flags):
-
-| Mode | Flag | Behavior |
+| Decision | Planned Resolution | Final Implementation Reality (Tickets 11–15) |
 |---|---|---|
-| **Opaque** (current) | `--expand=none` | Calls are opaque transitions (today's behavior) |
-| **Inline** | `--expand=inline` | Replace the call transition with the callee's full Petri net subnet (place-to-place substitution) |
-| **Reference** | `--expand=reference` | Keep call transitions but add a cross-reference annotation (PNML `<toolspecific>` element, DOT `URL` attribute linking to the callee's net) |
+| **Protocol Return Type** | Walker returns metadata alongside net | `WalkResult(NamedTuple)` containing `net: PetriNet` and `call_sites: List[CallSite]`. `WalkerProtocol.walk_function` requires this return type across all language walkers. |
+| **Call Site Representation** | Opaque label conversion | Dedicated `@dataclass(frozen=True) class CallSite` recording `caller_function`, `caller_file`, `callee_name`, `callee_owner`, `line_number`, and `transition_id`. |
+| **Variable Resolution Scope** | Full data-flow analysis | Conforms to [ADR 0001: Constructor-Only Variable Resolution](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0001-constructor-only-variable-resolution.md). Walkers extract constructor assignments (`const x = new Foo()` in JS, `x = Foo()` in Python via `collect_variable_bindings`) without dynamic dataflow analysis. |
+| **Symbol Table & Indexing** | In-engine lookup dict | Dedicated [`code2petri/symbol_table.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/symbol_table.py) (`SymbolTable`, `SymbolRecord`). Indexes all functions across context files by `(language, qualified_name)` with multi-file disambiguation and strict same-language boundary enforcement. |
+| **CLI Context Ingestion** | Single file flags | `--context` CLI argument in [`code2petri/engine.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/engine.py) accepting file paths or directories. Implements recursive directory discovery, automatic extension filtering, and platform-specific filtering (skips macOS `._*` AppleDouble files). |
+| **Reference Serialization** | Ad-hoc metadata dict | First-class `@dataclass(frozen=True) class CallResolution`. Serializes across PNML (`<toolspecific tool="code2petri" version="1.0">` with `<resolved>`/`<unresolved>`), Graphviz DOT (`tooltip` and color coding: `#2e7d32` for resolved, `#e65100` for unresolved), and JSON (`resolved`, `resolved_to`, `target_file`, and root `"status": "[unresolved]"`). |
+| **Inline Expansion** | Inline subnet splicing (`--expand=inline`) | Deferred to Phase 2.5 / Phase 5 to avoid net explosion until structural folding is available. Reference mode (`--expand=reference`) implemented as the universal default. |
 
-Default: `--expand=reference` (adds traceability without net explosion).
+### Implemented Tickets (Phase 2 Breakdown)
 
-#### 2D — Composite net assembly
+#### Ticket 11: Walker Protocol Return Type & Transition Metadata
+- Defined `CallSite` dataclass and `WalkResult(NamedTuple)` in [`code2petri/walker_protocol.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/walker_protocol.py).
+- Updated `Transition` model in [`code2petri/model.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/model.py) with optional `metadata` dict and `CallResolution` domain dataclass.
+- Updated `PythonWalker` and `JavascriptWalker` to return `WalkResult`.
+- Updated unit and pipeline tests in [`tests/test_walker_protocol.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_walker_protocol.py) and [`tests/test_petri_model.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_petri_model.py).
 
-When `--expand=inline`:
-- For each `CallSite`, resolve the callee, generate its `PetriNet`, and splice it in:
-  - Remove the call transition
-  - Wire the input place to the callee net's start place
-  - Wire the callee net's end place to the output place
-  - Prefix all IDs in the callee net to avoid collisions (`callee_func.p1`, etc.)
+#### Ticket 12: Variable Bindings & AST Call Site Extraction
+- Implemented `collect_variable_bindings` in `PythonWalker` and `JavascriptWalker` targeting constructor assignments per ADR 0001.
+- Implemented AST call-site harvesting during function walks for both Python and JavaScript.
+- Added transition callback hooking (`on_trans`) to decouple call-site creation from walker graph mutations.
+- Added extensive unit tests in [`tests/test_python_walker.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_python_walker.py) and [`tests/test_javascript_walker.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_javascript_walker.py).
 
-> [!WARNING]
-> **Net explosion risk**: Inlining a call chain 5 deep on a 100-line function produces ~1000+ places. Mitigation: add `--max-depth=N` to cap inline expansion depth (default: 2).
+#### Ticket 13: Symbol Table & Cross-File Call Resolution
+- Implemented [`code2petri/symbol_table.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/symbol_table.py) managing multi-file AST indexing into `(language, qualified_name) -> SymbolRecord`.
+- Implemented multi-step call resolution algorithm: bound instance method lookup, direct class receiver fallback, same-file bare call lookup, and cross-file bare call lookup.
+- Enforced strict same-language boundaries and graceful fallback to annotated unresolved transitions.
+- Added comprehensive unit tests in [`tests/test_symbol_table.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_symbol_table.py).
 
-### Deliverables
+#### Ticket 14: CLI Context Ingestion & Reference Serialization
+- Added `--context` argument to `code2petri` CLI in [`code2petri/engine.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/engine.py) supporting file and directory paths.
+- Implemented `discover_context_files` with recursive directory traversal and AppleDouble filtering.
+- Implemented reference serialization across PNML `<toolspecific>`, DOT tooltips/colors, and JSON attributes.
+- Added CLI integration tests in [`tests/test_context_pipeline.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_context_pipeline.py).
 
-- `code2petri/call_site.py` — `CallSite` dataclass
-- `code2petri/symbol_table.py` — multi-file symbol resolution
-- `code2petri/composer.py` — composite net assembly (inline/reference modes)
-- Updated CLI with `--expand`, `--max-depth` flags
-- Tests with multi-file Python fixtures
-- **Integration test**: full cross-file analysis of GameOfLife_Simulator (app.js + webgl-engine.js)
+#### Ticket 15: GameOfLife Cross-File Validation Suite
+- Implemented end-to-end multi-file validation suite in [`tests/test_game_of_life_validation.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_game_of_life_validation.py) using real `app.js` and `webgl-engine.js`.
+- Verified cross-file call resolutions:
+  - `gpuEngine.step()` in `loop` resolves to `WebGLEngine.step` in `webgl-engine.js`.
+  - `gpuEngine.randomize()` in `randomizeBoth` resolves to `WebGLEngine.randomize` in `webgl-engine.js`.
+  - `this.drawToScreen()` in `WebGLEngine.randomize` resolves to `WebGLEngine.drawToScreen`.
+  - Browser API calls (`document.getElementById`, `requestAnimationFrame`, `gl.bindTexture`) remain cleanly marked as unresolved.
+- Verified PNML XML structure, Graphviz DOT attributes, and JSON schema output.
+
+### Code Review Round 6 Assessment & Architectural Baseline
+
+The Phase 2 implementation concluded with Code Review Round 6 ([`phase-2-tickets-11-15-round-6.md`](file:///.scratch/code2petri/reviews/phase-2-tickets-11-15-round-6.md)) evaluating the full Phase 2 diff (`0de953e`..`3a241c8`):
+
+- **Standards Compliance**: **0 Hard Violations**.
+  - Strict conformance to repo standards (`CONTEXT.md`) and [ADR 0001](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0001-constructor-only-variable-resolution.md).
+  - All Fowler code smells resolved across iterations (eliminated middle man properties, temporal coupling on builder state, callee unpacking duplication, and context file deduplication).
+- **Spec Verification**: **0 Missing Requirements**, **0 Logic Defects**.
+  - All functional and serialization requirements across Tickets 11–15 and `specs/phase-2-cross-file-tracing.md` are satisfied.
+  - Entire test suite passing (**235 unit, integration, and cross-file validation tests**).
+
+### Deliverables Summary
+
+- [`code2petri/walker_protocol.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/walker_protocol.py) — `CallSite` dataclass and `WalkResult(NamedTuple)`
+- [`code2petri/symbol_table.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/symbol_table.py) — `SymbolTable` and multi-file symbol resolution
+- [`code2petri/model.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/model.py) — `CallResolution` domain object, PNML `<toolspecific>`, DOT tooltips/colors, JSON serialization
+- [`code2petri/engine.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/engine.py) — CLI `--context` argument and recursive directory discovery
+- [`code2petri/python_walker.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/python_walker.py) — Python variable bindings and call-site harvesting
+- [`code2petri/javascript_walker.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/javascript_walker.py) — JS variable bindings and call-site harvesting
+- Test suites: 235 passing tests across `tests/test_symbol_table.py`, `tests/test_context_pipeline.py`, `tests/test_game_of_life_validation.py`, and existing suites.
 
 ---
 
@@ -590,10 +607,10 @@ graph TD
     P1A --> P1B["1B: JS walker ✅"]
     P1B --> P1C["1C: JS tests +\nGameOfLife validation ✅"]
     
-    P1A --> P2A["2A: CallSite extraction"]
-    P2A --> P2B["2B: Symbol table"]
-    P2B --> P2C["2C: Expansion modes"]
-    P2C --> P2D["2D: Composite nets +\nGameOfLife cross-file"]
+    P1A --> P2A["2A: CallSite extraction ✅"]
+    P2A --> P2B["2B: Symbol table ✅"]
+    P2B --> P2C["2C: Reference serialization ✅"]
+    P2C --> P2D["2D: Cross-file validation ✅"]
     
     P2D --> P25A["2.5A: Structural fold\nalgorithm"]
     P25A --> P25B["2.5B: Fold-step JSON"]
@@ -624,10 +641,10 @@ graph TD
     style P1A fill:#2d6a2d,color:#fff
     style P1B fill:#2d6a2d,color:#fff
     style P1C fill:#2d6a2d,color:#fff
-    style P2A fill:#6c3483,color:#fff
-    style P2B fill:#6c3483,color:#fff
-    style P2C fill:#6c3483,color:#fff
-    style P2D fill:#6c3483,color:#fff
+    style P2A fill:#2d6a2d,color:#fff
+    style P2B fill:#2d6a2d,color:#fff
+    style P2C fill:#2d6a2d,color:#fff
+    style P2D fill:#2d6a2d,color:#fff
     style P25A fill:#148f77,color:#fff
     style P25B fill:#148f77,color:#fff
     style P25C fill:#148f77,color:#fff
@@ -699,11 +716,11 @@ graph TD
 | Phase | Estimated tickets | Rough effort | Status |
 |---|---|---|---|
 | Phase 1 — JS + abstraction | 4 tickets (Tickets 07–10) | 8 review rounds | ✅ Complete |
-| Phase 2 — Cross-file tracing | 4–5 tickets | 2–3 sessions | ⏳ Active |
-| Phase 2.5 — HTML viewer + folding | 4–5 tickets | 2–3 sessions | Planned |
+| Phase 2 — Cross-file tracing | 5 tickets (Tickets 11–15) | 6 review rounds | ✅ Complete |
+| Phase 2.5 — HTML viewer + folding | 4–5 tickets | 2–3 sessions | ⏳ Active Next |
 | Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned |
 | Phase 4 — C++ + Unreal | 5–6 tickets | 3–4 sessions | Planned |
 | Phase 5 — Project-scale | 4–5 tickets | 2–3 sessions | Planned |
-| **Phases 1–5 Total** | **~25–30 tickets** | **~12–18 sessions** | |
+| **Phases 1–5 Total** | **~26–30 tickets** | **~12–18 sessions** | |
 | Phase 6 — CPN (future) | 4–6 tickets | 3–5 sessions | Future |
 | **Grand Total (incl. future)** | **~29–36 tickets** | **~15–23 sessions** | |

@@ -1,0 +1,603 @@
+{
+  "places": [
+    {
+      "id": "p0",
+      "label": "start",
+      "line_number": 1,
+      "initial_tokens": 1
+    },
+    {
+      "id": "p_end",
+      "label": "end",
+      "line_number": null,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p1",
+      "label": "p1",
+      "line_number": 1,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p2",
+      "label": "p2",
+      "line_number": 2,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p3",
+      "label": "p3",
+      "line_number": 3,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p4",
+      "label": "p4",
+      "line_number": 5,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p5",
+      "label": "p5",
+      "line_number": 6,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p6",
+      "label": "p6",
+      "line_number": 7,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p7",
+      "label": "p7",
+      "line_number": 8,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p8",
+      "label": "p8",
+      "line_number": 9,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p9",
+      "label": "p9",
+      "line_number": 12,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p10",
+      "label": "p10",
+      "line_number": 13,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p11",
+      "label": "p11",
+      "line_number": 14,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p12",
+      "label": "p12",
+      "line_number": 16,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p13",
+      "label": "p13",
+      "line_number": 17,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p14",
+      "label": "p14",
+      "line_number": 18,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p15",
+      "label": "p15",
+      "line_number": 19,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p16",
+      "label": "p16",
+      "line_number": 22,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p17",
+      "label": "p17",
+      "line_number": 23,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p18",
+      "label": "p18",
+      "line_number": 26,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p19",
+      "label": "p19",
+      "line_number": 29,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p20",
+      "label": "p20",
+      "line_number": 30,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p21",
+      "label": "p21",
+      "line_number": 31,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p22",
+      "label": "p22",
+      "line_number": 32,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p23",
+      "label": "p23",
+      "line_number": 33,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p24",
+      "label": "p24",
+      "line_number": 34,
+      "initial_tokens": 0
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t1",
+      "label": "const canvasCpu = call: document.getElementById()",
+      "line_number": 1,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t2",
+      "label": "const canvasGpu = call: document.getElementById()",
+      "line_number": 2,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t3",
+      "label": "const ctx = call: canvasCpu.getContext()",
+      "line_number": 3,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t4",
+      "label": "const btnStart = call: document.getElementById()",
+      "line_number": 5,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t5",
+      "label": "const btnStep = call: document.getElementById()",
+      "line_number": 6,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t6",
+      "label": "const btnRandom = call: document.getElementById()",
+      "line_number": 7,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t7",
+      "label": "const speedSlider = call: document.getElementById()",
+      "line_number": 8,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t8",
+      "label": "const modeRadios = call: document.getElementsByName()",
+      "line_number": 9,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "t9",
+      "label": "const CELL_SIZE = 4",
+      "line_number": 12
+    },
+    {
+      "id": "t10",
+      "label": "const ROWS = 150",
+      "line_number": 13
+    },
+    {
+      "id": "t11",
+      "label": "const COLS = 200",
+      "line_number": 14
+    },
+    {
+      "id": "t12",
+      "label": "canvasCpu.width = COLS * CELL_SIZE",
+      "line_number": 16
+    },
+    {
+      "id": "t13",
+      "label": "canvasCpu.height = ROWS * CELL_SIZE",
+      "line_number": 17
+    },
+    {
+      "id": "t14",
+      "label": "canvasGpu.width = COLS * CELL_SIZE",
+      "line_number": 18
+    },
+    {
+      "id": "t15",
+      "label": "canvasGpu.height = ROWS * CELL_SIZE",
+      "line_number": 19
+    },
+    {
+      "id": "t16",
+      "label": "const COLOR_BG = '#1a2235'",
+      "line_number": 22
+    },
+    {
+      "id": "t17",
+      "label": "const COLOR_ALIVE = '#00f0ff'",
+      "line_number": 23
+    },
+    {
+      "id": "t18",
+      "label": "const gpuEngine = new WebGLEngine(canvasGpu, COLS, ROWS)",
+      "line_number": 26
+    },
+    {
+      "id": "t19",
+      "label": "let grid = call: createGrid()",
+      "line_number": 29,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "createGrid",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+      },
+      "resolved": true,
+      "resolved_to": "createGrid",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+    },
+    {
+      "id": "t20",
+      "label": "let isRunning = false",
+      "line_number": 30
+    },
+    {
+      "id": "t21",
+      "label": "let mode = 'gpu'",
+      "line_number": 31
+    },
+    {
+      "id": "t22",
+      "label": "let speed = 100",
+      "line_number": 32
+    },
+    {
+      "id": "t23",
+      "label": "let animationId = null",
+      "line_number": 33
+    },
+    {
+      "id": "t24",
+      "label": "let lastFrameTime = 0",
+      "line_number": 34
+    },
+    {
+      "id": "t25",
+      "label": "call: init()",
+      "line_number": 37,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "init",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+      },
+      "resolved": true,
+      "resolved_to": "init",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+    }
+  ],
+  "arcs": [
+    {
+      "source": "p0",
+      "target": "t1",
+      "weight": 1
+    },
+    {
+      "source": "t1",
+      "target": "p1",
+      "weight": 1
+    },
+    {
+      "source": "p1",
+      "target": "t2",
+      "weight": 1
+    },
+    {
+      "source": "t2",
+      "target": "p2",
+      "weight": 1
+    },
+    {
+      "source": "p2",
+      "target": "t3",
+      "weight": 1
+    },
+    {
+      "source": "t3",
+      "target": "p3",
+      "weight": 1
+    },
+    {
+      "source": "p3",
+      "target": "t4",
+      "weight": 1
+    },
+    {
+      "source": "t4",
+      "target": "p4",
+      "weight": 1
+    },
+    {
+      "source": "p4",
+      "target": "t5",
+      "weight": 1
+    },
+    {
+      "source": "t5",
+      "target": "p5",
+      "weight": 1
+    },
+    {
+      "source": "p5",
+      "target": "t6",
+      "weight": 1
+    },
+    {
+      "source": "t6",
+      "target": "p6",
+      "weight": 1
+    },
+    {
+      "source": "p6",
+      "target": "t7",
+      "weight": 1
+    },
+    {
+      "source": "t7",
+      "target": "p7",
+      "weight": 1
+    },
+    {
+      "source": "p7",
+      "target": "t8",
+      "weight": 1
+    },
+    {
+      "source": "t8",
+      "target": "p8",
+      "weight": 1
+    },
+    {
+      "source": "p8",
+      "target": "t9",
+      "weight": 1
+    },
+    {
+      "source": "t9",
+      "target": "p9",
+      "weight": 1
+    },
+    {
+      "source": "p9",
+      "target": "t10",
+      "weight": 1
+    },
+    {
+      "source": "t10",
+      "target": "p10",
+      "weight": 1
+    },
+    {
+      "source": "p10",
+      "target": "t11",
+      "weight": 1
+    },
+    {
+      "source": "t11",
+      "target": "p11",
+      "weight": 1
+    },
+    {
+      "source": "p11",
+      "target": "t12",
+      "weight": 1
+    },
+    {
+      "source": "t12",
+      "target": "p12",
+      "weight": 1
+    },
+    {
+      "source": "p12",
+      "target": "t13",
+      "weight": 1
+    },
+    {
+      "source": "t13",
+      "target": "p13",
+      "weight": 1
+    },
+    {
+      "source": "p13",
+      "target": "t14",
+      "weight": 1
+    },
+    {
+      "source": "t14",
+      "target": "p14",
+      "weight": 1
+    },
+    {
+      "source": "p14",
+      "target": "t15",
+      "weight": 1
+    },
+    {
+      "source": "t15",
+      "target": "p15",
+      "weight": 1
+    },
+    {
+      "source": "p15",
+      "target": "t16",
+      "weight": 1
+    },
+    {
+      "source": "t16",
+      "target": "p16",
+      "weight": 1
+    },
+    {
+      "source": "p16",
+      "target": "t17",
+      "weight": 1
+    },
+    {
+      "source": "t17",
+      "target": "p17",
+      "weight": 1
+    },
+    {
+      "source": "p17",
+      "target": "t18",
+      "weight": 1
+    },
+    {
+      "source": "t18",
+      "target": "p18",
+      "weight": 1
+    },
+    {
+      "source": "p18",
+      "target": "t19",
+      "weight": 1
+    },
+    {
+      "source": "t19",
+      "target": "p19",
+      "weight": 1
+    },
+    {
+      "source": "p19",
+      "target": "t20",
+      "weight": 1
+    },
+    {
+      "source": "t20",
+      "target": "p20",
+      "weight": 1
+    },
+    {
+      "source": "p20",
+      "target": "t21",
+      "weight": 1
+    },
+    {
+      "source": "t21",
+      "target": "p21",
+      "weight": 1
+    },
+    {
+      "source": "p21",
+      "target": "t22",
+      "weight": 1
+    },
+    {
+      "source": "t22",
+      "target": "p22",
+      "weight": 1
+    },
+    {
+      "source": "p22",
+      "target": "t23",
+      "weight": 1
+    },
+    {
+      "source": "t23",
+      "target": "p23",
+      "weight": 1
+    },
+    {
+      "source": "p23",
+      "target": "t24",
+      "weight": 1
+    },
+    {
+      "source": "t24",
+      "target": "p24",
+      "weight": 1
+    },
+    {
+      "source": "p24",
+      "target": "t25",
+      "weight": 1
+    },
+    {
+      "source": "t25",
+      "target": "p_end",
+      "weight": 1
+    }
+  ]
+}

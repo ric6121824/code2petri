@@ -1,0 +1,254 @@
+{
+  "places": [
+    {
+      "id": "p0",
+      "label": "start",
+      "line_number": 112,
+      "initial_tokens": 1
+    },
+    {
+      "id": "p_end",
+      "label": "end",
+      "line_number": null,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p1",
+      "label": "merge_t1",
+      "line_number": 113,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p2",
+      "label": "p2",
+      "line_number": 113,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p3",
+      "label": "merge_t4",
+      "line_number": 115,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p4",
+      "label": "p4",
+      "line_number": 115,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p5",
+      "label": "merge_t6",
+      "line_number": 116,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p6",
+      "label": "p6",
+      "line_number": 116,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p7",
+      "label": "p7",
+      "line_number": 118,
+      "initial_tokens": 0
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t1",
+      "label": "if (!isRunning)",
+      "line_number": 113
+    },
+    {
+      "id": "t2",
+      "label": "else",
+      "line_number": 113
+    },
+    {
+      "id": "t3",
+      "label": "return",
+      "line_number": 113
+    },
+    {
+      "id": "t4",
+      "label": "if (timestamp - lastFrameTime > speed)",
+      "line_number": 115
+    },
+    {
+      "id": "t5",
+      "label": "else",
+      "line_number": 115
+    },
+    {
+      "id": "t6",
+      "label": "if (mode === 'gpu')",
+      "line_number": 116
+    },
+    {
+      "id": "t7",
+      "label": "else",
+      "line_number": 118
+    },
+    {
+      "id": "t8",
+      "label": "call: gpuEngine.step()",
+      "line_number": 117,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "WebGLEngine.step",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+      },
+      "resolved": true,
+      "resolved_to": "WebGLEngine.step",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+    },
+    {
+      "id": "t9",
+      "label": "call: stepCpu()",
+      "line_number": 119,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "stepCpu",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+      },
+      "resolved": true,
+      "resolved_to": "stepCpu",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+    },
+    {
+      "id": "t10",
+      "label": "lastFrameTime = timestamp",
+      "line_number": 121
+    },
+    {
+      "id": "t11",
+      "label": "animationId = call: requestAnimationFrame()",
+      "line_number": 124,
+      "metadata": {
+        "resolved": false,
+        "status": "[unresolved]"
+      },
+      "resolved": false,
+      "status": "[unresolved]"
+    }
+  ],
+  "arcs": [
+    {
+      "source": "p0",
+      "target": "t1",
+      "weight": 1
+    },
+    {
+      "source": "p0",
+      "target": "t2",
+      "weight": 1
+    },
+    {
+      "source": "t1",
+      "target": "p2",
+      "weight": 1
+    },
+    {
+      "source": "p2",
+      "target": "t3",
+      "weight": 1
+    },
+    {
+      "source": "t3",
+      "target": "p_end",
+      "weight": 1
+    },
+    {
+      "source": "t2",
+      "target": "p1",
+      "weight": 1
+    },
+    {
+      "source": "p1",
+      "target": "t4",
+      "weight": 1
+    },
+    {
+      "source": "p1",
+      "target": "t5",
+      "weight": 1
+    },
+    {
+      "source": "t4",
+      "target": "p4",
+      "weight": 1
+    },
+    {
+      "source": "p4",
+      "target": "t6",
+      "weight": 1
+    },
+    {
+      "source": "p4",
+      "target": "t7",
+      "weight": 1
+    },
+    {
+      "source": "t6",
+      "target": "p6",
+      "weight": 1
+    },
+    {
+      "source": "p6",
+      "target": "t8",
+      "weight": 1
+    },
+    {
+      "source": "t8",
+      "target": "p5",
+      "weight": 1
+    },
+    {
+      "source": "t7",
+      "target": "p7",
+      "weight": 1
+    },
+    {
+      "source": "p7",
+      "target": "t9",
+      "weight": 1
+    },
+    {
+      "source": "t9",
+      "target": "p5",
+      "weight": 1
+    },
+    {
+      "source": "p5",
+      "target": "t10",
+      "weight": 1
+    },
+    {
+      "source": "t10",
+      "target": "p3",
+      "weight": 1
+    },
+    {
+      "source": "t5",
+      "target": "p3",
+      "weight": 1
+    },
+    {
+      "source": "p3",
+      "target": "t11",
+      "weight": 1
+    },
+    {
+      "source": "t11",
+      "target": "p0",
+      "weight": 1
+    },
+    {
+      "source": "t11",
+      "target": "p_end",
+      "weight": 1
+    }
+  ]
+}

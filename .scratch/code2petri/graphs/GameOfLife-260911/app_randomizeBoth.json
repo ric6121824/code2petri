@@ -1,0 +1,101 @@
+{
+  "places": [
+    {
+      "id": "p0",
+      "label": "start",
+      "line_number": 55,
+      "initial_tokens": 1
+    },
+    {
+      "id": "p_end",
+      "label": "end",
+      "line_number": null,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p1",
+      "label": "p1",
+      "line_number": 57,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p2",
+      "label": "p2",
+      "line_number": 58,
+      "initial_tokens": 0
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t1",
+      "label": "grid = call: createGrid()",
+      "line_number": 57,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "createGrid",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+      },
+      "resolved": true,
+      "resolved_to": "createGrid",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+    },
+    {
+      "id": "t2",
+      "label": "call: drawCpuGrid()",
+      "line_number": 58,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "drawCpuGrid",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+      },
+      "resolved": true,
+      "resolved_to": "drawCpuGrid",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+    },
+    {
+      "id": "t3",
+      "label": "call: gpuEngine.randomize()",
+      "line_number": 61,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "WebGLEngine.randomize",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+      },
+      "resolved": true,
+      "resolved_to": "WebGLEngine.randomize",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"
+    }
+  ],
+  "arcs": [
+    {
+      "source": "p0",
+      "target": "t1",
+      "weight": 1
+    },
+    {
+      "source": "t1",
+      "target": "p1",
+      "weight": 1
+    },
+    {
+      "source": "p1",
+      "target": "t2",
+      "weight": 1
+    },
+    {
+      "source": "t2",
+      "target": "p2",
+      "weight": 1
+    },
+    {
+      "source": "p2",
+      "target": "t3",
+      "weight": 1
+    },
+    {
+      "source": "t3",
+      "target": "p_end",
+      "weight": 1
+    }
+  ]
+}

@@ -1,0 +1,350 @@
+{
+  "places": [
+    {
+      "id": "p0",
+      "label": "start",
+      "line_number": 91,
+      "initial_tokens": 1
+    },
+    {
+      "id": "p_end",
+      "label": "end",
+      "line_number": null,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p1",
+      "label": "p1",
+      "line_number": 92,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p2",
+      "label": "exit_t2",
+      "line_number": 94,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p3",
+      "label": "p3",
+      "line_number": 94,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p4",
+      "label": "p4",
+      "line_number": 95,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p5",
+      "label": "p5",
+      "line_number": 96,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p6",
+      "label": "p6",
+      "line_number": 97,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p7",
+      "label": "p7",
+      "line_number": 99,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p8",
+      "label": "p8",
+      "line_number": 101,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p9",
+      "label": "p9",
+      "line_number": 101,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p10",
+      "label": "p10",
+      "line_number": 103,
+      "initial_tokens": 0
+    },
+    {
+      "id": "p11",
+      "label": "p11",
+      "line_number": 108,
+      "initial_tokens": 0
+    }
+  ],
+  "transitions": [
+    {
+      "id": "t1",
+      "label": "let nextGrid = call: createGrid()",
+      "line_number": 92,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "createGrid",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+      },
+      "resolved": true,
+      "resolved_to": "createGrid",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+    },
+    {
+      "id": "t2",
+      "label": "for (let i = 0; i < ROWS; i++)",
+      "line_number": 94
+    },
+    {
+      "id": "t3",
+      "label": "exit",
+      "line_number": 94
+    },
+    {
+      "id": "t4",
+      "label": "for (let j = 0; j < COLS; j++)",
+      "line_number": 95
+    },
+    {
+      "id": "t5",
+      "label": "exit",
+      "line_number": 95
+    },
+    {
+      "id": "t6",
+      "label": "let state = grid[i][j]",
+      "line_number": 96
+    },
+    {
+      "id": "t7",
+      "label": "let neighbors = call: countNeighbors()",
+      "line_number": 97,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "countNeighbors",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+      },
+      "resolved": true,
+      "resolved_to": "countNeighbors",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+    },
+    {
+      "id": "t8",
+      "label": "if (state === 0 && neighbors === 3)",
+      "line_number": 99
+    },
+    {
+      "id": "t9",
+      "label": "else",
+      "line_number": 101
+    },
+    {
+      "id": "t10",
+      "label": "nextGrid[i][j] = 1",
+      "line_number": 100
+    },
+    {
+      "id": "t11",
+      "label": "if (state === 1 && (neighbors < 2 || neighbors > 3))",
+      "line_number": 101
+    },
+    {
+      "id": "t12",
+      "label": "else",
+      "line_number": 103
+    },
+    {
+      "id": "t13",
+      "label": "nextGrid[i][j] = 0",
+      "line_number": 102
+    },
+    {
+      "id": "t14",
+      "label": "nextGrid[i][j] = state",
+      "line_number": 104
+    },
+    {
+      "id": "t15",
+      "label": "grid = nextGrid",
+      "line_number": 108
+    },
+    {
+      "id": "t16",
+      "label": "call: drawCpuGrid()",
+      "line_number": 109,
+      "metadata": {
+        "resolved": true,
+        "resolved_to": "drawCpuGrid",
+        "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+      },
+      "resolved": true,
+      "resolved_to": "drawCpuGrid",
+      "target_file": "/Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"
+    }
+  ],
+  "arcs": [
+    {
+      "source": "p0",
+      "target": "t1",
+      "weight": 1
+    },
+    {
+      "source": "t1",
+      "target": "p1",
+      "weight": 1
+    },
+    {
+      "source": "p1",
+      "target": "t2",
+      "weight": 1
+    },
+    {
+      "source": "p1",
+      "target": "t3",
+      "weight": 1
+    },
+    {
+      "source": "t2",
+      "target": "p3",
+      "weight": 1
+    },
+    {
+      "source": "p3",
+      "target": "t4",
+      "weight": 1
+    },
+    {
+      "source": "p3",
+      "target": "t5",
+      "weight": 1
+    },
+    {
+      "source": "t4",
+      "target": "p4",
+      "weight": 1
+    },
+    {
+      "source": "p4",
+      "target": "t6",
+      "weight": 1
+    },
+    {
+      "source": "t6",
+      "target": "p5",
+      "weight": 1
+    },
+    {
+      "source": "p5",
+      "target": "t7",
+      "weight": 1
+    },
+    {
+      "source": "t7",
+      "target": "p6",
+      "weight": 1
+    },
+    {
+      "source": "p6",
+      "target": "t8",
+      "weight": 1
+    },
+    {
+      "source": "p6",
+      "target": "t9",
+      "weight": 1
+    },
+    {
+      "source": "t8",
+      "target": "p7",
+      "weight": 1
+    },
+    {
+      "source": "p7",
+      "target": "t10",
+      "weight": 1
+    },
+    {
+      "source": "t10",
+      "target": "p3",
+      "weight": 1
+    },
+    {
+      "source": "t9",
+      "target": "p8",
+      "weight": 1
+    },
+    {
+      "source": "p8",
+      "target": "t11",
+      "weight": 1
+    },
+    {
+      "source": "p8",
+      "target": "t12",
+      "weight": 1
+    },
+    {
+      "source": "t11",
+      "target": "p9",
+      "weight": 1
+    },
+    {
+      "source": "p9",
+      "target": "t13",
+      "weight": 1
+    },
+    {
+      "source": "t13",
+      "target": "p3",
+      "weight": 1
+    },
+    {
+      "source": "t12",
+      "target": "p10",
+      "weight": 1
+    },
+    {
+      "source": "p10",
+      "target": "t14",
+      "weight": 1
+    },
+    {
+      "source": "t14",
+      "target": "p3",
+      "weight": 1
+    },
+    {
+      "source": "t5",
+      "target": "p1",
+      "weight": 1
+    },
+    {
+      "source": "t3",
+      "target": "p2",
+      "weight": 1
+    },
+    {
+      "source": "p2",
+      "target": "t15",
+      "weight": 1
+    },
+    {
+      "source": "t15",
+      "target": "p11",
+      "weight": 1
+    },
+    {
+      "source": "p11",
+      "target": "t16",
+      "weight": 1
+    },
+    {
+      "source": "t16",
+      "target": "p_end",
+      "weight": 1
+    }
+  ]
+}

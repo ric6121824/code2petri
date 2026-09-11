@@ -1,0 +1,49 @@
+digraph PetriNet {
+    rankdir=TB;
+
+    // Places
+    "p0" [shape=circle, label="start (tokens: 1)"];
+    "p_end" [shape=circle, label="end"];
+    "p1" [shape=circle, label="p1"];
+    "p2" [shape=circle, label="p2"];
+    "p3" [shape=circle, label="merge_t3"];
+    "p4" [shape=circle, label="p4"];
+    "p5" [shape=circle, label="p5"];
+    "p6" [shape=circle, label="p6"];
+    "p7" [shape=circle, label="p7"];
+    "p8" [shape=circle, label="p8"];
+
+    // Transitions
+    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.canvas = canvas (line 3)"];
+    "t2" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="this.gl = call: canvas.getContext() (line 4)", color="#e65100", tooltip="Unresolved call"];
+    "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (!this.gl) (line 5)"];
+    "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 5)"];
+    "t5" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: alert() (line 6)", color="#e65100", tooltip="Unresolved call"];
+    "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="return (line 7)"];
+    "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.width = width (line 10)"];
+    "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.height = height (line 11)"];
+    "t9" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: this.initShaders() (line 13)", color="#2e7d32", tooltip="Resolved to WebGLEngine.initShaders in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
+    "t10" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: this.initBuffers() (line 14)", color="#2e7d32", tooltip="Resolved to WebGLEngine.initBuffers in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
+
+    // Arcs
+    "p0" -> "t1";
+    "t1" -> "p1";
+    "p1" -> "t2";
+    "t2" -> "p2";
+    "p2" -> "t3";
+    "p2" -> "t4";
+    "t3" -> "p4";
+    "p4" -> "t5";
+    "t5" -> "p5";
+    "p5" -> "t6";
+    "t6" -> "p_end";
+    "t4" -> "p3";
+    "p3" -> "t7";
+    "t7" -> "p6";
+    "p6" -> "t8";
+    "t8" -> "p7";
+    "p7" -> "t9";
+    "t9" -> "p8";
+    "p8" -> "t10";
+    "t10" -> "p_end";
+}
