@@ -889,6 +889,15 @@ class JavascriptWalker(WalkerProtocol):
 
         return None
 
+    def _extract_new_class_name(self, node: Any) -> Optional[str]:
+        """Extracts the instantiated class name from a NewExpression AST node."""
+        if not isinstance(node, dict) or node.get("type") != "NewExpression":
+            return None
+        callee = node.get("callee", {})
+        if callee.get("type") == "Identifier":
+            return callee.get("name")
+        return self._slice_node(callee)
+
     def collect_variable_bindings(self, tree: Any) -> Dict[str, str]:
         """Collects variable to class name bindings from constructor calls in the AST."""
         if not tree:
@@ -901,28 +910,15 @@ class JavascriptWalker(WalkerProtocol):
                 ntype = node.get("type")
                 if ntype == "VariableDeclaration":
                     for decl in node.get("declarations", []):
-                        init = decl.get("init")
-                        if isinstance(init, dict) and init.get("type") == "NewExpression":
-                            callee = init.get("callee", {})
-                            class_name = (
-                                callee.get("name")
-                                if callee.get("type") == "Identifier"
-                                else self._slice_node(callee)
-                            )
-                            id_node = decl.get("id", {})
-                            if id_node.get("type") == "Identifier":
-                                var_name = id_node.get("name")
-                                if var_name and class_name:
-                                    bindings[var_name] = class_name
+                        class_name = self._extract_new_class_name(decl.get("init"))
+                        id_node = decl.get("id", {})
+                        if id_node.get("type") == "Identifier":
+                            var_name = id_node.get("name")
+                            if var_name and class_name:
+                                bindings[var_name] = class_name
                 elif ntype == "AssignmentExpression" and node.get("operator") == "=":
-                    right = node.get("right")
-                    if isinstance(right, dict) and right.get("type") == "NewExpression":
-                        callee = right.get("callee", {})
-                        class_name = (
-                            callee.get("name")
-                            if callee.get("type") == "Identifier"
-                            else self._slice_node(callee)
-                        )
+                    class_name = self._extract_new_class_name(node.get("right"))
+                    if class_name:
                         left = node.get("left", {})
                         left_type = left.get("type")
                         var_name = None

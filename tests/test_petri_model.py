@@ -461,6 +461,11 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         self.assertTrue(t_res.resolution.resolved)
         self.assertEqual(t_res.resolution.resolved_to, "Foo.foo")
 
+    def test_transition_type_hints_valid(self):
+        import typing
+        hints = typing.get_type_hints(Transition)
+        self.assertIn("RESERVED_METADATA_KEYS", hints)
+
     def test_pnml_serialization_avoids_literal_none_strings(self):
         net = PetriNet()
         p0 = net.add_place("p0", "start", initial_tokens=1)
@@ -540,6 +545,7 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         self.assertIs(t.resolution, call_res)
         d = t.to_dict()
         self.assertFalse(d["resolved"])
+        self.assertEqual(d["status"], "[unresolved]")
         self.assertNotIn("resolved_to", d)
 
         dot_attrs = t.get_dot_attributes()

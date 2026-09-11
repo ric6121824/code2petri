@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import json
-from typing import Optional, Union, List, Dict, Any
+from typing import Optional, Union, List, Dict, Any, Set
 import xml.etree.ElementTree as ET
 
 
@@ -109,6 +109,8 @@ class Transition:
                 d["resolved_to"] = self.resolution.resolved_to
             if self.resolution.target_file is not None:
                 d["target_file"] = self.resolution.target_file
+            if not self.resolution.resolved:
+                d["status"] = "[unresolved]"
         return d
 
     def add_pnml_toolspecific(self, parent_element: ET.Element) -> Optional[ET.Element]:

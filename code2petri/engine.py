@@ -16,6 +16,12 @@ def discover_context_files(context_paths: Sequence[str]) -> List[str]:
     discovered: List[str] = []
     seen: Set[str] = set()
 
+    def add_file(file_path: str) -> None:
+        abs_file = os.path.abspath(file_path)
+        if abs_file not in seen:
+            seen.add(abs_file)
+            discovered.append(abs_file)
+
     for path in context_paths:
         if not os.path.exists(path):
             raise AssertionError(f"Context path '{path}' does not exist.")
@@ -27,17 +33,11 @@ def discover_context_files(context_paths: Sequence[str]) -> List[str]:
                         continue
                     ext = os.path.splitext(f)[1].lower()
                     if ext in WALKERS:
-                        abs_file = os.path.abspath(os.path.join(root, f))
-                        if abs_file not in seen:
-                            seen.add(abs_file)
-                            discovered.append(abs_file)
+                        add_file(os.path.join(root, f))
         elif os.path.isfile(path):
             ext = os.path.splitext(path)[1].lower()
             if ext in WALKERS:
-                abs_file = os.path.abspath(path)
-                if abs_file not in seen:
-                    seen.add(abs_file)
-                    discovered.append(abs_file)
+                add_file(path)
             else:
                 supported_src = ", ".join(sorted(WALKERS.keys()))
                 raise AssertionError(
