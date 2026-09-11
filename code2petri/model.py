@@ -139,12 +139,14 @@ class Transition:
         if self.resolution is not None:
             if self.resolution.resolved:
                 attrs["color"] = "#2e7d32"
+                attrs["fillcolor"] = "#2e7d32"
                 target = self.resolution.resolved_to or ""
                 target_file = self.resolution.target_file or ""
                 tooltip_text = f"Resolved to {target} in {target_file}" if target_file else f"Resolved to {target}"
                 attrs["tooltip"] = tooltip_text
             else:
                 attrs["color"] = "#e65100"
+                attrs["fillcolor"] = "#e65100"
                 attrs["tooltip"] = "Unresolved call"
 
         # Tooltip fallback for generic metadata if not already set by call resolution
@@ -341,8 +343,10 @@ class PetriNet:
                 label = f"{label} (line {transition.line_number})"
             escaped_label = escape_dot(label)
             escaped_id = escape_dot(transition.id)
-            extra_attrs = ""
             dot_attrs = transition.get_dot_attributes()
+            fillcolor = dot_attrs.get("fillcolor", "black")
+            fillcolor_val = f'"{fillcolor}"' if fillcolor.startswith("#") else fillcolor
+            extra_attrs = ""
             if dot_attrs:
                 attrs_parts = []
                 if "color" in dot_attrs:
@@ -350,12 +354,12 @@ class PetriNet:
                 if "tooltip" in dot_attrs:
                     attrs_parts.append(f'tooltip="{escape_dot(dot_attrs["tooltip"])}"')
                 for k, v in dot_attrs.items():
-                    if k not in ("color", "tooltip"):
+                    if k not in ("color", "fillcolor", "tooltip"):
                         attrs_parts.append(f'{k}="{escape_dot(v)}"')
                 if attrs_parts:
                     extra_attrs = ", " + ", ".join(attrs_parts)
             lines.append(
-                f'    "{escaped_id}" [shape=rect, style=filled, fillcolor=black, '
+                f'    "{escaped_id}" [shape=rect, style=filled, fillcolor={fillcolor_val}, '
                 f'fontcolor=white, label="{escaped_label}"{extra_attrs}];'
             )
 

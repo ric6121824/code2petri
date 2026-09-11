@@ -375,8 +375,10 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
 
         dot = net.to_dot()
         self.assertIn('color="#2e7d32"', dot)
+        self.assertIn('fillcolor="#2e7d32"', dot)
         self.assertIn('tooltip="Resolved to Foo.foo in foo.py"', dot)
         self.assertIn('color="#e65100"', dot)
+        self.assertIn('fillcolor="#e65100"', dot)
         self.assertIn('tooltip="Unresolved call"', dot)
 
     def test_json_serialization_preserves_metadata(self):
@@ -496,6 +498,7 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         # DOT attributes
         dot_attrs = t.get_dot_attributes()
         self.assertEqual(dot_attrs["color"], "#2e7d32")
+        self.assertEqual(dot_attrs["fillcolor"], "#2e7d32")
         self.assertEqual(dot_attrs["tooltip"], "Resolved to Worker.process in worker.py")
 
         # PNML toolspecific
@@ -524,6 +527,7 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         # DOT attributes
         dot_attrs = t.get_dot_attributes()
         self.assertEqual(dot_attrs["color"], "#2e7d32")
+        self.assertEqual(dot_attrs["fillcolor"], "#2e7d32")
         self.assertEqual(dot_attrs["tooltip"], "Resolved to Renderer.render in renderer.js")
 
         # PNML toolspecific
@@ -550,6 +554,7 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
 
         dot_attrs = t.get_dot_attributes()
         self.assertEqual(dot_attrs["color"], "#e65100")
+        self.assertEqual(dot_attrs["fillcolor"], "#e65100")
         self.assertEqual(dot_attrs["tooltip"], "Unresolved call")
 
 

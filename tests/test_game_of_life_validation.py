@@ -212,6 +212,8 @@ class TestGameOfLifeCrossFileValidation(unittest.TestCase):
             dot_text = f.read()
         self.assertIn('color="#2e7d32"', dot_text)
         self.assertIn('color="#e65100"', dot_text)
+        self.assertIn('fillcolor="#2e7d32"', dot_text)
+        self.assertIn('fillcolor="#e65100"', dot_text)
         self.assertIn("Resolved to WebGLEngine.step in", dot_text)
         self.assertIn('tooltip="Unresolved call"', dot_text)
 
@@ -225,6 +227,39 @@ class TestGameOfLifeCrossFileValidation(unittest.TestCase):
         self.assertGreaterEqual(len(unresolved_json), 1)
         step_json = next(t for t in resolved_json if t.get("resolved_to") == "WebGLEngine.step")
         self.assertEqual(step_json.get("target_file"), self.webgl_js)
+
+    def test_png_rendering_distinguishes_resolution_status(self):
+        """Verifies PNG output export correctly renders colored transitions for resolved/unresolved calls."""
+        out_png = os.path.join(self.temp_dir.name, "gol_loop.png")
+        code2petri(
+            source_path=self.app_js,
+            target_function="loop",
+            context=[self.webgl_js],
+            output_file=out_png,
+        )
+        self.assertTrue(os.path.exists(out_png))
+        self.assertGreater(os.path.getsize(out_png), 0)
+
+        import pymupdf
+
+        doc = pymupdf.open(out_png)
+        pix = doc[0].get_pixmap()
+        samples = pix.samples
+        n = pix.n
+
+        green_count = 0
+        orange_count = 0
+        for i in range(0, len(samples), n):
+            r, g, b = samples[i], samples[i + 1], samples[i + 2]
+            # #2e7d32 is (46, 125, 50)
+            if abs(r - 0x2E) < 15 and abs(g - 0x7D) < 15 and abs(b - 0x32) < 15:
+                green_count += 1
+            # #e65100 is (230, 81, 0)
+            elif abs(r - 0xE6) < 15 and abs(g - 0x51) < 15 and abs(b - 0x00) < 15:
+                orange_count += 1
+
+        self.assertGreater(green_count, 100, "Expected green pixels for resolved transitions in PNG")
+        self.assertGreater(orange_count, 100, "Expected orange pixels for unresolved transitions in PNG")
 
 
 if __name__ == "__main__":
