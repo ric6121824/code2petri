@@ -43,7 +43,7 @@
 <g id="node22" class="node">
 <title>t2</title>
 <g id="a_node22"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="299.89,-2748.45 107.39,-2748.45 107.39,-2712.45 299.89,-2712.45 299.89,-2748.45"/>
+<polygon fill="#e65100" stroke="black" points="299.89,-2748.45 107.39,-2748.45 107.39,-2712.45 299.89,-2712.45 299.89,-2748.45"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-2726.25" font-family="Times,serif" font-size="14.00" fill="white">call: gl.useProgram() (line 168)</text>
 </a>
 </g>
@@ -64,7 +64,7 @@
 <g id="node23" class="node">
 <title>t3</title>
 <g id="a_node23"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="313.88,-2599.06 93.4,-2599.06 93.4,-2563.06 313.88,-2563.06 313.88,-2599.06"/>
+<polygon fill="#e65100" stroke="black" points="313.88,-2599.06 93.4,-2599.06 93.4,-2563.06 313.88,-2563.06 313.88,-2599.06"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-2576.86" font-family="Times,serif" font-size="14.00" fill="white">call: gl.bindFramebuffer() (line 169)</text>
 </a>
 </g>
@@ -85,7 +85,7 @@
 <g id="node24" class="node">
 <title>t4</title>
 <g id="a_node24"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="291.34,-2449.68 115.94,-2449.68 115.94,-2413.68 291.34,-2413.68 291.34,-2449.68"/>
+<polygon fill="#e65100" stroke="black" points="291.34,-2449.68 115.94,-2449.68 115.94,-2413.68 291.34,-2413.68 291.34,-2449.68"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-2427.48" font-family="Times,serif" font-size="14.00" fill="white">call: gl.viewport() (line 170)</text>
 </a>
 </g>
@@ -106,7 +106,7 @@
 <g id="node25" class="node">
 <title>t5</title>
 <g id="a_node25"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="336.81,-2300.29 70.47,-2300.29 70.47,-2264.29 336.81,-2264.29 336.81,-2300.29"/>
+<polygon fill="#e65100" stroke="black" points="336.81,-2300.29 70.47,-2300.29 70.47,-2264.29 336.81,-2264.29 336.81,-2300.29"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-2278.09" font-family="Times,serif" font-size="14.00" fill="white">call: gl.enableVertexAttribArray() (line 172)</text>
 </a>
 </g>
@@ -127,7 +127,7 @@
 <g id="node26" class="node">
 <title>t6</title>
 <g id="a_node26"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="320.89,-2150.9 86.4,-2150.9 86.4,-2114.9 320.89,-2114.9 320.89,-2150.9"/>
+<polygon fill="#e65100" stroke="black" points="320.89,-2150.9 86.4,-2150.9 86.4,-2114.9 320.89,-2114.9 320.89,-2150.9"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-2128.7" font-family="Times,serif" font-size="14.00" fill="white">call: gl.vertexAttribPointer() (line 173)</text>
 </a>
 </g>
@@ -148,7 +148,7 @@
 <g id="node27" class="node">
 <title>t7</title>
 <g id="a_node27"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="304.93,-2001.51 102.35,-2001.51 102.35,-1965.51 304.93,-1965.51 304.93,-2001.51"/>
+<polygon fill="#e65100" stroke="black" points="304.93,-2001.51 102.35,-2001.51 102.35,-1965.51 304.93,-1965.51 304.93,-2001.51"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-1979.31" font-family="Times,serif" font-size="14.00" fill="white">call: gl.activeTexture() (line 175)</text>
 </a>
 </g>
@@ -169,7 +169,7 @@
 <g id="node28" class="node">
 <title>t8</title>
 <g id="a_node28"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="300.67,-1852.13 106.62,-1852.13 106.62,-1816.13 300.67,-1816.13 300.67,-1852.13"/>
+<polygon fill="#e65100" stroke="black" points="300.67,-1852.13 106.62,-1852.13 106.62,-1816.13 300.67,-1816.13 300.67,-1852.13"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-1829.93" font-family="Times,serif" font-size="14.00" fill="white">call: gl.bindTexture() (line 176)</text>
 </a>
 </g>
@@ -190,7 +190,7 @@
 <g id="node29" class="node">
 <title>t9</title>
 <g id="a_node29"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="371.68,-1702.74 35.6,-1702.74 35.6,-1666.74 371.68,-1666.74 371.68,-1702.74"/>
+<polygon fill="#e65100" stroke="black" points="371.68,-1702.74 35.6,-1702.74 35.6,-1666.74 371.68,-1666.74 371.68,-1702.74"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-1680.54" font-family="Times,serif" font-size="14.00" fill="white">const stateLoc = call: gl.getUniformLocation() (line 178)</text>
 </a>
 </g>
@@ -211,7 +211,7 @@
 <g id="node30" class="node">
 <title>t10</title>
 <g id="a_node30"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="369.73,-1553.35 37.55,-1553.35 37.55,-1517.35 369.73,-1517.35 369.73,-1553.35"/>
+<polygon fill="#e65100" stroke="black" points="369.73,-1553.35 37.55,-1553.35 37.55,-1517.35 369.73,-1517.35 369.73,-1553.35"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-1531.15" font-family="Times,serif" font-size="14.00" fill="white">const sizeLoc = call: gl.getUniformLocation() (line 179)</text>
 </a>
 </g>
@@ -232,7 +232,7 @@
 <g id="node31" class="node">
 <title>t11</title>
 <g id="a_node31"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="294.45,-1394.31 112.83,-1394.31 112.83,-1358.31 294.45,-1358.31 294.45,-1394.31"/>
+<polygon fill="#e65100" stroke="black" points="294.45,-1394.31 112.83,-1394.31 112.83,-1358.31 294.45,-1358.31 294.45,-1394.31"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-1372.11" font-family="Times,serif" font-size="14.00" fill="white">call: gl.uniform1i() (line 180)</text>
 </a>
 </g>
@@ -253,7 +253,7 @@
 <g id="node32" class="node">
 <title>t12</title>
 <g id="a_node32"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="294.84,-1235.27 112.44,-1235.27 112.44,-1199.27 294.84,-1199.27 294.84,-1235.27"/>
+<polygon fill="#e65100" stroke="black" points="294.84,-1235.27 112.44,-1235.27 112.44,-1199.27 294.84,-1199.27 294.84,-1235.27"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-1213.07" font-family="Times,serif" font-size="14.00" fill="white">call: gl.uniform2f() (line 181)</text>
 </a>
 </g>
@@ -274,7 +274,7 @@
 <g id="node33" class="node">
 <title>t13</title>
 <g id="a_node33"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="299.5,-1076.22 107.79,-1076.22 107.79,-1040.22 299.5,-1040.22 299.5,-1076.22"/>
+<polygon fill="#e65100" stroke="black" points="299.5,-1076.22 107.79,-1076.22 107.79,-1040.22 299.5,-1040.22 299.5,-1076.22"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-1054.02" font-family="Times,serif" font-size="14.00" fill="white">call: gl.drawArrays() (line 183)</text>
 </a>
 </g>
@@ -385,7 +385,7 @@
 <g id="node39" class="node">
 <title>t19</title>
 <g id="a_node39"><a xlink:title="Resolved to WebGLEngine.drawToScreen in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl&#45;engine.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="311.94,-121.96 95.34,-121.96 95.34,-85.96 311.94,-85.96 311.94,-121.96"/>
+<polygon fill="#2e7d32" stroke="black" points="311.94,-121.96 95.34,-121.96 95.34,-85.96 311.94,-85.96 311.94,-121.96"/>
 <text xml:space="preserve" text-anchor="middle" x="203.64" y="-99.76" font-family="Times,serif" font-size="14.00" fill="white">call: this.drawToScreen() (line 194)</text>
 </a>
 </g>

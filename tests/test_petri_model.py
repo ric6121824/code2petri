@@ -9,7 +9,7 @@ REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from code2petri.model import Place, Transition, Arc, PetriNet, CallResolution  # noqa: E402
+from code2petri.model import Place, Transition, Arc, PetriNet, CallResolution, RenderingConfig, escape_dot  # noqa: E402
 
 
 
@@ -257,6 +257,52 @@ class TestDOTSerialization(unittest.TestCase):
         self.assertIn(r"line1\nline2", dot2)
         self.assertNotIn("line1\nline2", dot2)
 
+    def test_place_to_dot_node(self):
+        p_plain = Place(id="p1", label="start")
+        self.assertEqual(p_plain.to_dot_node(), '    "p1" [shape=circle, label="start"];')
+
+        p_tokens = Place(id="p2", label="active", initial_tokens=3)
+        self.assertEqual(p_tokens.to_dot_node(), '    "p2" [shape=circle, label="active (tokens: 3)"];')
+
+        p_escaped = Place(id='p"3"', label='line"1"')
+        self.assertEqual(p_escaped.to_dot_node(), r'    "p\"3\"" [shape=circle, label="line\"1\""];')
+
+    def test_transition_to_dot_node(self):
+        t_default = Transition(id="t1", label="run", line_number=42)
+        self.assertEqual(
+            t_default.to_dot_node(),
+            '    "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="run (line 42)"];'
+        )
+
+        t_res = Transition(
+            id="t2",
+            label="step",
+            resolution=CallResolution(resolved=True, resolved_to="Engine.step", target_file="engine.js"),
+        )
+        dot_res = t_res.to_dot_node()
+        self.assertIn('shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white', dot_res)
+        self.assertIn('tooltip="Resolved to Engine.step in engine.js"', dot_res)
+        self.assertNotIn(' color=', dot_res)
+
+        t_unres = Transition(
+            id="t3",
+            label="call",
+            resolution=CallResolution(resolved=False),
+        )
+        dot_unres = t_unres.to_dot_node()
+        self.assertIn('shape=rect, style=filled, fillcolor="#e65100", fontcolor=white', dot_unres)
+        self.assertIn('tooltip="Unresolved call"', dot_unres)
+        self.assertNotIn(' color=', dot_unres)
+
+    def test_arc_to_dot_edge(self):
+        p = Place(id="p1", label="start")
+        t = Transition(id="t1", label="run")
+        a1 = Arc(source=p, target=t)
+        self.assertEqual(a1.to_dot_edge(), '    "p1" -> "t1";')
+
+        a2 = Arc(source=t, target=p, weight=4)
+        self.assertEqual(a2.to_dot_edge(), '    "t1" -> "p1" [label="4"];')
+
 
 class TestPetriJsonSerialization(unittest.TestCase):
     def setUp(self):
@@ -373,12 +419,12 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         net.add_arc(t_res, p1)
         net.add_arc(p1, t_unres)
 
+        import re
         dot = net.to_dot()
-        self.assertIn('color="#2e7d32"', dot)
-        self.assertIn('fillcolor="#2e7d32"', dot)
+        self.assertIsNone(re.search(r'(?<!fill)(?<!font)color=', dot))
+        self.assertIn(f'fillcolor="{RenderingConfig.RESOLVED_COLOR}"', dot)
         self.assertIn('tooltip="Resolved to Foo.foo in foo.py"', dot)
-        self.assertIn('color="#e65100"', dot)
-        self.assertIn('fillcolor="#e65100"', dot)
+        self.assertIn(f'fillcolor="{RenderingConfig.UNRESOLVED_COLOR}"', dot)
         self.assertIn('tooltip="Unresolved call"', dot)
 
     def test_json_serialization_preserves_metadata(self):
@@ -497,8 +543,8 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         )
         # DOT attributes
         dot_attrs = t.get_dot_attributes()
-        self.assertEqual(dot_attrs["color"], "#2e7d32")
-        self.assertEqual(dot_attrs["fillcolor"], "#2e7d32")
+        self.assertNotIn("color", dot_attrs)
+        self.assertEqual(dot_attrs["fillcolor"], RenderingConfig.RESOLVED_COLOR)
         self.assertEqual(dot_attrs["tooltip"], "Resolved to Worker.process in worker.py")
 
         # PNML toolspecific
@@ -526,8 +572,8 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
 
         # DOT attributes
         dot_attrs = t.get_dot_attributes()
-        self.assertEqual(dot_attrs["color"], "#2e7d32")
-        self.assertEqual(dot_attrs["fillcolor"], "#2e7d32")
+        self.assertNotIn("color", dot_attrs)
+        self.assertEqual(dot_attrs["fillcolor"], RenderingConfig.RESOLVED_COLOR)
         self.assertEqual(dot_attrs["tooltip"], "Resolved to Renderer.render in renderer.js")
 
         # PNML toolspecific
@@ -553,8 +599,8 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         self.assertNotIn("resolved_to", d)
 
         dot_attrs = t.get_dot_attributes()
-        self.assertEqual(dot_attrs["color"], "#e65100")
-        self.assertEqual(dot_attrs["fillcolor"], "#e65100")
+        self.assertNotIn("color", dot_attrs)
+        self.assertEqual(dot_attrs["fillcolor"], RenderingConfig.UNRESOLVED_COLOR)
         self.assertEqual(dot_attrs["tooltip"], "Unresolved call")
 
 

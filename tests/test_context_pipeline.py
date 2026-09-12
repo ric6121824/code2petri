@@ -1,11 +1,12 @@
 import json
 import os
+import re
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
 from code2petri.engine import code2petri, discover_context_files, main
-from code2petri.model import PetriNet
+from code2petri.model import PetriNet, RenderingConfig
 
 
 class TestContextDiscovery(unittest.TestCase):
@@ -158,8 +159,9 @@ class TestCrossFileResolutionEndToEnd(unittest.TestCase):
         with open(out_dot, "r", encoding="utf-8") as f:
             content = f.read()
 
-        self.assertIn('color="#2e7d32"', content)
-        self.assertIn('color="#e65100"', content)
+        self.assertIsNone(re.search(r'(?<!fill)(?<!font)color=', content))
+        self.assertIn(f'fillcolor="{RenderingConfig.RESOLVED_COLOR}"', content)
+        self.assertIn(f'fillcolor="{RenderingConfig.UNRESOLVED_COLOR}"', content)
         self.assertIn("Resolved to WebGLEngine.step in", content)
         self.assertIn('tooltip="Unresolved call"', content)
 

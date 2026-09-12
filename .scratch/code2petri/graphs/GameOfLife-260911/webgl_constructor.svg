@@ -43,7 +43,7 @@
 <g id="node12" class="node">
 <title>t2</title>
 <g id="a_node12"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="278.94,-922.52 29.17,-922.52 29.17,-886.52 278.94,-886.52 278.94,-922.52"/>
+<polygon fill="#e65100" stroke="black" points="278.94,-922.52 29.17,-922.52 29.17,-886.52 278.94,-886.52 278.94,-922.52"/>
 <text xml:space="preserve" text-anchor="middle" x="154.05" y="-900.32" font-family="Times,serif" font-size="14.00" fill="white">this.gl = call: canvas.getContext() (line 4)</text>
 </a>
 </g>
@@ -112,7 +112,7 @@
 <g id="node15" class="node">
 <title>t5</title>
 <g id="a_node15"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="122.11,-570.12 0,-570.12 0,-534.12 122.11,-534.12 122.11,-570.12"/>
+<polygon fill="#e65100" stroke="black" points="122.11,-570.12 0,-570.12 0,-534.12 122.11,-534.12 122.11,-570.12"/>
 <text xml:space="preserve" text-anchor="middle" x="61.05" y="-547.92" font-family="Times,serif" font-size="14.00" fill="white">call: alert() (line 6)</text>
 </a>
 </g>
@@ -169,7 +169,7 @@
 <g id="node19" class="node">
 <title>t9</title>
 <g id="a_node19"><a xlink:title="Resolved to WebGLEngine.initShaders in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl&#45;engine.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="318.53,-271.35 127.57,-271.35 127.57,-235.35 318.53,-235.35 318.53,-271.35"/>
+<polygon fill="#2e7d32" stroke="black" points="318.53,-271.35 127.57,-271.35 127.57,-235.35 318.53,-235.35 318.53,-271.35"/>
 <text xml:space="preserve" text-anchor="middle" x="223.05" y="-249.15" font-family="Times,serif" font-size="14.00" fill="white">call: this.initShaders() (line 13)</text>
 </a>
 </g>
@@ -190,7 +190,7 @@
 <g id="node20" class="node">
 <title>t10</title>
 <g id="a_node20"><a xlink:title="Resolved to WebGLEngine.initBuffers in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl&#45;engine.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="316.36,-121.96 127.74,-121.96 127.74,-85.96 316.36,-85.96 316.36,-121.96"/>
+<polygon fill="#2e7d32" stroke="black" points="316.36,-121.96 127.74,-121.96 127.74,-85.96 316.36,-85.96 316.36,-121.96"/>
 <text xml:space="preserve" text-anchor="middle" x="222.05" y="-99.76" font-family="Times,serif" font-size="14.00" fill="white">call: this.initBuffers() (line 14)</text>
 </a>
 </g>

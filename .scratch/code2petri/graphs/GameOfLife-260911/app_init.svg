@@ -19,7 +19,7 @@
 <g id="node4" class="node">
 <title>t1</title>
 <g id="a_node4"><a xlink:title="Resolved to randomizeBoth in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="204.16,-271.35 13.61,-271.35 13.61,-235.35 204.16,-235.35 204.16,-271.35"/>
+<polygon fill="#2e7d32" stroke="black" points="204.16,-271.35 13.61,-271.35 13.61,-235.35 204.16,-235.35 204.16,-271.35"/>
 <text xml:space="preserve" text-anchor="middle" x="108.88" y="-249.15" font-family="Times,serif" font-size="14.00" fill="white">call: randomizeBoth() (line 40)</text>
 </a>
 </g>
@@ -46,7 +46,7 @@
 <g id="node5" class="node">
 <title>t2</title>
 <g id="a_node5"><a xlink:title="Resolved to setupEventListeners in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="217.76,-121.96 0,-121.96 0,-85.96 217.76,-85.96 217.76,-121.96"/>
+<polygon fill="#2e7d32" stroke="black" points="217.76,-121.96 0,-121.96 0,-85.96 217.76,-85.96 217.76,-121.96"/>
 <text xml:space="preserve" text-anchor="middle" x="108.88" y="-99.76" font-family="Times,serif" font-size="14.00" fill="white">call: setupEventListeners() (line 41)</text>
 </a>
 </g>

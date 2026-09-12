@@ -15,15 +15,15 @@ digraph PetriNet {
 
     // Transitions
     "t1" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.canvas = canvas (line 3)"];
-    "t2" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="this.gl = call: canvas.getContext() (line 4)", color="#e65100", tooltip="Unresolved call"];
+    "t2" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="this.gl = call: canvas.getContext() (line 4)", tooltip="Unresolved call"];
     "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (!this.gl) (line 5)"];
     "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 5)"];
-    "t5" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: alert() (line 6)", color="#e65100", tooltip="Unresolved call"];
+    "t5" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: alert() (line 6)", tooltip="Unresolved call"];
     "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="return (line 7)"];
     "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.width = width (line 10)"];
     "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="this.height = height (line 11)"];
-    "t9" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: this.initShaders() (line 13)", color="#2e7d32", tooltip="Resolved to WebGLEngine.initShaders in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
-    "t10" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: this.initBuffers() (line 14)", color="#2e7d32", tooltip="Resolved to WebGLEngine.initBuffers in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
+    "t9" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: this.initShaders() (line 13)", tooltip="Resolved to WebGLEngine.initShaders in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
+    "t10" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: this.initBuffers() (line 14)", tooltip="Resolved to WebGLEngine.initBuffers in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
 
     // Arcs
     "p0" -> "t1";

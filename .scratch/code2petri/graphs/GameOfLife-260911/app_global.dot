@@ -30,14 +30,14 @@ digraph PetriNet {
     "p24" [shape=circle, label="p24"];
 
     // Transitions
-    "t1" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const canvasCpu = call: document.getElementById() (line 1)", color="#e65100", tooltip="Unresolved call"];
-    "t2" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const canvasGpu = call: document.getElementById() (line 2)", color="#e65100", tooltip="Unresolved call"];
-    "t3" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const ctx = call: canvasCpu.getContext() (line 3)", color="#e65100", tooltip="Unresolved call"];
-    "t4" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const btnStart = call: document.getElementById() (line 5)", color="#e65100", tooltip="Unresolved call"];
-    "t5" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const btnStep = call: document.getElementById() (line 6)", color="#e65100", tooltip="Unresolved call"];
-    "t6" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const btnRandom = call: document.getElementById() (line 7)", color="#e65100", tooltip="Unresolved call"];
-    "t7" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const speedSlider = call: document.getElementById() (line 8)", color="#e65100", tooltip="Unresolved call"];
-    "t8" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const modeRadios = call: document.getElementsByName() (line 9)", color="#e65100", tooltip="Unresolved call"];
+    "t1" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const canvasCpu = call: document.getElementById() (line 1)", tooltip="Unresolved call"];
+    "t2" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const canvasGpu = call: document.getElementById() (line 2)", tooltip="Unresolved call"];
+    "t3" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const ctx = call: canvasCpu.getContext() (line 3)", tooltip="Unresolved call"];
+    "t4" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const btnStart = call: document.getElementById() (line 5)", tooltip="Unresolved call"];
+    "t5" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const btnStep = call: document.getElementById() (line 6)", tooltip="Unresolved call"];
+    "t6" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const btnRandom = call: document.getElementById() (line 7)", tooltip="Unresolved call"];
+    "t7" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const speedSlider = call: document.getElementById() (line 8)", tooltip="Unresolved call"];
+    "t8" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="const modeRadios = call: document.getElementsByName() (line 9)", tooltip="Unresolved call"];
     "t9" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const CELL_SIZE = 4 (line 12)"];
     "t10" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const ROWS = 150 (line 13)"];
     "t11" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const COLS = 200 (line 14)"];
@@ -48,13 +48,13 @@ digraph PetriNet {
     "t16" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const COLOR_BG = '#1a2235' (line 22)"];
     "t17" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const COLOR_ALIVE = '#00f0ff' (line 23)"];
     "t18" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const gpuEngine = new WebGLEngine(canvasGpu, COLS, ROWS) (line 26)"];
-    "t19" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="let grid = call: createGrid() (line 29)", color="#2e7d32", tooltip="Resolved to createGrid in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
+    "t19" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="let grid = call: createGrid() (line 29)", tooltip="Resolved to createGrid in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
     "t20" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let isRunning = false (line 30)"];
     "t21" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let mode = 'gpu' (line 31)"];
     "t22" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let speed = 100 (line 32)"];
     "t23" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let animationId = null (line 33)"];
     "t24" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let lastFrameTime = 0 (line 34)"];
-    "t25" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: init() (line 37)", color="#2e7d32", tooltip="Resolved to init in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
+    "t25" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: init() (line 37)", tooltip="Resolved to init in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
 
     // Arcs
     "p0" -> "t1";

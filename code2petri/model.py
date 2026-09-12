@@ -4,6 +4,25 @@ from typing import Optional, Union, List, Dict, Any, Set
 import xml.etree.ElementTree as ET
 
 
+class RenderingConfig:
+    """Central configuration for Petri net visualization and styling."""
+    RESOLVED_COLOR: str = "#2e7d32"
+    UNRESOLVED_COLOR: str = "#e65100"
+    DEFAULT_FILLCOLOR: str = "black"
+    DEFAULT_FONTCOLOR: str = "white"
+
+
+def escape_dot(text: str) -> str:
+    """Escapes special characters for Graphviz DOT string literals."""
+    return (
+        str(text)
+        .replace('\\', '\\\\')
+        .replace('"', '\\"')
+        .replace('\n', '\\n')
+        .replace('\r', '')
+    )
+
+
 class Place:
     """Represents a Petri net Place (control point where execution can rest)."""
 
@@ -28,6 +47,15 @@ class Place:
             f"Place(id={self.id!r}, label={self.label!r}, "
             f"line_number={self.line_number!r}, initial_tokens={self.initial_tokens!r})"
         )
+
+    def to_dot_node(self) -> str:
+        """Serializes the Place to a Graphviz DOT node statement."""
+        label = self.label
+        if self.initial_tokens > 0:
+            label = f"{label} (tokens: {self.initial_tokens})"
+        escaped_label = escape_dot(label)
+        escaped_id = escape_dot(self.id)
+        return f'    "{escaped_id}" [shape=circle, label="{escaped_label}"];'
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the Place into a dictionary."""
@@ -138,15 +166,13 @@ class Transition:
         attrs: Dict[str, str] = {}
         if self.resolution is not None:
             if self.resolution.resolved:
-                attrs["color"] = "#2e7d32"
-                attrs["fillcolor"] = "#2e7d32"
+                attrs["fillcolor"] = RenderingConfig.RESOLVED_COLOR
                 target = self.resolution.resolved_to or ""
                 target_file = self.resolution.target_file or ""
                 tooltip_text = f"Resolved to {target} in {target_file}" if target_file else f"Resolved to {target}"
                 attrs["tooltip"] = tooltip_text
             else:
-                attrs["color"] = "#e65100"
-                attrs["fillcolor"] = "#e65100"
+                attrs["fillcolor"] = RenderingConfig.UNRESOLVED_COLOR
                 attrs["tooltip"] = "Unresolved call"
 
         # Tooltip fallback for generic metadata if not already set by call resolution
@@ -159,6 +185,31 @@ class Transition:
                     attrs["tooltip"] = ", ".join(items)
 
         return attrs
+
+    def to_dot_node(self) -> str:
+        """Serializes the Transition to a Graphviz DOT node statement."""
+        label = self.label
+        if self.line_number is not None:
+            label = f"{label} (line {self.line_number})"
+        escaped_label = escape_dot(label)
+        escaped_id = escape_dot(self.id)
+        dot_attrs = self.get_dot_attributes()
+        fillcolor = dot_attrs.get("fillcolor", RenderingConfig.DEFAULT_FILLCOLOR)
+        fillcolor_val = f'"{fillcolor}"' if fillcolor.startswith("#") else fillcolor
+        extra_attrs = ""
+        if dot_attrs:
+            attrs_parts = []
+            if "tooltip" in dot_attrs:
+                attrs_parts.append(f'tooltip="{escape_dot(dot_attrs["tooltip"])}"')
+            for k, v in dot_attrs.items():
+                if k not in ("color", "fillcolor", "tooltip"):
+                    attrs_parts.append(f'{k}="{escape_dot(v)}"')
+            if attrs_parts:
+                extra_attrs = ", " + ", ".join(attrs_parts)
+        return (
+            f'    "{escaped_id}" [shape=rect, style=filled, fillcolor={fillcolor_val}, '
+            f'fontcolor={RenderingConfig.DEFAULT_FONTCOLOR}, label="{escaped_label}"{extra_attrs}];'
+        )
 
 
 class Arc:
@@ -194,6 +245,14 @@ class Arc:
             f"Arc(source={self.source.id!r}, target={self.target.id!r}, "
             f"weight={self.weight!r})"
         )
+
+    def to_dot_edge(self) -> str:
+        """Serializes the Arc to a Graphviz DOT edge statement."""
+        source_id = escape_dot(self.source.id)
+        target_id = escape_dot(self.target.id)
+        if self.weight > 1:
+            return f'    "{source_id}" -> "{target_id}" [label="{self.weight}"];'
+        return f'    "{source_id}" -> "{target_id}";'
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the Arc into a dictionary."""
@@ -312,66 +371,24 @@ class PetriNet:
 
     def to_dot(self) -> str:
         """Serializes the Petri net to Graphviz DOT format."""
-        def escape_dot(text: str) -> str:
-            return (
-                text.replace('\\', '\\\\')
-                .replace('"', '\\"')
-                .replace('\n', '\\n')
-                .replace('\r', '')
-            )
-
         lines = [
             "digraph PetriNet {",
             "    rankdir=TB;",
             "",
             "    // Places",
         ]
-
         for place in self.places:
-            label = place.label
-            if place.initial_tokens > 0:
-                label = f"{label} (tokens: {place.initial_tokens})"
-            escaped_label = escape_dot(label)
-            escaped_id = escape_dot(place.id)
-            lines.append(f'    "{escaped_id}" [shape=circle, label="{escaped_label}"];')
+            lines.append(place.to_dot_node())
 
         lines.append("")
         lines.append("    // Transitions")
         for transition in self.transitions:
-            label = transition.label
-            if transition.line_number is not None:
-                label = f"{label} (line {transition.line_number})"
-            escaped_label = escape_dot(label)
-            escaped_id = escape_dot(transition.id)
-            dot_attrs = transition.get_dot_attributes()
-            fillcolor = dot_attrs.get("fillcolor", "black")
-            fillcolor_val = f'"{fillcolor}"' if fillcolor.startswith("#") else fillcolor
-            extra_attrs = ""
-            if dot_attrs:
-                attrs_parts = []
-                if "color" in dot_attrs:
-                    attrs_parts.append(f'color="{dot_attrs["color"]}"')
-                if "tooltip" in dot_attrs:
-                    attrs_parts.append(f'tooltip="{escape_dot(dot_attrs["tooltip"])}"')
-                for k, v in dot_attrs.items():
-                    if k not in ("color", "fillcolor", "tooltip"):
-                        attrs_parts.append(f'{k}="{escape_dot(v)}"')
-                if attrs_parts:
-                    extra_attrs = ", " + ", ".join(attrs_parts)
-            lines.append(
-                f'    "{escaped_id}" [shape=rect, style=filled, fillcolor={fillcolor_val}, '
-                f'fontcolor=white, label="{escaped_label}"{extra_attrs}];'
-            )
+            lines.append(transition.to_dot_node())
 
         lines.append("")
         lines.append("    // Arcs")
         for arc in self.arcs:
-            source_id = escape_dot(arc.source.id)
-            target_id = escape_dot(arc.target.id)
-            if arc.weight > 1:
-                lines.append(f'    "{source_id}" -> "{target_id}" [label="{arc.weight}"];')
-            else:
-                lines.append(f'    "{source_id}" -> "{target_id}";')
+            lines.append(arc.to_dot_edge())
 
         lines.append("}")
         return "\n".join(lines) + "\n"

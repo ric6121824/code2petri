@@ -91,7 +91,7 @@
 <g id="node14" class="node">
 <title>t6</title>
 <g id="a_node14"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="507.72,-420.73 313.67,-420.73 313.67,-384.73 507.72,-384.73 507.72,-420.73"/>
+<polygon fill="#e65100" stroke="black" points="507.72,-420.73 313.67,-420.73 313.67,-384.73 507.72,-384.73 507.72,-420.73"/>
 <text xml:space="preserve" text-anchor="middle" x="410.69" y="-398.53" font-family="Times,serif" font-size="14.00" fill="white">call: gl.bindTexture() (line 159)</text>
 </a>
 </g>
@@ -112,7 +112,7 @@
 <g id="node13" class="node">
 <title>t5</title>
 <g id="a_node13"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="295.38,-420.73 0,-420.73 0,-384.73 295.38,-384.73 295.38,-420.73"/>
+<polygon fill="#e65100" stroke="black" points="295.38,-420.73 0,-420.73 0,-384.73 295.38,-384.73 295.38,-420.73"/>
 <text xml:space="preserve" text-anchor="middle" x="147.69" y="-398.53" font-family="Times,serif" font-size="14.00" fill="white">data[i] = Math.random() &gt; 0.8 ? 255 : 0 (line 156)</text>
 </a>
 </g>
@@ -133,7 +133,7 @@
 <g id="node15" class="node">
 <title>t7</title>
 <g id="a_node15"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="519,-271.35 302.39,-271.35 302.39,-235.35 519,-235.35 519,-271.35"/>
+<polygon fill="#e65100" stroke="black" points="519,-271.35 302.39,-271.35 302.39,-235.35 519,-235.35 519,-271.35"/>
 <text xml:space="preserve" text-anchor="middle" x="410.69" y="-249.15" font-family="Times,serif" font-size="14.00" fill="white">call: gl.texSubImage2D() (line 160)</text>
 </a>
 </g>
@@ -154,7 +154,7 @@
 <g id="node16" class="node">
 <title>t8</title>
 <g id="a_node16"><a xlink:title="Resolved to WebGLEngine.drawToScreen in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl&#45;engine.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="518.99,-121.96 302.4,-121.96 302.4,-85.96 518.99,-85.96 518.99,-121.96"/>
+<polygon fill="#2e7d32" stroke="black" points="518.99,-121.96 302.4,-121.96 302.4,-85.96 518.99,-85.96 518.99,-121.96"/>
 <text xml:space="preserve" text-anchor="middle" x="410.69" y="-99.76" font-family="Times,serif" font-size="14.00" fill="white">call: this.drawToScreen() (line 161)</text>
 </a>
 </g>

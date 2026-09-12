@@ -103,7 +103,7 @@
 <g id="node20" class="node">
 <title>t11</title>
 <g id="a_node20"><a xlink:title="Unresolved call">
-<polygon fill="#e65100" stroke="#e65100" points="519.8,-121.96 189.94,-121.96 189.94,-85.96 519.8,-85.96 519.8,-121.96"/>
+<polygon fill="#e65100" stroke="black" points="519.8,-121.96 189.94,-121.96 189.94,-85.96 519.8,-85.96 519.8,-121.96"/>
 <text xml:space="preserve" text-anchor="middle" x="354.87" y="-99.76" font-family="Times,serif" font-size="14.00" fill="white">animationId = call: requestAnimationFrame() (line 124)</text>
 </a>
 </g>
@@ -172,7 +172,7 @@
 <g id="node17" class="node">
 <title>t8</title>
 <g id="a_node17"><a xlink:title="Resolved to WebGLEngine.step in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl&#45;engine.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="260.85,-527.98 62.9,-527.98 62.9,-491.98 260.85,-491.98 260.85,-527.98"/>
+<polygon fill="#2e7d32" stroke="black" points="260.85,-527.98 62.9,-527.98 62.9,-491.98 260.85,-491.98 260.85,-527.98"/>
 <text xml:space="preserve" text-anchor="middle" x="161.87" y="-505.78" font-family="Times,serif" font-size="14.00" fill="white">call: gpuEngine.step() (line 117)</text>
 </a>
 </g>
@@ -193,7 +193,7 @@
 <g id="node18" class="node">
 <title>t9</title>
 <g id="a_node18"><a xlink:title="Resolved to stepCpu in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="436.44,-527.98 279.31,-527.98 279.31,-491.98 436.44,-491.98 436.44,-527.98"/>
+<polygon fill="#2e7d32" stroke="black" points="436.44,-527.98 279.31,-527.98 279.31,-491.98 436.44,-491.98 436.44,-527.98"/>
 <text xml:space="preserve" text-anchor="middle" x="357.87" y="-505.78" font-family="Times,serif" font-size="14.00" fill="white">call: stepCpu() (line 119)</text>
 </a>
 </g>

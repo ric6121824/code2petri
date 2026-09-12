@@ -19,7 +19,7 @@
 <g id="node14" class="node">
 <title>t1</title>
 <g id="a_node14"><a xlink:title="Resolved to createGrid in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="918.73,-1143.92 673.27,-1143.92 673.27,-1107.92 918.73,-1107.92 918.73,-1143.92"/>
+<polygon fill="#2e7d32" stroke="black" points="918.73,-1143.92 673.27,-1143.92 673.27,-1107.92 918.73,-1107.92 918.73,-1143.92"/>
 <text xml:space="preserve" text-anchor="middle" x="796" y="-1121.72" font-family="Times,serif" font-size="14.00" fill="white">let nextGrid = call: createGrid() (line 92)</text>
 </a>
 </g>
@@ -142,7 +142,7 @@
 <g id="node20" class="node">
 <title>t7</title>
 <g id="a_node20"><a xlink:title="Resolved to countNeighbors in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="677.63,-493.82 396.37,-493.82 396.37,-457.82 677.63,-457.82 677.63,-493.82"/>
+<polygon fill="#2e7d32" stroke="black" points="677.63,-493.82 396.37,-493.82 396.37,-457.82 677.63,-457.82 677.63,-493.82"/>
 <text xml:space="preserve" text-anchor="middle" x="537" y="-471.62" font-family="Times,serif" font-size="14.00" fill="white">let neighbors = call: countNeighbors() (line 97)</text>
 </a>
 </g>
@@ -277,7 +277,7 @@
 <g id="node29" class="node">
 <title>t16</title>
 <g id="a_node29"><a xlink:title="Resolved to drawCpuGrid in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js">
-<polygon fill="#2e7d32" stroke="#2e7d32" points="1033.11,-651.78 844.89,-651.78 844.89,-615.78 1033.11,-615.78 1033.11,-651.78"/>
+<polygon fill="#2e7d32" stroke="black" points="1033.11,-651.78 844.89,-651.78 844.89,-615.78 1033.11,-615.78 1033.11,-651.78"/>
 <text xml:space="preserve" text-anchor="middle" x="939" y="-629.58" font-family="Times,serif" font-size="14.00" fill="white">call: drawCpuGrid() (line 109)</text>
 </a>
 </g>

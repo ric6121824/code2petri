@@ -17,13 +17,13 @@ digraph PetriNet {
     "p11" [shape=circle, label="p11"];
 
     // Transitions
-    "t1" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="let nextGrid = call: createGrid() (line 92)", color="#2e7d32", tooltip="Resolved to createGrid in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
+    "t1" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="let nextGrid = call: createGrid() (line 92)", tooltip="Resolved to createGrid in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
     "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="for (let i = 0; i < ROWS; i++) (line 94)"];
     "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="exit (line 94)"];
     "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="for (let j = 0; j < COLS; j++) (line 95)"];
     "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="exit (line 95)"];
     "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="let state = grid[i][j] (line 96)"];
-    "t7" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="let neighbors = call: countNeighbors() (line 97)", color="#2e7d32", tooltip="Resolved to countNeighbors in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
+    "t7" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="let neighbors = call: countNeighbors() (line 97)", tooltip="Resolved to countNeighbors in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
     "t8" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (state === 0 && neighbors === 3) (line 99)"];
     "t9" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 101)"];
     "t10" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="nextGrid[i][j] = 1 (line 100)"];
@@ -32,7 +32,7 @@ digraph PetriNet {
     "t13" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="nextGrid[i][j] = 0 (line 102)"];
     "t14" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="nextGrid[i][j] = state (line 104)"];
     "t15" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="grid = nextGrid (line 108)"];
-    "t16" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: drawCpuGrid() (line 109)", color="#2e7d32", tooltip="Resolved to drawCpuGrid in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
+    "t16" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: drawCpuGrid() (line 109)", tooltip="Resolved to drawCpuGrid in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
 
     // Arcs
     "p0" -> "t1";

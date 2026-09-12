@@ -16,10 +16,10 @@ digraph PetriNet {
     "t2" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="const data = new Uint8Array(this.width * this.height) (line 154)"];
     "t3" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="for(let i=0; i<data.length; i++) (line 155)"];
     "t4" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="exit (line 155)"];
-    "t5" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="data[i] = Math.random() > 0.8 ? 255 : 0 (line 156)", color="#e65100", tooltip="Unresolved call"];
-    "t6" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.bindTexture() (line 159)", color="#e65100", tooltip="Unresolved call"];
-    "t7" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.texSubImage2D() (line 160)", color="#e65100", tooltip="Unresolved call"];
-    "t8" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: this.drawToScreen() (line 161)", color="#2e7d32", tooltip="Resolved to WebGLEngine.drawToScreen in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
+    "t5" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="data[i] = Math.random() > 0.8 ? 255 : 0 (line 156)", tooltip="Unresolved call"];
+    "t6" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.bindTexture() (line 159)", tooltip="Unresolved call"];
+    "t7" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="call: gl.texSubImage2D() (line 160)", tooltip="Unresolved call"];
+    "t8" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: this.drawToScreen() (line 161)", tooltip="Resolved to WebGLEngine.drawToScreen in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
 
     // Arcs
     "p0" -> "t1";

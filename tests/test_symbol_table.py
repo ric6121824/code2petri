@@ -1,9 +1,10 @@
 import os
+import re
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 
-from code2petri.model import PetriNet, Transition, CallResolution
+from code2petri.model import PetriNet, Transition, CallResolution, RenderingConfig
 from code2petri.walker_protocol import CallSite, WalkResult
 from code2petri.symbol_table import Symbol, SymbolTable, normalize_language
 
@@ -456,8 +457,9 @@ class TestTransitionDecoration(unittest.TestCase):
 
         # 2. DOT
         dot = net.to_dot()
-        self.assertIn('color="#2e7d32"', dot)  # resolved
-        self.assertIn('color="#e65100"', dot)  # unresolved
+        self.assertIsNone(re.search(r'(?<!fill)(?<!font)color=', dot))
+        self.assertIn(f'fillcolor="{RenderingConfig.RESOLVED_COLOR}"', dot)  # resolved
+        self.assertIn(f'fillcolor="{RenderingConfig.UNRESOLVED_COLOR}"', dot)  # unresolved
         self.assertIn('tooltip="Resolved to WebGLEngine.step in', dot)
         self.assertIn('tooltip="Unresolved call"', dot)
 

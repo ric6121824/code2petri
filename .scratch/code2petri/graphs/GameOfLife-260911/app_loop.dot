@@ -20,10 +20,10 @@ digraph PetriNet {
     "t5" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 115)"];
     "t6" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="if (mode === 'gpu') (line 116)"];
     "t7" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="else (line 118)"];
-    "t8" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: gpuEngine.step() (line 117)", color="#2e7d32", tooltip="Resolved to WebGLEngine.step in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
-    "t9" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: stepCpu() (line 119)", color="#2e7d32", tooltip="Resolved to stepCpu in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
+    "t8" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: gpuEngine.step() (line 117)", tooltip="Resolved to WebGLEngine.step in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/webgl-engine.js"];
+    "t9" [shape=rect, style=filled, fillcolor="#2e7d32", fontcolor=white, label="call: stepCpu() (line 119)", tooltip="Resolved to stepCpu in /Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/GameOfLife_Simulator/app.js"];
     "t10" [shape=rect, style=filled, fillcolor=black, fontcolor=white, label="lastFrameTime = timestamp (line 121)"];
-    "t11" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="animationId = call: requestAnimationFrame() (line 124)", color="#e65100", tooltip="Unresolved call"];
+    "t11" [shape=rect, style=filled, fillcolor="#e65100", fontcolor=white, label="animationId = call: requestAnimationFrame() (line 124)", tooltip="Unresolved call"];
 
     // Arcs
     "p0" -> "t1";
