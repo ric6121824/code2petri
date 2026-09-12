@@ -202,7 +202,7 @@ class Transition:
             if "tooltip" in dot_attrs:
                 attrs_parts.append(f'tooltip="{escape_dot(dot_attrs["tooltip"])}"')
             for k, v in dot_attrs.items():
-                if k not in ("color", "fillcolor", "tooltip"):
+                if k not in ("fillcolor", "tooltip"):
                     attrs_parts.append(f'{k}="{escape_dot(v)}"')
             if attrs_parts:
                 extra_attrs = ", " + ", ".join(attrs_parts)

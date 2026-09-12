@@ -28,7 +28,7 @@ pip install -r requirements.txt
 
 ## Basic Usage
 
-You can target a specific function, a class method, or the global script scope of a file, optionally supplying context files or directories for cross-file call resolution.
+You can target a specific function, a class method, or the global scope of a file, optionally supplying context files or directories for cross-file call resolution.
 
 ```bash
 # Analyze a global execution script
