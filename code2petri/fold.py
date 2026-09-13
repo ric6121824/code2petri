@@ -5,11 +5,11 @@ Implements structural component detection based on Lassen & van der Aalst (2008)
 """
 
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 import json
 import os
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from code2petri.model import PetriNet
 
@@ -19,7 +19,6 @@ class ComponentType(str, Enum):
     SEQUENCE = "sequence"
     CHOICE = "choice"
     LOOP = "loop"
-    MARKED_GRAPH = "marked_graph"
     UNSTRUCTURED = "unstructured"
 
 
@@ -27,7 +26,6 @@ PRIORITY_MAP: Dict[ComponentType, int] = {
     ComponentType.SEQUENCE: 1,
     ComponentType.CHOICE: 2,
     ComponentType.LOOP: 3,
-    ComponentType.MARKED_GRAPH: 4,
     ComponentType.UNSTRUCTURED: 7,
 }
 
@@ -39,52 +37,48 @@ class FoldConfig:
     Default base penalty weights:
       sequence = 0.0
       choice = 1.0
-      marked_graph = 2.0
       loop = 3.0
       unstructured = 7.0
     """
     sequence: float = 0.0
     choice: float = 1.0
-    marked_graph: float = 2.0
     loop: float = 3.0
     unstructured: float = 7.0
 
     @classmethod
     def from_json(cls, json_str: str) -> "FoldConfig":
-        """Creates a FoldConfig from a JSON string, applying defaults for omitted fields."""
-        data = json.loads(json_str)
-        kwargs: Dict[str, float] = {}
-        for f_name in cls.__dataclass_fields__:
-            if f_name in data:
-                kwargs[f_name] = float(data[f_name])
-        return cls(**kwargs)
+        return load_fold_config_from_json(json_str)
 
     @classmethod
     def from_file(cls, file_path: str) -> "FoldConfig":
-        """Loads a FoldConfig from a JSON configuration file."""
-        with open(file_path, "r", encoding="utf-8") as f:
-            return cls.from_json(f.read())
+        return load_fold_config_from_file(file_path)
 
     @classmethod
     def load(cls, source: str) -> "FoldConfig":
-        """Unified factory method to load FoldConfig from either a file path or JSON string."""
-        if os.path.isfile(source):
-            return cls.from_file(source)
-        return cls.from_json(source)
+        return load_fold_config(source)
 
-    def to_dict(self) -> Dict[str, float]:
-        """Serializes configuration to a dictionary."""
-        return {
-            "sequence": self.sequence,
-            "choice": self.choice,
-            "marked_graph": self.marked_graph,
-            "loop": self.loop,
-            "unstructured": self.unstructured,
-        }
 
-    def to_json(self, indent: int = 2) -> str:
-        """Serializes configuration to formatted JSON string."""
-        return json.dumps(self.to_dict(), indent=indent)
+def load_fold_config_from_json(json_str: str) -> FoldConfig:
+    """Creates a FoldConfig from a JSON string, applying defaults for omitted fields."""
+    data = json.loads(json_str)
+    kwargs: Dict[str, float] = {}
+    for f_name in ("sequence", "choice", "loop", "unstructured"):
+        if f_name in data:
+            kwargs[f_name] = float(data[f_name])
+    return FoldConfig(**kwargs)
+
+
+def load_fold_config_from_file(file_path: str) -> FoldConfig:
+    """Loads a FoldConfig from a JSON configuration file."""
+    with open(file_path, "r", encoding="utf-8") as f:
+        return load_fold_config_from_json(f.read())
+
+
+def load_fold_config(source: str) -> FoldConfig:
+    """Unified factory method to load FoldConfig from either a file path or JSON string."""
+    if os.path.isfile(source):
+        return load_fold_config_from_file(source)
+    return load_fold_config_from_json(source)
 
 
 @dataclass
@@ -94,33 +88,15 @@ class Component:
     Attributes:
         component_type: Type of the component (Sequence, Choice, Loop, etc.).
         internal_node_ids: Set of node IDs strictly internal to the component.
-        entrance: Boundary entry node ID belonging to the component.
-        exit: Boundary exit node ID belonging to the component.
+        entrance: Boundary entry node ID.
+        exit: Boundary exit node ID.
         omega: Computed penalty weight per Definition 22.
-        priority: Priority rank per Definition 21 (1 = Sequence, 2 = Choice, 3 = Loop, etc.).
     """
     component_type: ComponentType
     internal_node_ids: Set[str]
     entrance: str
     exit: str
     omega: float
-    priority: int = field(default=0)
-
-    def __post_init__(self) -> None:
-        if not self.priority:
-            self.priority = PRIORITY_MAP.get(self.component_type, 7)
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Serializes the Component into a JSON-compatible dictionary."""
-        type_str = self.component_type.value if isinstance(self.component_type, ComponentType) else str(self.component_type)
-        return {
-            "component_type": type_str,
-            "internal_node_ids": sorted(list(self.internal_node_ids)),
-            "entrance": self.entrance,
-            "exit": self.exit,
-            "omega": self.omega,
-            "priority": self.priority,
-        }
 
 
 class NetTopology:
@@ -160,33 +136,61 @@ class NetTopology:
     def has_arc(self, source_id: str, target_id: str) -> bool:
         return (source_id, target_id) in self.direct_arcs
 
+    def incoming_arcs(self, node_set: Set[str]) -> List[Tuple[str, str]]:
+        """Returns all arcs (u, v) entering node_set from outside."""
+        arcs: List[Tuple[str, str]] = []
+        for target_id in node_set:
+            for source_id in self.presets(target_id):
+                if source_id not in node_set:
+                    arcs.append((source_id, target_id))
+        return arcs
 
-def calculate_diff(
+    def outgoing_arcs(self, node_set: Set[str]) -> List[Tuple[str, str]]:
+        """Returns all arcs (u, v) leaving node_set to outside."""
+        arcs: List[Tuple[str, str]] = []
+        for source_id in node_set:
+            for target_id in self.postsets(source_id):
+                if target_id not in node_set:
+                    arcs.append((source_id, target_id))
+        return arcs
+
+    def subnet_degrees(self, comp_set: Set[str]) -> Tuple[Dict[str, int], Dict[str, int]]:
+        """Calculates in-degree and out-degree within the component subnet PN|C."""
+        subnet_out: Dict[str, int] = defaultdict(int)
+        subnet_in: Dict[str, int] = defaultdict(int)
+        for source_id in comp_set:
+            for target_id in self.postsets(source_id):
+                if target_id in comp_set:
+                    subnet_out[source_id] += 1
+                    subnet_in[target_id] += 1
+        return subnet_out, subnet_in
+
+
+def calculate_symmetry_multiplier(
     net: PetriNet,
     component_node_ids: Iterable[str],
     target_node_ids: Optional[Iterable[str]] = None,
+    topology: Optional[NetTopology] = None,
 ) -> int:
     """Calculates the symmetry multiplier diff(X) per Definition 22 in subnet PN|C.
 
     diff(X) = ||{x in X | |x*| > 1}| - |{x in X | |*x| > 1}|| + 1
     where degrees are computed in the subnet projection PN|C.
     """
+    topo = topology if topology is not None else NetTopology(net)
     comp_set = set(component_node_ids)
     target_set = set(target_node_ids) if target_node_ids is not None else comp_set
 
-    # Count in-degree and out-degree strictly within the component subnet PN|C
-    subnet_out: Dict[str, int] = defaultdict(int)
-    subnet_in: Dict[str, int] = defaultdict(int)
-
-    for arc in net.arcs:
-        if arc.source.id in comp_set and arc.target.id in comp_set:
-            subnet_out[arc.source.id] += 1
-            subnet_in[arc.target.id] += 1
+    subnet_out, subnet_in = topo.subnet_degrees(comp_set)
 
     splits = sum(1 for nid in target_set if subnet_out[nid] > 1)
     joins = sum(1 for nid in target_set if subnet_in[nid] > 1)
 
     return abs(splits - joins) + 1
+
+
+# Backward-compatible alias
+calculate_diff = calculate_symmetry_multiplier
 
 
 def detect_sequences(net: PetriNet, config: FoldConfig, topology: Optional[NetTopology] = None) -> List[Component]:
@@ -308,7 +312,7 @@ def detect_choices(net: PetriNet, config: FoldConfig, topology: Optional[NetTopo
             continue
 
         component_nodes = {p_split, p_merge} | choice_transitions
-        diff_val = calculate_diff(net, component_nodes, [p_split, p_merge])
+        diff_val = calculate_symmetry_multiplier(net, component_nodes, [p_split, p_merge], topo)
         omega = config.choice * diff_val
 
         choices.append(
@@ -367,12 +371,12 @@ def detect_loops(net: PetriNet, config: FoldConfig, topology: Optional[NetTopolo
             continue
         seen_cycles.add(cycle_key)
 
-        in_arcs = [a for a in net.arcs if a.source.id not in cycle_nodes and a.target.id in cycle_nodes]
-        out_arcs = [a for a in net.arcs if a.source.id in cycle_nodes and a.target.id not in cycle_nodes]
+        in_arcs = topo.incoming_arcs(cycle_nodes)
+        out_arcs = topo.outgoing_arcs(cycle_nodes)
 
         # Condition 1: Single entry place
         if in_arcs:
-            entry_targets = {a.target.id for a in in_arcs}
+            entry_targets = {target_id for _, target_id in in_arcs}
             if len(entry_targets) != 1:
                 continue
             entry_place = next(iter(entry_targets))
@@ -392,21 +396,21 @@ def detect_loops(net: PetriNet, config: FoldConfig, topology: Optional[NetTopolo
         if len(out_arcs) != 1:
             continue
 
-        exit_arc = out_arcs[0]
-        exit_boundary_node = exit_arc.source.id
+        _, exit_target_id = out_arcs[0]
 
-        # Definition 16: (o_C, i_C) not in F (if exit_boundary is different from entry)
-        if exit_boundary_node != entry_place and topo.has_arc(exit_boundary_node, entry_place):
+        # Definition 16: (o_C, i_C) not in F
+        if topo.has_arc(exit_target_id, entry_place):
             continue
 
-        internal_nodes = cycle_nodes - {entry_place}
+        # Internal nodes are strictly nodes in the cycle minus entry and exit target
+        internal_nodes = (cycle_nodes - {entry_place}) - {exit_target_id}
 
         loops.append(
             Component(
                 component_type=ComponentType.LOOP,
                 internal_node_ids=internal_nodes,
                 entrance=entry_place,
-                exit=exit_boundary_node,
+                exit=exit_target_id,
                 omega=config.loop,
             )
         )
@@ -432,12 +436,12 @@ def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> Lis
     components.extend(detect_loops(net, config, topo))
 
     # Definition 21 sorting:
-    # 1. priority (lowest integer = highest priority)
+    # 1. priority rank (lowest integer = highest priority)
     # 2. internal node count (smallest first)
     # 3. entrance, exit, internal_node_ids (deterministic tie-breaking)
     components.sort(
         key=lambda c: (
-            c.priority,
+            PRIORITY_MAP.get(c.component_type, 7),
             len(c.internal_node_ids),
             c.entrance,
             c.exit,
