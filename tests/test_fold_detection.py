@@ -81,14 +81,23 @@ class TestFoldConfig(unittest.TestCase):
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
 
-    def test_to_dict_and_to_json(self):
-        config = FoldConfig(choice=2.0)
-        d = config.to_dict()
-        self.assertEqual(d["choice"], 2.0)
-        self.assertEqual(d["sequence"], 0.0)
-        json_str = config.to_json()
-        reloaded = FoldConfig.from_json(json_str)
-        self.assertEqual(reloaded, config)
+    def test_load_polymorphic(self):
+        # From JSON string
+        config_from_str = FoldConfig.load('{"choice": 4.5, "loop": 6.5}')
+        self.assertEqual(config_from_str.choice, 4.5)
+        self.assertEqual(config_from_str.loop, 6.5)
+
+        # From file path
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write(json.dumps({"choice": 2.5, "sequence": 1.0}))
+            tmp_path = f.name
+        try:
+            config_from_file = FoldConfig.load(tmp_path)
+            self.assertEqual(config_from_file.choice, 2.5)
+            self.assertEqual(config_from_file.sequence, 1.0)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
 
 class TestComponentBasics(unittest.TestCase):
@@ -120,7 +129,7 @@ class TestComponentBasics(unittest.TestCase):
             component_type=ComponentType.LOOP,
             internal_node_ids={"t_while", "p_body", "t_back"},
             entrance="p_head",
-            exit="t_exit",
+            exit="p_head",
             omega=3.0,
         )
         self.assertEqual(c_loop.priority, 3)
@@ -155,9 +164,33 @@ class TestDiffCalculation(unittest.TestCase):
         net.add_arc(t1, p_out)
         net.add_arc(t2, p_out)
 
+        # In subnet {p_in, p_out, t1, t2}:
         # p_in has out-degree 2 (1 split), p_out has in-degree 2 (1 join)
         # diff = |1 - 1| + 1 = 1
-        diff_val = calculate_diff(net, ["p_in", "p_out"])
+        component_nodes = {"p_in", "p_out", "t1", "t2"}
+        diff_val = calculate_diff(net, component_nodes, ["p_in", "p_out"])
+        self.assertEqual(diff_val, 1)
+
+    def test_diff_ignores_external_arcs_to_split_place(self):
+        # External arc t0 -> p_in does not make p_in a join inside the component
+        net = PetriNet()
+        p0 = net.add_place("p0")
+        t0 = net.add_transition("t0")
+        p_in = net.add_place("p_in")
+        p_out = net.add_place("p_out")
+        t1 = net.add_transition("t1")
+        t2 = net.add_transition("t2")
+
+        net.add_arc(p0, t0)
+        net.add_arc(t0, p_in)  # External incoming arc to p_in
+        net.add_arc(p_in, t1)
+        net.add_arc(p_in, t2)
+        net.add_arc(t1, p_out)
+        net.add_arc(t2, p_out)
+
+        component_nodes = {"p_in", "p_out", "t1", "t2"}
+        diff_val = calculate_diff(net, component_nodes, ["p_in", "p_out"])
+        # Should still be 1 (symmetric choice), not inflated by external arc
         self.assertEqual(diff_val, 1)
 
     def test_diff_asymmetric(self):
@@ -170,6 +203,7 @@ class TestDiffCalculation(unittest.TestCase):
         t3 = net.add_transition("t3")
         t4 = net.add_transition("t4")
 
+        # In component subnet {p1, p2, p3, t1, t2, t3, t4}:
         # p1 splits to t1, t2; p2 splits to t3, t4 (2 splits)
         # p3 joins t1, t2 (1 join)
         net.add_arc(p1, t1)
@@ -180,7 +214,8 @@ class TestDiffCalculation(unittest.TestCase):
         net.add_arc(t2, p3)
 
         # splits = 2, joins = 1 -> diff = |2 - 1| + 1 = 2
-        diff_val = calculate_diff(net, ["p1", "p2", "p3"])
+        comp_nodes = {"p1", "p2", "p3", "t1", "t2", "t3", "t4"}
+        diff_val = calculate_diff(net, comp_nodes, ["p1", "p2", "p3"])
         self.assertEqual(diff_val, 2)
 
 
@@ -334,7 +369,7 @@ class TestDetectLoop(unittest.TestCase):
         self.assertEqual(len(loop_comps), 1)
         c = loop_comps[0]
         self.assertEqual(c.entrance, "p_head")
-        self.assertEqual(c.exit, "t_exit")
+        self.assertEqual(c.exit, "p_head")
         self.assertEqual(c.internal_node_ids, {"t_while", "p_body", "t_back"})
         self.assertEqual(c.omega, 3.0)
         self.assertEqual(c.priority, 3)

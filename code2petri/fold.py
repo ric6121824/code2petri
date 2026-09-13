@@ -11,7 +11,7 @@ import json
 import os
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from code2petri.model import PetriNet, Place, Transition, Arc
+from code2petri.model import PetriNet
 
 
 class ComponentType(str, Enum):
@@ -65,6 +65,13 @@ class FoldConfig:
         with open(file_path, "r", encoding="utf-8") as f:
             return cls.from_json(f.read())
 
+    @classmethod
+    def load(cls, source: str) -> "FoldConfig":
+        """Unified factory method to load FoldConfig from either a file path or JSON string."""
+        if os.path.isfile(source):
+            return cls.from_file(source)
+        return cls.from_json(source)
+
     def to_dict(self) -> Dict[str, float]:
         """Serializes configuration to a dictionary."""
         return {
@@ -86,9 +93,9 @@ class Component:
 
     Attributes:
         component_type: Type of the component (Sequence, Choice, Loop, etc.).
-        internal_node_ids: Set of node IDs to be removed / folded into a dummy transition.
-        entrance: Boundary entry node ID.
-        exit: Boundary exit node ID.
+        internal_node_ids: Set of node IDs strictly internal to the component.
+        entrance: Boundary entry node ID belonging to the component.
+        exit: Boundary exit node ID belonging to the component.
         omega: Computed penalty weight per Definition 22.
         priority: Priority rank per Definition 21 (1 = Sequence, 2 = Choice, 3 = Loop, etc.).
     """
@@ -116,109 +123,137 @@ class Component:
         }
 
 
-def calculate_diff(net: PetriNet, node_ids: Iterable[str]) -> int:
-    """Calculates the symmetry multiplier diff(X) per Definition 22:
+class NetTopology:
+    """Encapsulates indexed graph topology and queries for a PetriNet."""
+
+    def __init__(self, net: PetriNet):
+        self.net = net
+        self.place_ids: Set[str] = {p.id for p in net.places}
+        self.trans_ids: Set[str] = {t.id for t in net.transitions}
+        self.preset: Dict[str, Set[str]] = defaultdict(set)
+        self.postset: Dict[str, Set[str]] = defaultdict(set)
+        self.direct_arcs: Set[Tuple[str, str]] = set()
+
+        for arc in net.arcs:
+            self.postset[arc.source.id].add(arc.target.id)
+            self.preset[arc.target.id].add(arc.source.id)
+            self.direct_arcs.add((arc.source.id, arc.target.id))
+
+    def presets(self, node_id: str) -> Set[str]:
+        return self.preset.get(node_id, set())
+
+    def postsets(self, node_id: str) -> Set[str]:
+        return self.postset.get(node_id, set())
+
+    def in_degree(self, node_id: str) -> int:
+        return len(self.preset.get(node_id, set()))
+
+    def out_degree(self, node_id: str) -> int:
+        return len(self.postset.get(node_id, set()))
+
+    def is_place(self, node_id: str) -> bool:
+        return node_id in self.place_ids
+
+    def is_transition(self, node_id: str) -> bool:
+        return node_id in self.trans_ids
+
+    def has_arc(self, source_id: str, target_id: str) -> bool:
+        return (source_id, target_id) in self.direct_arcs
+
+
+def calculate_diff(
+    net: PetriNet,
+    component_node_ids: Iterable[str],
+    target_node_ids: Optional[Iterable[str]] = None,
+) -> int:
+    """Calculates the symmetry multiplier diff(X) per Definition 22 in subnet PN|C.
 
     diff(X) = ||{x in X | |x*| > 1}| - |{x in X | |*x| > 1}|| + 1
+    where degrees are computed in the subnet projection PN|C.
     """
-    node_set = set(node_ids)
-    out_degree: Dict[str, int] = defaultdict(int)
-    in_degree: Dict[str, int] = defaultdict(int)
+    comp_set = set(component_node_ids)
+    target_set = set(target_node_ids) if target_node_ids is not None else comp_set
+
+    # Count in-degree and out-degree strictly within the component subnet PN|C
+    subnet_out: Dict[str, int] = defaultdict(int)
+    subnet_in: Dict[str, int] = defaultdict(int)
 
     for arc in net.arcs:
-        out_degree[arc.source.id] += 1
-        in_degree[arc.target.id] += 1
+        if arc.source.id in comp_set and arc.target.id in comp_set:
+            subnet_out[arc.source.id] += 1
+            subnet_in[arc.target.id] += 1
 
-    splits = sum(1 for nid in node_set if out_degree[nid] > 1)
-    joins = sum(1 for nid in node_set if in_degree[nid] > 1)
+    splits = sum(1 for nid in target_set if subnet_out[nid] > 1)
+    joins = sum(1 for nid in target_set if subnet_in[nid] > 1)
 
     return abs(splits - joins) + 1
 
 
-def detect_sequences(net: PetriNet, config: FoldConfig) -> List[Component]:
-    """Detects maximal unbranching sequence components (chains of alternating places/transitions).
+def detect_sequences(net: PetriNet, config: FoldConfig, topology: Optional[NetTopology] = None) -> List[Component]:
+    """Detects linear chains of place -> transition -> place with no branching.
 
     Per Definition 17 & 18:
-    A sequence component is a maximal linear chain containing >= 2 transitions
-    with no internal branching.
+    A sequence component is a maximal linear chain starting and ending with a place,
+    containing >= 2 transitions with no internal branching.
     """
-    preset: Dict[str, Set[str]] = defaultdict(set)
-    postset: Dict[str, Set[str]] = defaultdict(set)
-    place_ids = {p.id for p in net.places}
-    trans_ids = {t.id for t in net.transitions}
+    topo = topology if topology is not None else NetTopology(net)
 
-    for arc in net.arcs:
-        postset[arc.source.id].add(arc.target.id)
-        preset[arc.target.id].add(arc.source.id)
+    def can_extend_backwards(place_id: str) -> bool:
+        if topo.in_degree(place_id) != 1:
+            return False
+        pred_trans = next(iter(topo.presets(place_id)))
+        return topo.out_degree(pred_trans) == 1 and topo.in_degree(pred_trans) == 1
 
-    def can_extend_backwards(nid: str) -> bool:
-        if nid in place_ids:
-            if len(preset[nid]) != 1:
-                return False
-            pred = next(iter(preset[nid]))
-            return len(postset[pred]) == 1 and len(preset[pred]) == 1
-        else:  # transition
-            if len(preset[nid]) != 1 or len(postset[nid]) != 1:
-                return False
-            pred = next(iter(preset[nid]))
-            return len(postset[pred]) == 1
-
-    # Identify candidate start nodes of maximal sequences
-    start_nodes: List[str] = []
-
-    # Places that can start a chain
-    for p_id in place_ids:
-        if len(postset[p_id]) == 1 and not can_extend_backwards(p_id):
-            start_nodes.append(p_id)
-
-    # Transitions that can start a TT chain (e.g. branch out of an XOR-split)
-    for t_id in trans_ids:
-        if len(preset[t_id]) == 1 and len(postset[t_id]) == 1 and not can_extend_backwards(t_id):
-            start_nodes.append(t_id)
+    # Place-started candidate start nodes
+    start_places = [
+        p_id for p_id in topo.place_ids
+        if topo.out_degree(p_id) == 1 and not can_extend_backwards(p_id)
+    ]
 
     sequences: List[Component] = []
     seen_transition_sets: Set[Tuple[str, ...]] = set()
 
-    for start in start_nodes:
-        chain = [start]
-        visited = {start}
-        curr = start
+    for start_p in start_places:
+        chain = [start_p]
+        visited = {start_p}
+        curr = start_p
 
         while True:
-            succs = postset[curr]
+            succs = topo.postsets(curr)
             if len(succs) != 1:
                 break
             nxt = next(iter(succs))
             if nxt in visited:
-                break  # Cycle, not a simple linear sequence
+                break  # Cycle encountered
 
-            if nxt in place_ids:
-                if len(preset[nxt]) != 1:
+            if topo.is_place(nxt):
+                if topo.in_degree(nxt) != 1:
                     break  # Join place, cannot enter
                 chain.append(nxt)
                 visited.add(nxt)
                 curr = nxt
-                if len(postset[nxt]) != 1:
+                if topo.out_degree(nxt) != 1:
                     break  # Split place or sink, chain ends
             else:  # nxt is a transition
-                if len(preset[nxt]) != 1 or len(postset[nxt]) != 1:
+                if topo.in_degree(nxt) != 1 or topo.out_degree(nxt) != 1:
                     break
                 chain.append(nxt)
                 visited.add(nxt)
                 curr = nxt
 
-        # Count transitions in chain
-        chain_transitions = [nid for nid in chain if nid in trans_ids]
-        if len(chain_transitions) >= 2:
+        # Sequence must end at a place
+        if not topo.is_place(chain[-1]):
+            chain.pop()
+
+        chain_transitions = [nid for nid in chain if topo.is_transition(nid)]
+        if len(chain_transitions) >= 2 and len(chain) >= 3:
             trans_key = tuple(sorted(chain_transitions))
             if trans_key not in seen_transition_sets:
                 seen_transition_sets.add(trans_key)
                 entrance = chain[0]
                 exit_node = chain[-1]
-                if entrance in place_ids and exit_node in place_ids:
-                    internal_nodes = set(chain[1:-1]) | set(chain_transitions)
-                else:
-                    internal_nodes = set(chain)
+                # Internal nodes are strictly intermediate nodes between entrance and exit
+                internal_nodes = set(chain[1:-1])
 
                 sequences.append(
                     Component(
@@ -227,44 +262,35 @@ def detect_sequences(net: PetriNet, config: FoldConfig) -> List[Component]:
                         entrance=entrance,
                         exit=exit_node,
                         omega=config.sequence,
-                        priority=PRIORITY_MAP[ComponentType.SEQUENCE],
                     )
                 )
 
     return sequences
 
 
-def detect_choices(net: PetriNet, config: FoldConfig) -> List[Component]:
+def detect_choices(net: PetriNet, config: FoldConfig, topology: Optional[NetTopology] = None) -> List[Component]:
     """Detects XOR-split/join Choice components per Definition 18.
 
     A Choice component has P_C = {p_i, p_o} and T_C = p_i* = *p_o with |T_C| >= 2.
     """
-    preset: Dict[str, Set[str]] = defaultdict(set)
-    postset: Dict[str, Set[str]] = defaultdict(set)
-    direct_arcs: Set[Tuple[str, str]] = set()
-
-    for arc in net.arcs:
-        postset[arc.source.id].add(arc.target.id)
-        preset[arc.target.id].add(arc.source.id)
-        direct_arcs.add((arc.source.id, arc.target.id))
-
+    topo = topology if topology is not None else NetTopology(net)
     choices: List[Component] = []
 
     for place in net.places:
         p_split = place.id
-        t_c = postset[p_split]
-        if len(t_c) < 2:
+        choice_transitions = topo.postsets(p_split)
+        if len(choice_transitions) < 2:
             continue
 
         # Each transition must have only p_split as input and exactly one output
         valid_transitions = True
         target_places: Set[str] = set()
 
-        for tid in t_c:
-            if preset[tid] != {p_split} or len(postset[tid]) != 1:
+        for tid in choice_transitions:
+            if topo.presets(tid) != {p_split} or topo.out_degree(tid) != 1:
                 valid_transitions = False
                 break
-            target_places.add(next(iter(postset[tid])))
+            target_places.add(next(iter(topo.postsets(tid))))
 
         if not valid_transitions or len(target_places) != 1:
             continue
@@ -273,38 +299,34 @@ def detect_choices(net: PetriNet, config: FoldConfig) -> List[Component]:
         if p_merge == p_split:
             continue
 
-        # p_merge must receive inputs exclusively from T_C
-        if preset[p_merge] != t_c:
+        # p_merge must receive inputs exclusively from choice_transitions
+        if topo.presets(p_merge) != choice_transitions:
             continue
 
         # No direct arc from p_merge to p_split (Definition 16: (o_C, i_C) not in F)
-        if (p_merge, p_split) in direct_arcs:
+        if topo.has_arc(p_merge, p_split):
             continue
 
-        diff_val = calculate_diff(net, [p_split, p_merge])
+        component_nodes = {p_split, p_merge} | choice_transitions
+        diff_val = calculate_diff(net, component_nodes, [p_split, p_merge])
         omega = config.choice * diff_val
 
         choices.append(
             Component(
                 component_type=ComponentType.CHOICE,
-                internal_node_ids=set(t_c),
+                internal_node_ids=set(choice_transitions),
                 entrance=p_split,
                 exit=p_merge,
                 omega=omega,
-                priority=PRIORITY_MAP[ComponentType.CHOICE],
             )
         )
 
     return choices
 
 
-def _find_elementary_cycles(net: PetriNet) -> List[List[str]]:
+def _find_elementary_cycles(net: PetriNet, topology: NetTopology) -> List[List[str]]:
     """Finds all elementary directed cycles in the Petri net."""
-    adj: Dict[str, List[str]] = defaultdict(list)
-    for arc in net.arcs:
-        adj[arc.source.id].append(arc.target.id)
-
-    nodes = sorted(list({p.id for p in net.places} | {t.id for t in net.transitions}))
+    nodes = sorted(list(topology.place_ids | topology.trans_ids))
     node_indices = {n: i for i, n in enumerate(nodes)}
     cycles: List[List[str]] = []
 
@@ -313,7 +335,7 @@ def _find_elementary_cycles(net: PetriNet) -> List[List[str]]:
         visited = {start_node}
 
         def dfs(curr: str) -> None:
-            for neighbor in adj.get(curr, []):
+            for neighbor in topology.postsets(curr):
                 n_idx = node_indices.get(neighbor, -1)
                 if n_idx < start_idx:
                     continue
@@ -331,29 +353,22 @@ def _find_elementary_cycles(net: PetriNet) -> List[List[str]]:
     return cycles
 
 
-def detect_loops(net: PetriNet, config: FoldConfig) -> List[Component]:
+def detect_loops(net: PetriNet, config: FoldConfig, topology: Optional[NetTopology] = None) -> List[Component]:
     """Detects simple directed cycles with a single entry place and a single exit arc."""
-    place_ids = {p.id for p in net.places}
-    preset: Dict[str, Set[str]] = defaultdict(set)
-    direct_arcs: Set[Tuple[str, str]] = set()
-
-    for arc in net.arcs:
-        preset[arc.target.id].add(arc.source.id)
-        direct_arcs.add((arc.source.id, arc.target.id))
-
-    cycles = _find_elementary_cycles(net)
+    topo = topology if topology is not None else NetTopology(net)
+    cycles = _find_elementary_cycles(net, topo)
     loops: List[Component] = []
     seen_cycles: Set[Tuple[str, ...]] = set()
 
     for cycle in cycles:
-        v_cycle = set(cycle)
+        cycle_nodes = set(cycle)
         cycle_key = tuple(sorted(cycle))
         if cycle_key in seen_cycles:
             continue
         seen_cycles.add(cycle_key)
 
-        in_arcs = [a for a in net.arcs if a.source.id not in v_cycle and a.target.id in v_cycle]
-        out_arcs = [a for a in net.arcs if a.source.id in v_cycle and a.target.id not in v_cycle]
+        in_arcs = [a for a in net.arcs if a.source.id not in cycle_nodes and a.target.id in cycle_nodes]
+        out_arcs = [a for a in net.arcs if a.source.id in cycle_nodes and a.target.id not in cycle_nodes]
 
         # Condition 1: Single entry place
         if in_arcs:
@@ -361,12 +376,12 @@ def detect_loops(net: PetriNet, config: FoldConfig) -> List[Component]:
             if len(entry_targets) != 1:
                 continue
             entry_place = next(iter(entry_targets))
-            if entry_place not in place_ids:
+            if not topo.is_place(entry_place):
                 continue
         else:
             entry_candidates = [
                 p.id for p in net.places
-                if p.id in v_cycle and (len(preset[p.id]) == 0 or p.initial_tokens > 0)
+                if p.id in cycle_nodes and (topo.in_degree(p.id) == 0 or p.initial_tokens > 0)
             ]
             if len(entry_candidates) == 1:
                 entry_place = entry_candidates[0]
@@ -378,22 +393,21 @@ def detect_loops(net: PetriNet, config: FoldConfig) -> List[Component]:
             continue
 
         exit_arc = out_arcs[0]
-        exit_node = exit_arc.target.id
+        exit_boundary_node = exit_arc.source.id
 
-        # Definition 16: (o_C, i_C) not in F
-        if (exit_node, entry_place) in direct_arcs:
+        # Definition 16: (o_C, i_C) not in F (if exit_boundary is different from entry)
+        if exit_boundary_node != entry_place and topo.has_arc(exit_boundary_node, entry_place):
             continue
 
-        internal_nodes = v_cycle - {entry_place}
+        internal_nodes = cycle_nodes - {entry_place}
 
         loops.append(
             Component(
                 component_type=ComponentType.LOOP,
                 internal_node_ids=internal_nodes,
                 entrance=entry_place,
-                exit=exit_node,
+                exit=exit_boundary_node,
                 omega=config.loop,
-                priority=PRIORITY_MAP[ComponentType.LOOP],
             )
         )
 
@@ -411,10 +425,11 @@ def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> Lis
     if config is None:
         config = FoldConfig()
 
+    topo = NetTopology(net)
     components: List[Component] = []
-    components.extend(detect_sequences(net, config))
-    components.extend(detect_choices(net, config))
-    components.extend(detect_loops(net, config))
+    components.extend(detect_sequences(net, config, topo))
+    components.extend(detect_choices(net, config, topo))
+    components.extend(detect_loops(net, config, topo))
 
     # Definition 21 sorting:
     # 1. priority (lowest integer = highest priority)
