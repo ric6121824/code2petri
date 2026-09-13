@@ -4,6 +4,7 @@ from code2petri.walker_protocol import WalkerProtocol, CallSite, WalkResult
 from code2petri.javascript_walker import JavascriptWalker
 from code2petri.python_walker import PythonWalker
 from code2petri.symbol_table import Symbol, SymbolTable
+from code2petri.fold import FoldConfig, Component, ComponentType, calculate_diff, detect_components
 
 __all__ = [
     "Place",
@@ -21,6 +22,11 @@ __all__ = [
     "Symbol",
     "SymbolTable",
     "code2petri",
+    "FoldConfig",
+    "Component",
+    "ComponentType",
+    "calculate_diff",
+    "detect_components",
 ]
 
 
