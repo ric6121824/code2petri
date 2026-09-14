@@ -451,3 +451,14 @@ class PetriNet:
             )
 
         return new_net
+
+    def remove_nodes(self, node_ids: Union[Set[str], List[str]]) -> None:
+        """Removes places and transitions matching node_ids and any connected arcs."""
+        ids_to_remove = set(node_ids)
+        self.places = [p for p in self.places if p.id not in ids_to_remove]
+        self.transitions = [t for t in self.transitions if t.id not in ids_to_remove]
+        self.arcs = [
+            a for a in self.arcs
+            if a.source.id not in ids_to_remove and a.target.id not in ids_to_remove
+        ]
+

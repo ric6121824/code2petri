@@ -220,6 +220,15 @@ class NetTopology:
     def out_degree(self, node_id: str) -> int:
         return len(self.postset.get(node_id, set()))
 
+    def source_places(self) -> List[Place]:
+        """Returns places with in_degree == 0 or initial_tokens > 0."""
+        return [p for p in self.net.places if self.in_degree(p.id) == 0 or p.initial_tokens > 0]
+
+    def sink_places(self) -> List[Place]:
+        """Returns places with out_degree == 0."""
+        return [p for p in self.net.places if self.out_degree(p.id) == 0]
+
+
     def is_place(self, node_id: str) -> bool:
         return node_id in self.place_ids
 
@@ -552,7 +561,6 @@ def fold_component(
     net: PetriNet,
     component: Component,
     step_number: int,
-    config: Optional[FoldConfig] = None,
 ) -> Tuple[PetriNet, FoldStep]:
     """Replaces component C in net by a single dummy transition t_C per Definition 19.
 
@@ -560,12 +568,10 @@ def fold_component(
         net: The PetriNet containing component.
         component: The Component to fold.
         step_number: 1-indexed reduction step number.
-        config: Optional fold configuration.
 
     Returns:
         A tuple of (folded_petri_net, fold_step_record).
     """
-    cfg = config if config is not None else FoldConfig()
     folded_net = net.clone()
     topo = NetTopology(folded_net)
 
@@ -616,12 +622,7 @@ def fold_component(
                 folded_net.add_arc(dummy_t, node_map[p_id])
 
     # 6. Remove consumed nodes and any incident arcs
-    folded_net.places = [p for p in folded_net.places if p.id not in consumed_node_ids]
-    folded_net.transitions = [t for t in folded_net.transitions if t.id not in consumed_node_ids]
-    folded_net.arcs = [
-        a for a in folded_net.arcs
-        if a.source.id not in consumed_node_ids and a.target.id not in consumed_node_ids
-    ]
+    folded_net.remove_nodes(consumed_node_ids)
 
     # 7. Compute running SM score: sum of all tau weights on remaining transitions
     running_sm = sum(t.get_tau() for t in folded_net.transitions)
@@ -660,14 +661,8 @@ def fold_unstructured(
     topo = NetTopology(folded_net)
 
     # Identify global entrance and exit places
-    source_candidates = [
-        p for p in folded_net.places
-        if topo.in_degree(p.id) == 0 or p.initial_tokens > 0
-    ]
-    sink_candidates = [
-        p for p in folded_net.places
-        if topo.out_degree(p.id) == 0
-    ]
+    source_candidates = topo.source_places()
+    sink_candidates = topo.sink_places()
 
     p_src = source_candidates[0] if source_candidates else folded_net.places[0]
     p_snk = sink_candidates[0] if sink_candidates else folded_net.places[-1]
@@ -688,7 +683,7 @@ def fold_unstructured(
     accumulated_tau = omega + tau_sum
 
     dummy_id = f"t_C{step_number}"
-    dummy_t = Transition(
+    dummy_t = folded_net.add_transition(
         id=dummy_id,
         label=dummy_id,
         metadata={
@@ -699,14 +694,12 @@ def fold_unstructured(
     )
 
     # Retain only boundary places and the new dummy transition
-    folded_net.places = [p for p in folded_net.places if p.id in (p_src.id, p_snk.id)]
-    folded_net.transitions = [dummy_t]
+    folded_net.remove_nodes(consumed_node_ids)
     folded_net.arcs = []
 
     node_map = {p.id: p for p in folded_net.places}
     folded_net.add_arc(node_map[p_src.id], dummy_t)
-    if p_src.id != p_snk.id:
-        folded_net.add_arc(dummy_t, node_map[p_snk.id])
+    folded_net.add_arc(dummy_t, node_map[p_snk.id])
 
     running_sm = accumulated_tau
 
@@ -725,16 +718,25 @@ def fold_unstructured(
 
 
 def _is_trivial_workflow_net(net: PetriNet) -> bool:
-    """Returns True if the net is reduced to a trivial workflow net (single transition and no internal places)."""
+    """Returns True if the net is reduced to a trivial workflow net (single transition connecting source to sink)."""
     if len(net.transitions) == 0:
-        return True
+        return len(net.places) <= 1
     if len(net.transitions) == 1:
+        t = net.transitions[0]
         topo = NetTopology(net)
-        source_places = [p for p in net.places if topo.in_degree(p.id) == 0 or p.initial_tokens > 0]
-        sink_places = [p for p in net.places if topo.out_degree(p.id) == 0]
-        boundary_place_ids = {p.id for p in source_places + sink_places}
-        internal_places = [p for p in net.places if p.id not in boundary_place_ids]
-        return len(internal_places) == 0 and len(net.places) <= 2
+        presets = topo.presets(t.id)
+        postsets = topo.postsets(t.id)
+        if len(presets) != 1 or len(postsets) != 1:
+            return False
+        p_in_id = next(iter(presets))
+        p_out_id = next(iter(postsets))
+        if {p.id for p in net.places} != {p_in_id, p_out_id}:
+            return False
+        p_in_sources = {s for s in topo.presets(p_in_id) if s != t.id}
+        p_out_targets = {target for target in topo.postsets(p_out_id) if target != t.id}
+        if p_in_sources or p_out_targets:
+            return False
+        return True
     return False
 
 
@@ -761,7 +763,7 @@ def fold_net(
     """
     cfg = config if config is not None else FoldConfig()
     current_net = net.clone()
-    initial_snapshot = net.clone()
+    initial_snapshot = current_net.clone()
     steps: List[FoldStep] = []
     step_number = 1
     fully_reducible = True
@@ -787,7 +789,7 @@ def fold_net(
         if components:
             # Pick highest priority / smallest component per Definition 21
             best_comp = components[0]
-            current_net, step = fold_component(current_net, best_comp, step_number, cfg)
+            current_net, step = fold_component(current_net, best_comp, step_number)
             steps.append(step)
             step_number += 1
         else:

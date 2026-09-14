@@ -120,15 +120,26 @@ class TestFoldMixedAndPriority(unittest.TestCase):
     def test_mixed_net_priority_order_reduction(self):
         net = PetriNet()
 
-        # Connect: p0 -> t_in -> p_mid (prefix="m_")
-        # Then sequence (s_), choice (c_), loop (l_)
-        seq_net, _, _, _ = build_sequence_net(2, prefix="s_")
-        choice_net, _, _, _ = build_choice_net(2, prefix="c_")
-        loop_net, _, _, _ = build_loop_net(prefix="l_")
+        # Connect in series: seq (s_) -> choice (c_) -> loop (l_)
+        seq_net, s_entrance, s_exit, _ = build_sequence_net(2, prefix="s_")
+        choice_net, c_entrance, c_exit, _ = build_choice_net(2, prefix="c_")
+        loop_net, l_entrance, l_exit, _ = build_loop_net(prefix="l_")
 
         combine_into_composite_net(net, seq_net)
         combine_into_composite_net(net, choice_net)
         combine_into_composite_net(net, loop_net)
+
+        # Connect sequence exit to choice entrance via intermediate transition
+        t_s2c = net.add_transition("t_s2c")
+        net.add_arc(next(p for p in net.places if p.id == s_exit), t_s2c)
+        net.add_arc(t_s2c, next(p for p in net.places if p.id == c_entrance))
+
+        # Connect choice exit to loop entrance via intermediate transition
+        p_l0 = next(p for p in net.places if p.id == "l_p0")
+        p_l0.initial_tokens = 0
+        t_c2l = net.add_transition("t_c2l")
+        net.add_arc(next(p for p in net.places if p.id == c_exit), t_c2l)
+        net.add_arc(t_c2l, p_l0)
 
         result = fold_net(net)
         step_types = [s.component_type for s in result.steps]
@@ -139,6 +150,9 @@ class TestFoldMixedAndPriority(unittest.TestCase):
         choice_idx = step_types.index(ComponentType.CHOICE)
         loop_idx = step_types.index(ComponentType.LOOP)
         self.assertLess(choice_idx, loop_idx)
+        # A connected mixed workflow net reduces fully
+        self.assertTrue(result.fully_reducible)
+        self.assertEqual(len(result.steps[-1].snapshot.transitions), 1)
 
 
 class TestFoldIrreducible(unittest.TestCase):
@@ -174,6 +188,35 @@ class TestFoldIrreducible(unittest.TestCase):
         self.assertEqual(last_step.component_type, ComponentType.UNSTRUCTURED)
         self.assertEqual(last_step.omega, 7.0)
         self.assertGreater(result.final_sm, 7.0)
+
+    def test_unstructured_fold_on_single_place_net(self):
+        # Build an irreducible net with a single place and multiple transitions
+        net = PetriNet()
+        p = net.add_place("p0", initial_tokens=1)
+        t1 = net.add_transition("t1")
+        t2 = net.add_transition("t2")
+        # Both transitions loop on p0
+        net.add_arc(p, t1)
+        net.add_arc(t1, p)
+        net.add_arc(p, t2)
+        net.add_arc(t2, p)
+
+        result = fold_net(net)
+        self.assertFalse(result.fully_reducible)
+        self.assertEqual(len(result.steps), 1)
+        step = result.steps[0]
+        self.assertEqual(step.component_type, ComponentType.UNSTRUCTURED)
+        # Verify dummy transition has both input and output arcs connected to p0
+        final_net = step.snapshot
+        self.assertEqual(len(final_net.transitions), 1)
+        dummy_t = final_net.transitions[0]
+        self.assertEqual(len(final_net.arcs), 2)
+        sources = {a.source.id for a in final_net.arcs}
+        targets = {a.target.id for a in final_net.arcs}
+        self.assertIn("p0", sources)
+        self.assertIn(dummy_t.id, sources)
+        self.assertIn("p0", targets)
+        self.assertIn(dummy_t.id, targets)
 
 
 class TestFoldConfigOverrides(unittest.TestCase):
