@@ -13,22 +13,22 @@ class CallFrame:
     filepath: str
     name: str
 
+    @property
+    def bare_name(self) -> str:
+        """Extracts the unqualified function or method name."""
+        return self.name.rsplit(".", 1)[-1] if "." in self.name else self.name
 
-def _is_start_place(place: Place) -> bool:
-    """Returns True if place is designated as a workflow net start place."""
-    return place.initial_tokens > 0 or place.label == "start"
-
-
-def _mark_recursive_cycle(trans: Transition) -> None:
-    """Annotates an opaque transition with recursive cycle metadata."""
-    if trans.metadata is None:
-        trans.metadata = {}
-    trans.metadata["recursive_cycle"] = True
+    @classmethod
+    def from_caller(cls, cs: CallSite) -> Optional["CallFrame"]:
+        """Creates a CallFrame for the caller of a CallSite if defined."""
+        if not cs.caller_function:
+            return None
+        c_file = os.path.abspath(cs.caller_file) if cs.caller_file else ""
+        return cls(filepath=c_file, name=cs.caller_function)
 
 
 def _get_callee_net(
     symbol: Symbol,
-    walker_cache: Optional[Dict[str, Tuple[WalkerProtocol, Any]]] = None,
 ) -> Tuple[Optional[PetriNet], List[CallSite]]:
     """Walks the callee symbol's AST node to produce its PetriNet and CallSite records."""
     ext = os.path.splitext(symbol.filepath)[1].lower() if symbol.filepath else ""
@@ -37,20 +37,13 @@ def _get_callee_net(
     if walker_cls is None:
         return None, []
 
-    cache = walker_cache if walker_cache is not None else {}
-    cache_key = f"{walker_cls.__name__}:{symbol.filepath}"
-
-    if cache_key in cache:
-        walker, tree = cache[cache_key]
-    else:
-        walker = walker_cls()
-        tree = None
-        if symbol.filepath and os.path.exists(symbol.filepath):
-            try:
-                tree = walker.parse_file(symbol.filepath)
-            except Exception:
-                tree = None
-        cache[cache_key] = (walker, tree)
+    walker = walker_cls()
+    tree = None
+    if symbol.filepath and os.path.exists(symbol.filepath):
+        try:
+            tree = walker.parse_file(symbol.filepath)
+        except Exception:
+            tree = None
 
     ast_node = symbol.ast_node
     if ast_node is None and tree is not None:
@@ -64,6 +57,7 @@ def _get_callee_net(
         return walk_res.net, walk_res.call_sites
     except Exception:
         return None, []
+
 
 
 def _splice_callee_net(
@@ -86,6 +80,10 @@ def _splice_callee_net(
     if not preset_places or not postset_places:
         return
 
+    # Note on spec deviation: The spec requested wiring directly to callee source and sink places.
+    # To preserve the bipartite property of Petri nets (preventing illegal Place -> Place arcs),
+    # the callee's boundary places are merged into caller preset and postset places, and caller arcs
+    # connect directly between caller places and callee internal transitions.
     callee_source_place, callee_sink_place = callee_net.find_boundary_places()
     if (
         callee_source_place is None
@@ -175,17 +173,17 @@ def _is_self_referencing_game_loop(
     if cs.callee_name != "requestAnimationFrame":
         return False
     # Structural check: JavascriptWalker wires recursive RAF loop back-arcs directly to the start place
-    start_places = {p.id for p in net.places if _is_start_place(p)}
+    start_places = {p.id for p in net.places if p.is_start}
     if any(a.source.id == trans.id and a.target.id in start_places for a in net.arcs):
         return True
 
-    # Fallback check: label explicitly references caller function
-    if cs.caller_function:
-        bare_name = cs.caller_function.split(".")[-1]
+    # Fallback check: label explicitly references caller function via structured CallFrame
+    frame = CallFrame.from_caller(cs)
+    if frame:
         return (
-            f"({cs.caller_function})" in trans.label
-            or f"({bare_name})" in trans.label
-            or f"this.{bare_name}" in trans.label
+            f"({frame.name})" in trans.label
+            or f"({frame.bare_name})" in trans.label
+            or f"this.{frame.bare_name}" in trans.label
         )
     return False
 
@@ -195,7 +193,7 @@ def _inline_expand_recursive(
     call_sites: List[CallSite],
     symbol_table: SymbolTable,
     max_depth: int,
-    call_stack: Set[CallFrame],
+    call_stack: Optional[Set[CallFrame]] = None,
 ) -> PetriNet:
     """Internal recursive worker for inline expansion."""
     composite_net = net.clone()
@@ -203,7 +201,6 @@ def _inline_expand_recursive(
         return composite_net
 
     used_prefixes: Set[str] = set()
-    walker_cache: Dict[str, Tuple[WalkerProtocol, Any]] = {}
     processed_trans_ids: Set[str] = set()
 
     for cs in call_sites:
@@ -218,7 +215,7 @@ def _inline_expand_recursive(
 
         # Check self-referencing game loop (e.g. requestAnimationFrame(loop)) before external symbol lookup
         if _is_self_referencing_game_loop(composite_net, cs, trans):
-            _mark_recursive_cycle(trans)
+            trans.mark_recursive_cycle()
             continue
 
         sym = symbol_table.resolve_call(cs)
@@ -232,23 +229,33 @@ def _inline_expand_recursive(
             target_file=sym.filepath,
         )
 
-        # Recursion Guard: check matching call frames in the active expansion call stack
+        # Build path-dependent vertical call stack for this call site
+        if call_stack is not None:
+            active_stack = set(call_stack)
+        else:
+            active_stack = set()
+            caller_frame = CallFrame.from_caller(cs)
+            if caller_frame:
+                active_stack.add(caller_frame)
+                if caller_frame.bare_name != caller_frame.name:
+                    active_stack.add(CallFrame(filepath=caller_frame.filepath, name=caller_frame.bare_name))
+
+        # Recursion Guard: check matching call frames in the active vertical expansion call stack
         callee_file = sym.filepath or (os.path.abspath(cs.caller_file) if cs.caller_file else "")
-        callee_frames = {
-            CallFrame(filepath=callee_file, name=sym.name),
-        }
-        if sym.bare_name:
+        callee_frame = CallFrame(filepath=callee_file, name=sym.name)
+        callee_frames = {callee_frame}
+        if sym.bare_name and sym.bare_name != sym.name:
             callee_frames.add(CallFrame(filepath=callee_file, name=sym.bare_name))
 
-        if any(f in call_stack for f in callee_frames):
-            _mark_recursive_cycle(trans)
+        if any(f in active_stack for f in callee_frames):
+            trans.mark_recursive_cycle()
             continue
 
-        callee_net, callee_call_sites = _get_callee_net(sym, walker_cache=walker_cache)
+        callee_net, callee_call_sites = _get_callee_net(sym)
         if callee_net is None:
             continue
 
-        new_stack = set(call_stack)
+        new_stack = set(active_stack)
         new_stack.update(callee_frames)
 
         if max_depth > 1:
@@ -288,19 +295,12 @@ def inline_expand(
     Returns:
         A new PetriNet instance with resolved callee subnets spliced in.
     """
-    initial_stack: Set[CallFrame] = set()
-    for cs in call_sites:
-        if cs.caller_function:
-            c_file = os.path.abspath(cs.caller_file) if cs.caller_file else ""
-            initial_stack.add(CallFrame(filepath=c_file, name=cs.caller_function))
-            if "." in cs.caller_function:
-                initial_stack.add(CallFrame(filepath=c_file, name=cs.caller_function.split(".")[-1]))
-
     return _inline_expand_recursive(
         net=net,
         call_sites=call_sites,
         symbol_table=symbol_table,
         max_depth=max_depth,
-        call_stack=initial_stack,
+        call_stack=None,
     )
+
 

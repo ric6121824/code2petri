@@ -66,6 +66,17 @@ class Place:
             "initial_tokens": self.initial_tokens,
         }
 
+    @property
+    def is_start(self) -> bool:
+        """Returns True if this place functions as a start/source place."""
+        return self.initial_tokens > 0 or self.label == "start"
+
+    @property
+    def is_end(self) -> bool:
+        """Returns True if this place functions as an end/sink place."""
+        return self.label == "end"
+
+
 
 @dataclass(frozen=True)
 class CallResolution:
@@ -216,6 +227,13 @@ class Transition:
             f'    "{escaped_id}" [shape=rect, style=filled, fillcolor={fillcolor_val}, '
             f'fontcolor={RenderingConfig.DEFAULT_FONTCOLOR}, label="{escaped_label}"{extra_attrs}];'
         )
+
+    def mark_recursive_cycle(self) -> None:
+        """Marks this transition as an opaque transition halting a recursive cycle."""
+        if self.metadata is None:
+            self.metadata = {}
+        self.metadata["recursive_cycle"] = True
+
 
 
 class Arc:
@@ -468,11 +486,12 @@ class PetriNet:
 
     def find_boundary_places(self) -> Tuple[Optional[Place], Optional[Place]]:
         """Identifies the primary source (start) and sink (end) boundary places of the Petri net."""
-        start_places = [p for p in self.places if p.initial_tokens > 0 or p.label == "start"]
+        start_places = [p for p in self.places if p.is_start]
         source_place = start_places[0] if start_places else (self.places[0] if self.places else None)
 
-        end_places = [p for p in self.places if p.label == "end"]
+        end_places = [p for p in self.places if p.is_end]
         sink_place = end_places[0] if end_places else (self.places[-1] if self.places else None)
 
         return source_place, sink_place
+
 

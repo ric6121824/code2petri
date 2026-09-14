@@ -351,13 +351,13 @@ class TestInlineExpansionEngine(unittest.TestCase):
         self.assertTrue(rec_trans.metadata.get("recursive_cycle"))
 
     def test_multi_caller_initial_stack(self):
-        """Validates that call sites from multiple callers populate the initial call stack."""
+        """Validates that call sites from multiple callers maintain path-dependent vertical stacks."""
         from code2petri.walker_protocol import CallSite
         code = (
             "def worker_a():\n"
             "    worker_a()\n"
             "def worker_b():\n"
-            "    worker_b()\n"
+            "    worker_a()\n"
         )
         fp = self._write_temp_file("multi_callers.py", code)
         symbol_table = SymbolTable()
@@ -370,16 +370,37 @@ class TestInlineExpansionEngine(unittest.TestCase):
         node_b = self.py_walker.find_function(tree, "worker_b")
         res_b = self.py_walker.walk_function(node_b, "worker_b", filepath=fp)
 
-        # Merge net and call sites from both
+        # Build composite net and combine call sites
         combined_net = PetriNet()
-        combined_net.places.extend(res_a.net.places)
-        combined_net.transitions.extend(res_a.net.transitions)
-        combined_net.arcs.extend(res_a.net.arcs)
-        combined_call_sites = list(res_a.call_sites) + list(res_b.call_sites)
+        for p in res_a.net.places:
+            combined_net.add_place(id=f"a_{p.id}", label=p.label, initial_tokens=p.initial_tokens)
+        for t in res_a.net.transitions:
+            combined_net.add_transition(id=f"a_{t.id}", label=t.label)
+        node_map_a = combined_net.get_node_map()
+        for a in res_a.net.arcs:
+            combined_net.add_arc(source=node_map_a[f"a_{a.source.id}"], target=node_map_a[f"a_{a.target.id}"])
+
+        for p in res_b.net.places:
+            combined_net.add_place(id=f"b_{p.id}", label=p.label, initial_tokens=0)
+        for t in res_b.net.transitions:
+            combined_net.add_transition(id=f"b_{t.id}", label=t.label)
+        node_map_b = combined_net.get_node_map()
+        for a in res_b.net.arcs:
+            combined_net.add_arc(source=node_map_b[f"b_{a.source.id}"], target=node_map_b[f"b_{a.target.id}"])
+
+        cs_a = [CallSite(cs.caller_function, cs.caller_file, cs.callee_name, cs.callee_owner, cs.line_number, f"a_{cs.transition_id}") for cs in res_a.call_sites]
+        cs_b = [CallSite(cs.caller_function, cs.caller_file, cs.callee_name, cs.callee_owner, cs.line_number, f"b_{cs.transition_id}") for cs in res_b.call_sites]
+        combined_call_sites = cs_a + cs_b
 
         composite_net = inline_expand(combined_net, combined_call_sites, symbol_table, max_depth=1)
+        # worker_a calling worker_a is recursive and halts
         cycle_transitions = [t for t in composite_net.transitions if t.metadata and t.metadata.get("recursive_cycle")]
-        self.assertEqual(len(cycle_transitions), 1)  # worker_a call marked recursive
+        self.assertEqual(len(cycle_transitions), 1)
+
+        # worker_b calling worker_a is NOT recursive and inlines successfully
+        inlined_worker_a = [t for t in composite_net.transitions if "inline_worker_a__" in t.id]
+        self.assertGreater(len(inlined_worker_a), 0)
+
 
     def test_petrinet_find_boundary_places(self):
         """Validates PetriNet.find_boundary_places identifies source and sink."""
