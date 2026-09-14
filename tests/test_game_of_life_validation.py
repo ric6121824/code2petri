@@ -230,20 +230,17 @@ class TestGameOfLifeCrossFileValidation(unittest.TestCase):
         self.assertEqual(step_json.get("target_file"), self.webgl_js)
 
     def test_game_of_life_step_cpu_fold_html_output(self):
-        """Validates that stepCpu with --fold generates a valid self-contained HTML file."""
+        """Validates that stepCpu with --fold generates a valid self-contained HTML file via CLI main()."""
         out_html = os.path.join(self.temp_dir.name, "stepCpu.html")
-        res = code2petri(
-            source_path=self.app_js,
-            target_function="stepCpu",
-            fold=True,
-            context=[self.game_of_life_dir],
-            output_file=out_html,
-        )
-        self.assertIsInstance(res, FoldResult)
+        main([
+            self.app_js,
+            "-t", "stepCpu",
+            "--fold",
+            "--context", self.game_of_life_dir,
+            "-o", out_html,
+        ])
         self.assertTrue(os.path.exists(out_html))
         self.assertGreater(os.path.getsize(out_html), 0)
-        self.assertGreater(res.final_sm, 0.0)
-        self.assertGreater(len(res.steps), 0)
 
         with open(out_html, "r", encoding="utf-8") as f:
             content = f.read()
@@ -251,22 +248,25 @@ class TestGameOfLifeCrossFileValidation(unittest.TestCase):
         self.assertIn("<!DOCTYPE html>", content)
         self.assertIn("</html>", content)
         self.assertIn('<script id="code2petri-data"', content)
-        self.assertIn('"mode": "fold"', content)
-        self.assertIn('"fold_steps"', content)
-        self.assertIn(f'"final_sm": {res.final_sm}', content)
+
+        match = re.search(r'<script id="code2petri-data" type="application/json">\s*(\{.*?\})\s*</script>', content, re.DOTALL)
+        self.assertIsNotNone(match)
+        data = json.loads(match.group(1))
+        self.assertEqual(data["mode"], "fold")
+        self.assertGreater(len(data["fold_steps"]), 0)
+        self.assertGreater(data["final_sm"], 0.0)
 
     def test_game_of_life_loop_inline_composite_html_output(self):
-        """Validates that loop with --inline produces a Composite Net HTML with inlined subnodes."""
+        """Validates that loop with --inline produces a Composite Net HTML with inlined subnodes via CLI main()."""
         out_html = os.path.join(self.temp_dir.name, "composite.html")
-        res = code2petri(
-            source_path=self.app_js,
-            target_function="loop",
-            inline=True,
-            inline_depth=1,
-            context=[self.game_of_life_dir],
-            output_file=out_html,
-        )
-        self.assertIsInstance(res, FoldResult)
+        main([
+            self.app_js,
+            "-t", "loop",
+            "--inline",
+            "--inline-depth", "1",
+            "--context", self.game_of_life_dir,
+            "-o", out_html,
+        ])
         self.assertTrue(os.path.exists(out_html))
         self.assertGreater(os.path.getsize(out_html), 0)
 
@@ -276,8 +276,14 @@ class TestGameOfLifeCrossFileValidation(unittest.TestCase):
         self.assertIn("<!DOCTYPE html>", content)
         self.assertIn("</html>", content)
         self.assertIn('<script id="code2petri-data"', content)
+
+        match = re.search(r'<script id="code2petri-data" type="application/json">\s*(\{.*?\})\s*</script>', content, re.DOTALL)
+        self.assertIsNotNone(match)
+        data = json.loads(match.group(1))
+        self.assertEqual(data["mode"], "fold")
         # Composite net before folding must contain inlined WebGLEngine.step nodes
-        initial_trans_ids = [t.id for t in res.initial_net.transitions]
+        initial_trans = data["initial_net"]["transitions"]
+        initial_trans_ids = [t["id"] for t in initial_trans]
         self.assertTrue(any("WebGLEngine.step" in tid for tid in initial_trans_ids))
         self.assertIn("WebGLEngine.step", content)
 

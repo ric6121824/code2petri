@@ -9,3 +9,5 @@ dist
 composer.json
 composer.lock
 vendor
+!code2petri/viewer/vendor/
+!code2petri/viewer/vendor/**

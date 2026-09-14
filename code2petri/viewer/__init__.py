@@ -3,6 +3,7 @@ import json
 import os
 from typing import Any, Dict, Optional, Union
 
+from code2petri.fold import FoldResult
 from code2petri.model import PetriNet
 
 
@@ -51,35 +52,31 @@ def _load_template() -> str:
 
 
 def generate_html(
-    target: Any,
+    net_or_fold: Union[PetriNet, FoldResult, Any],
     title: Optional[str] = None,
 ) -> str:
     """Generates a 100% self-contained offline HTML viewer for a PetriNet or FoldResult.
 
-    :param target: A PetriNet instance (for static --no-fold view) or a FoldResult
-                   instance (for interactive fold playback).
+    :param net_or_fold: A PetriNet instance (for static --no-fold view) or a FoldResult
+                        instance (for interactive fold playback).
     :param title: Optional title to display in the header.
     :return: Complete HTML document string with inlined Cytoscape, Dagre, and graph data.
     """
     template = _load_template()
     vendor_scripts = _load_vendor_scripts()
 
-    is_fold_result = hasattr(target, "initial_net") and hasattr(target, "steps")
+    is_fold_result = hasattr(net_or_fold, "initial_net") and hasattr(net_or_fold, "steps")
     if is_fold_result:
-        initial_net_dict = target.initial_net.to_dict()
-        steps_dict = [s.to_dict() for s in target.steps]
-        final_sm = float(target.final_sm) if hasattr(target, "final_sm") else 0.0
+        fold_dict = net_or_fold.to_dict() if hasattr(net_or_fold, "to_dict") else {}
+        final_sm = float(getattr(net_or_fold, "final_sm", 0.0))
         display_title = title if title is not None else f"SM Score = {final_sm}"
         payload: Dict[str, Any] = {
             "mode": "fold",
             "title": display_title,
-            "initial_net": initial_net_dict,
-            "fold_steps": steps_dict,
-            "final_sm": final_sm,
-            "fully_reducible": bool(getattr(target, "fully_reducible", True)),
+            **fold_dict,
         }
     else:
-        net_dict = target.to_dict() if hasattr(target, "to_dict") else {}
+        net_dict = net_or_fold.to_dict() if hasattr(net_or_fold, "to_dict") else {}
         display_title = title if title is not None else "Petri Net"
         payload = {
             "mode": "no-fold",

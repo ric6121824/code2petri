@@ -4,10 +4,22 @@ import re
 import tempfile
 import unittest
 
-from code2petri.engine import code2petri, main
+from code2petri.engine import code2petri, main, TEXT_SERIALIZERS
 from code2petri.fold import FoldConfig, fold_net, FoldResult
 from code2petri.model import PetriNet, Transition, Place
 from code2petri.viewer import generate_html
+
+
+def _extract_embedded_data(html_content: str) -> dict:
+    """Helper to extract and parse the embedded code2petri-data JSON block."""
+    match = re.search(
+        r'<script id="code2petri-data" type="application/json">\s*(\{.*?\})\s*</script>',
+        html_content,
+        re.DOTALL,
+    )
+    if not match:
+        raise ValueError("Could not find embedded code2petri-data in HTML content")
+    return json.loads(match.group(1))
 
 
 class TestHTMLViewerGenerator(unittest.TestCase):
@@ -60,9 +72,7 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         html_content = generate_html(self.net, title="Static View")
         self.assertIn("Static View", html_content)
 
-        match = re.search(r'<script id="code2petri-data" type="application/json">\s*(\{.*?\})\s*</script>', html_content, re.DOTALL)
-        self.assertIsNotNone(match)
-        data = json.loads(match.group(1))
+        data = _extract_embedded_data(html_content)
         self.assertEqual(data["mode"], "no-fold")
         self.assertEqual(data["fold_steps"], [])
         self.assertEqual(data["final_sm"], 0.0)
@@ -74,25 +84,35 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         fold_res = fold_net(self.net, FoldConfig())
         html_content = generate_html(fold_res)
 
-        match = re.search(r'<script id="code2petri-data" type="application/json">\s*(\{.*?\})\s*</script>', html_content, re.DOTALL)
-        self.assertIsNotNone(match)
-        data = json.loads(match.group(1))
+        data = _extract_embedded_data(html_content)
         self.assertEqual(data["mode"], "fold")
         self.assertGreater(len(data["fold_steps"]), 0)
         self.assertEqual(data["final_sm"], fold_res.final_sm)
 
-    def test_petrinet_to_html_method(self):
-        """Validates that PetriNet.to_html() produces valid HTML."""
-        html_content = self.net.to_html(title="Model to_html")
-        self.assertIn("Model to_html", html_content)
-        self.assertIn("cytoscape", html_content)
+    def test_text_serializers_html_dispatch(self):
+        """Validates that TEXT_SERIALIZERS['html'] delegates to generate_html for nets and fold results."""
+        html_net = TEXT_SERIALIZERS["html"](self.net)
+        self.assertIn("<!DOCTYPE html>", html_net)
+        data_net = _extract_embedded_data(html_net)
+        self.assertEqual(data_net["mode"], "no-fold")
 
-    def test_foldresult_to_html_method(self):
-        """Validates that FoldResult.to_html() produces valid HTML."""
         fold_res = fold_net(self.net, FoldConfig())
-        html_content = fold_res.to_html(title="FoldResult to_html")
-        self.assertIn("FoldResult to_html", html_content)
-        self.assertIn('"mode": "fold"', html_content)
+        html_fold = TEXT_SERIALIZERS["html"](fold_res)
+        self.assertIn("<!DOCTYPE html>", html_fold)
+        data_fold = _extract_embedded_data(html_fold)
+        self.assertEqual(data_fold["mode"], "fold")
+
+    def test_opaque_transition_visual_tau_badge_elements(self):
+        """Validates that the template renders an inline SVG tau badge rather than label text."""
+        fold_res = fold_net(self.net, FoldConfig())
+        html_content = generate_html(fold_res)
+
+        self.assertIn("node.transition.opaque[badge_svg]", html_content)
+        self.assertIn("background-image", html_content)
+        self.assertIn("data(badge_svg)", html_content)
+        self.assertIn("data:image/svg+xml;utf8,", html_content)
+        # Verify that tau is NOT appended as raw label text
+        self.assertNotIn("(τ=", html_content)
 
 
 class TestCLIEngineHTMLIntegration(unittest.TestCase):
@@ -123,9 +143,10 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
             content = f.read()
 
         self.assertIn("<!DOCTYPE html>", content)
-        self.assertIn('"mode": "fold"', content)
-        self.assertIn('"fold_steps"', content)
-        self.assertIn(f'"final_sm": {res.final_sm}', content)
+        data = _extract_embedded_data(content)
+        self.assertEqual(data["mode"], "fold")
+        self.assertGreater(len(data["fold_steps"]), 0)
+        self.assertEqual(data["final_sm"], res.final_sm)
 
     def test_no_fold_flag_overrides_implicit_html_activation(self):
         """Validates that --no-fold produces static Petri net HTML view."""
@@ -143,8 +164,9 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
             content = f.read()
 
         self.assertIn("<!DOCTYPE html>", content)
-        self.assertIn('"mode": "no-fold"', content)
-        self.assertNotIn('"component_type"', content)
+        data = _extract_embedded_data(content)
+        self.assertEqual(data["mode"], "no-fold")
+        self.assertEqual(data["fold_steps"], [])
 
     def test_cli_main_html_output(self):
         """Validates code2petri CLI main with -o file.html."""
@@ -157,7 +179,8 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
         self.assertTrue(os.path.exists(out_html))
         with open(out_html, "r", encoding="utf-8") as f:
             content = f.read()
-        self.assertIn('"mode": "fold"', content)
+        data = _extract_embedded_data(content)
+        self.assertEqual(data["mode"], "fold")
 
 
 if __name__ == "__main__":

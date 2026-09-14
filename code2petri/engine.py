@@ -9,6 +9,7 @@ from code2petri.model import PetriNet
 from code2petri.symbol_table import SymbolTable, SUPPORTED_WALKERS
 from code2petri.fold import FoldConfig, FoldResult, fold_net
 from code2petri.inline import inline_expand
+from code2petri.viewer import generate_html
 
 WALKERS = SUPPORTED_WALKERS
 
@@ -51,11 +52,11 @@ def discover_context_files(context_paths: Sequence[str]) -> List[str]:
 
 IMAGE_EXTENSIONS = {"png", "svg"}
 TEXT_SERIALIZERS = {
-    "pnml": lambda target: target.to_pnml(),
-    "dot": lambda target: target.to_dot(),
-    "gv": lambda target: target.to_dot(),
-    "json": lambda target: target.to_json(),
-    "html": lambda target: target.to_html(),
+    "pnml": lambda model: model.to_pnml(),
+    "dot": lambda model: model.to_dot(),
+    "gv": lambda model: model.to_dot(),
+    "json": lambda model: model.to_json(),
+    "html": lambda model: generate_html(model),
 }
 SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | set(TEXT_SERIALIZERS.keys())
 
@@ -238,8 +239,8 @@ def code2petri(
             dot_content = fold_result.to_dot() if (fold_active and fold_result is not None) else net.to_dot()
             _render_dot_to_image(dot_content, ext, output_file)
         else:
-            target = fold_result if (fold_active and fold_result is not None) else net
-            content = TEXT_SERIALIZERS[ext](target)
+            model_to_serialize = fold_result if (fold_active and fold_result is not None) else net
+            content = TEXT_SERIALIZERS[ext](model_to_serialize)
 
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(content)
