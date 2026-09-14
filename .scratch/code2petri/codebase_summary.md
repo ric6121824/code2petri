@@ -30,11 +30,13 @@ code2flow/
 │   ├── symbol_table.py            # Multi-file symbol indexing, variable binding resolution, & call resolution engine
 │   ├── python_walker.py           # Python AST walker implementing WalkerProtocol & variable binding extraction
 │   ├── javascript_walker.py       # JavaScript Acorn AST walker implementing WalkerProtocol & variable binding extraction
+│   ├── fold.py                    # Structural component detection, fold reduction engine, & SM computation (Tickets 17-18)
+│   ├── inline.py                  # Inline expansion engine, composite net splicing, & recursion guard (Ticket 19)
 │   └── engine.py                  # Pipeline orchestrator, CLI (`code2petri`), `--context` file discovery & Graphviz renderer
 ├── docs/                          # Architecture decision records and specifications
 │   └── adr/
 │       └── 0001-constructor-only-variable-resolution.md # ADR on constructor-only variable binding resolution
-├── tests/                         # Comprehensive unit, integration, & validation test suites (235 passing tests)
+├── tests/                         # Comprehensive unit, integration, & validation test suites (287 passing tests)
 │   ├── petri_assertions.py        # Shared structural assertion utilities for Petri nets
 │   ├── test_petri_model.py        # Tests for Place, Transition, Arc, PetriNet, CallResolution, and serializers
 │   ├── test_walker_protocol.py    # Contract adherence & instantiation tests for WalkerProtocol & WalkResult
@@ -43,6 +45,9 @@ code2flow/
 │   ├── test_symbol_table.py       # Multi-file symbol table indexing and resolution unit tests
 │   ├── test_context_pipeline.py   # CLI `--context` ingestion and multi-format serialization integration tests
 │   ├── test_game_of_life_validation.py # End-to-end multi-file validation suite against GameOfLife Simulator
+│   ├── test_fold_detection.py     # Structural component detection & FoldConfig tests (Ticket 17)
+│   ├── test_fold_reduction.py     # Fold reduction engine & SM computation tests (Ticket 18)
+│   ├── test_inline_expansion.py   # Inline expansion engine & recursion guard tests (Ticket 19)
 │   ├── test_petri_if_branching.py # Python if/elif/else branching tests
 │   ├── test_petri_loops.py        # Python while/for loop tests
 │   ├── test_petri_try.py          # Python try/except/finally tests
