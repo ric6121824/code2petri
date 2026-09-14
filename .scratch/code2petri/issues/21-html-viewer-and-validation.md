@@ -15,22 +15,22 @@ End-to-end validation against the GameOfLife Simulator confirms the entire Phase
 
 **Blocked by:** 20 — CLI Integration & Headless Fold/Inline Output.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] An HTML template exists that inlines minified Cytoscape.js and Dagre layout plugin source.
-- [ ] A Python generator function accepts a `FoldResult` (or raw `PetriNet` for `--no-fold`) and produces a complete HTML string with the data blocks and library source embedded.
-- [ ] `.html` output extension in the CLI triggers fold analysis automatically (implicit `--fold`) and invokes the HTML generator.
-- [ ] `--no-fold` with `.html` output produces a static interactive view (pan/zoom, graph rendering) with no fold controls or step data.
-- [ ] The generated HTML file contains zero external resource references (no CDN links, no external CSS/JS files).
-- [ ] The viewer renders places as circles and transitions as filled rectangles using Dagre hierarchical top-to-bottom layout.
-- [ ] Dummy transitions are visually distinct (different border style or shape) and display their accumulated $\tau$ weight as a badge.
-- [ ] Resolved call transitions render with `#2e7d32` fill; unresolved with `#e65100` fill.
-- [ ] Fold button advances one step, collapsing the next component.
-- [ ] Unfold button reverses one step, restoring the previous state.
-- [ ] Reset button returns to the initial un-folded net.
-- [ ] Step counter displays "Step N / Total" and updates on each action.
-- [ ] SM score display updates on each fold/unfold action.
-- [ ] GameOfLife validation: `code2petri app.js -t stepCpu --fold -o net.html` with `--context <game_of_life_dir>` produces a valid HTML file with non-zero SM score and fold steps.
-- [ ] GameOfLife validation: `code2petri app.js -t loop --inline --context <game_of_life_dir> -o composite.html` produces a Composite Net HTML with inlined `WebGLEngine.step` subnet nodes visible.
-- [ ] Generated HTML file size is > 0 bytes and passes basic HTML validity checks (contains `<html>`, `<script>`, and the Cytoscape data blocks).
-- [ ] Existing tests continue to pass.
+- [x] An HTML template exists that inlines minified Cytoscape.js and Dagre layout plugin source.
+- [x] A Python generator function accepts a `FoldResult` (or raw `PetriNet` for `--no-fold`) and produces a complete HTML string with the data blocks and library source embedded.
+- [x] `.html` output extension in the CLI triggers fold analysis automatically (implicit `--fold`) and invokes the HTML generator.
+- [x] `--no-fold` with `.html` output produces a static interactive view (pan/zoom, graph rendering) with no fold controls or step data.
+- [x] The generated HTML file contains zero external resource references (no CDN links, no external CSS/JS files).
+- [x] The viewer renders places as circles and transitions as filled rectangles using Dagre hierarchical top-to-bottom layout.
+- [x] Dummy transitions are visually distinct (different border style or shape) and display their accumulated $\tau$ weight as a badge.
+- [x] Resolved call transitions render with `#2e7d32` fill; unresolved with `#e65100` fill.
+- [x] Fold button advances one step, collapsing the next component.
+- [x] Unfold button reverses one step, restoring the previous state.
+- [x] Reset button returns to the initial un-folded net.
+- [x] Step counter displays "Step N / Total" and updates on each action.
+- [x] SM score display updates on each fold/unfold action.
+- [x] GameOfLife validation: `code2petri app.js -t stepCpu --fold -o net.html` with `--context <game_of_life_dir>` produces a valid HTML file with non-zero SM score and fold steps.
+- [x] GameOfLife validation: `code2petri app.js -t loop --inline --context <game_of_life_dir> -o composite.html` produces a Composite Net HTML with inlined `WebGLEngine.step` subnet nodes visible.
+- [x] Generated HTML file size is > 0 bytes and passes basic HTML validity checks (contains `<html>`, `<script>`, and the Cytoscape data blocks).
+- [x] Existing tests continue to pass.
