@@ -1,6 +1,6 @@
 # Code Review: Phase 2 (Tickets 11–15 — Round 2 Re-Review)
 
-Re-evaluating the Phase 2 cross-cutting changes following the implementation of findings from [phase-2-tickets-11-15.md](phase-2-tickets-11-15.md).
+Re-evaluating the Phase 2 cross-cutting changes following the implementation of findings from [phase-2.0-tickets-11-15-round-01.md](phase-2.0-tickets-11-15-round-01.md).
 
 ---
 

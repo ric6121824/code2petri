@@ -11,7 +11,7 @@
 - `d8ca94c` refactor(code2petri): address code-review findings on qualification and exports (ticket 07)
 - `e87b993` feat(code2petri): implement WalkerProtocol and shared base walker infrastructure (ticket 07)
 
-*Previous review report:* [tickets-07-10.md](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/.scratch/code2petri/reviews/tickets-07-10.md)
+*Previous review report:* [phase-1.0-tickets-07-10-round-01.md](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/.scratch/code2petri/reviews/phase-1.0-tickets-07-10-round-01.md)
 
 ---
 

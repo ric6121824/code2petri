@@ -13,8 +13,8 @@
 - `e87b993` feat(code2petri): implement WalkerProtocol and shared base walker infrastructure (ticket 07)
 
 *Previous review reports:*
-- Round 1: [tickets-07-10.md](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/.scratch/code2petri/reviews/tickets-07-10.md)
-- Round 2: [tickets-07-10-round-2.md](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/.scratch/code2petri/reviews/tickets-07-10-round-2.md)
+- Round 1: [phase-1.0-tickets-07-10-round-01.md](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/.scratch/code2petri/reviews/phase-1.0-tickets-07-10-round-01.md)
+- Round 2: [phase-1.0-tickets-07-10-round-02.md](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/.scratch/code2petri/reviews/phase-1.0-tickets-07-10-round-02.md)
 
 ---
 

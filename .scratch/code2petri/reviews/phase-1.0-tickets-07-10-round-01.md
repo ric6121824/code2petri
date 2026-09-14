@@ -11,7 +11,7 @@
 - `a7d9ad2` refactor(code2petri): address code-review findings on Ticket 10
 
 > [!NOTE]
-> A subsequent re-review following fix commit `d72e78f` is available at [tickets-07-10-round-2.md](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/.scratch/code2petri/reviews/tickets-07-10-round-2.md).
+> A subsequent re-review following fix commit `d72e78f` is available at [phase-1.0-tickets-07-10-round-02.md](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/.scratch/code2petri/reviews/phase-1.0-tickets-07-10-round-02.md).
 
 ---
 

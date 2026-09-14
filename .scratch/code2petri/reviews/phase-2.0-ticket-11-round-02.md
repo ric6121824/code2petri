@@ -75,8 +75,8 @@ All Ticket 11 requirements are fully satisfied:
 ### (c) Implemented But Wrong
 **None (0 Defects).**
 Both Round 1 implementation defects were cleanly resolved in commit `44b9154`:
-1. *Resolved*: Literal `"None"` XML strings ([`ticket-11-round-1.md:81-93`](file:///.scratch/code2petri/reviews/ticket-11-round-1.md#L81-L93)) fixed in [`code2petri/model.py:123-124`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/model.py#L123-L124) via `str(res.resolved_to or "")` and verified in `test_pnml_serialization_avoids_literal_none_strings`.
-2. *Resolved*: Direct assertion on `WalkResult` ([`ticket-11-round-1.md:94-96`](file:///.scratch/code2petri/reviews/ticket-11-round-1.md#L94-L96)) added across `test_python_walker.py`, `test_javascript_walker.py`, and `test_walker_protocol.py`. Shared test unboxing extracted to `walk_net` in [`tests/petri_assertions.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/petri_assertions.py).
+1. *Resolved*: Literal `"None"` XML strings ([`phase-2.0-ticket-11-round-01.md:81-93`](file:///.scratch/code2petri/reviews/phase-2.0-ticket-11-round-01.md#L81-L93)) fixed in [`code2petri/model.py:123-124`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/model.py#L123-L124) via `str(res.resolved_to or "")` and verified in `test_pnml_serialization_avoids_literal_none_strings`.
+2. *Resolved*: Direct assertion on `WalkResult` ([`phase-2.0-ticket-11-round-01.md:94-96`](file:///.scratch/code2petri/reviews/phase-2.0-ticket-11-round-01.md#L94-L96)) added across `test_python_walker.py`, `test_javascript_walker.py`, and `test_walker_protocol.py`. Shared test unboxing extracted to `walk_net` in [`tests/petri_assertions.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/petri_assertions.py).
 
 ---
 

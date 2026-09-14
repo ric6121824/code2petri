@@ -111,7 +111,7 @@ graph LR
 
 ### Code Review Round 8 Assessment & Architectural Baseline
 
-The Phase 1 implementation concluded with Code Review Round 8 ([`tickets-07-10-round-8.md`](file:///.scratch/code2petri/reviews/tickets-07-10-round-8.md)) evaluating the entire Phase 1 diff (`f41d6ba`..`325e82d`):
+The Phase 1 implementation concluded with Code Review Round 8 ([`phase-1.0-tickets-07-10-round-08.md`](file:///.scratch/code2petri/reviews/phase-1.0-tickets-07-10-round-08.md)) evaluating the entire Phase 1 diff (`f41d6ba`..`325e82d`):
 
 - **Standards Compliance**: **0 Hard Violations**.
   - Strict conformance to repo standards (`CONTEXT.md`): `WalkerProtocol` uses `abc.ABC`, `(global)` naming convention followed uniformly across both walkers, call transitions modeled as opaque nodes.
@@ -195,7 +195,7 @@ The Phase 1 implementation concluded with Code Review Round 8 ([`tickets-07-10-r
 
 ### Code Review Round 6 Assessment & Architectural Baseline
 
-The Phase 2 implementation concluded with Code Review Round 6 ([`phase-2-tickets-11-15-round-6.md`](file:///.scratch/code2petri/reviews/phase-2-tickets-11-15-round-6.md)) evaluating the full Phase 2 diff (`0de953e`..`3a241c8`):
+The Phase 2 implementation concluded with Code Review Round 6 ([`phase-2.0-tickets-11-15-round-06.md`](file:///.scratch/code2petri/reviews/phase-2.0-tickets-11-15-round-06.md)) evaluating the full Phase 2 diff (`0de953e`..`3a241c8`):
 
 - **Standards Compliance**: **0 Hard Violations**.
   - Strict conformance to repo standards (`CONTEXT.md`) and [ADR 0001](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0001-constructor-only-variable-resolution.md).
