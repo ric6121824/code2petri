@@ -10,16 +10,17 @@ The penultimate fold state (the last snapshot before the final unstructured-bloc
 
 **Blocked by:** 17 — FoldConfig & Structural Component Detection.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] `FoldStep` dataclass exists recording: step number, component type, consumed node IDs, dummy transition ID, $\omega$, $\tau$, running SM score, and the `PetriNet` snapshot at that step.
-- [ ] `FoldResult` dataclass exists recording: the initial net, the ordered list of `FoldStep`s, the final SM score, the `fully_reducible` boolean, and a property/method to access the penultimate state.
-- [ ] Dummy transitions are standard `Transition` instances with `metadata={"dummy": True, "component_type": "<type>", "tau": <float>}`.
-- [ ] The fold function correctly rewires boundary arcs when replacing a component with $t_C$: preset places of the entrance arc to $t_C$, $t_C$ to postset places of the exit.
-- [ ] The fold loop terminates correctly for fully-reducible nets (single final transition).
-- [ ] The fold loop terminates correctly for irreducible nets (remaining block folded as Unstructured with $\rho = 7$).
-- [ ] Accumulated $\tau$ on a dummy transition equals $\omega(C) + \sum_{t \in C} \tau(t)$, where internal transitions start at $\tau = 1$.
-- [ ] Unit tests verify: a pure 3-transition sequence folds to 1 step with $\omega = 0$; a single XOR-split with 2 symmetric branches folds correctly with $\omega = 1$; a single loop folds with $\omega = 3$; a mixed net folds in the correct priority order; a known-irreducible net terminates with the unstructured penalty and `fully_reducible = False`.
-- [ ] Unit tests verify that `FoldConfig` weight overrides change the computed $\omega$ and final SM score.
-- [ ] `FoldResult` JSON serialization produces the schema documented in the grand plan (initial net, fold steps array, final SM).
-- [ ] Existing tests continue to pass.
+- [x] `FoldStep` dataclass exists recording: step number, component type, consumed node IDs, dummy transition ID, $\omega$, $\tau$, running SM score, and the `PetriNet` snapshot at that step.
+- [x] `FoldResult` dataclass exists recording: the initial net, the ordered list of `FoldStep`s, the final SM score, the `fully_reducible` boolean, and a property/method to access the penultimate state.
+- [x] Dummy transitions are standard `Transition` instances with `metadata={"dummy": True, "component_type": "<type>", "tau": <float>}`.
+- [x] The fold function correctly rewires boundary arcs when replacing a component with $t_C$: preset places of the entrance arc to $t_C$, $t_C$ to postset places of the exit.
+- [x] The fold loop terminates correctly for fully-reducible nets (single final transition).
+- [x] The fold loop terminates correctly for irreducible nets (remaining block folded as Unstructured with $\rho = 7$).
+- [x] Accumulated $\tau$ on a dummy transition equals $\omega(C) + \sum_{t \in C} \tau(t)$, where internal transitions start at $\tau = 1$.
+- [x] Unit tests verify: a pure 3-transition sequence folds to 1 step with $\omega = 0$; a single XOR-split with 2 symmetric branches folds correctly with $\omega = 1$; a single loop folds with $\omega = 3$; a mixed net folds in the correct priority order; a known-irreducible net terminates with the unstructured penalty and `fully_reducible = False`.
+- [x] Unit tests verify that `FoldConfig` weight overrides change the computed $\omega$ and final SM score.
+- [x] `FoldResult` JSON serialization produces the schema documented in the grand plan (initial net, fold steps array, final SM).
+- [x] Existing tests continue to pass.
+
