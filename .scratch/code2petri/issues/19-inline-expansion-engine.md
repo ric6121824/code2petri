@@ -14,14 +14,14 @@ The resulting Composite Net is a standard `PetriNet` instance, directly compatib
 
 **Blocked by:** None — can start immediately (uses existing `SymbolTable` and `WalkerProtocol` infrastructure from Phase 2).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] An inline expansion function accepts a `PetriNet`, a list of `CallSite` records, a `SymbolTable`, and optional `max_depth` (default 1), and returns a new `PetriNet` with resolved callees spliced in.
-- [ ] Callee nodes are cloned with namespace prefixes that prevent ID collisions across multiple inlined callees.
-- [ ] The opaque call transition is removed and its preset/postset arcs are rewired to the callee's source and sink places.
-- [ ] The resulting Composite Net passes `assert_valid_petri_net` (bipartite, has start/end, non-empty).
-- [ ] Recursion guard: a self-referencing call site (e.g., `loop` calling `requestAnimationFrame(loop)`) retains the call transition as an Opaque Transition with `{"recursive_cycle": True}` metadata instead of infinite expansion.
-- [ ] Depth capping: a 3-deep call chain with `max_depth=1` expands only the first level; deeper call transitions remain opaque.
-- [ ] Unresolved call transitions are left untouched (no expansion attempted).
-- [ ] Unit tests verify: single callee splicing (correct node count, arc wiring, no orphaned nodes); recursive call guard; depth-1 cap on a multi-level chain; unresolved calls remain opaque.
-- [ ] Existing tests continue to pass.
+- [x] An inline expansion function accepts a `PetriNet`, a list of `CallSite` records, a `SymbolTable`, and optional `max_depth` (default 1), and returns a new `PetriNet` with resolved callees spliced in.
+- [x] Callee nodes are cloned with namespace prefixes that prevent ID collisions across multiple inlined callees.
+- [x] The opaque call transition is removed and its preset/postset arcs are rewired to the callee's source and sink places.
+- [x] The resulting Composite Net passes `assert_valid_petri_net` (bipartite, has start/end, non-empty).
+- [x] Recursion guard: a self-referencing call site (e.g., `loop` calling `requestAnimationFrame(loop)`) retains the call transition as an Opaque Transition with `{"recursive_cycle": True}` metadata instead of infinite expansion.
+- [x] Depth capping: a 3-deep call chain with `max_depth=1` expands only the first level; deeper call transitions remain opaque.
+- [x] Unresolved call transitions are left untouched (no expansion attempted).
+- [x] Unit tests verify: single callee splicing (correct node count, arc wiring, no orphaned nodes); recursive call guard; depth-1 cap on a multi-level chain; unresolved calls remain opaque.
+- [x] Existing tests continue to pass.

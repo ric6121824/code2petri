@@ -17,6 +17,8 @@ from code2petri.fold import (
     fold_net,
 )
 
+from code2petri.inline import inline_expand
+
 __all__ = [
     "Place",
     "Transition",
@@ -43,6 +45,7 @@ __all__ = [
     "detect_components",
     "fold_component",
     "fold_net",
+    "inline_expand",
 ]
 
 
