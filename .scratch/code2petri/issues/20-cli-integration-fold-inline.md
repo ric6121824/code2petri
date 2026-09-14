@@ -28,6 +28,6 @@ Pipeline ordering: inline expansion runs first (if active), then fold analysis r
 - [x] SM score is printed to stderr (e.g., `Code2Petri: SM score = 42.0`) when `--fold` is active.
 - [x] `--inline` combined with `--fold` runs inline expansion first, then fold analysis on the composite net.
 - [x] Commands without `--fold` or `--inline` produce identical output to Phase 2 (backward compatibility).
-- [x] `"dummy"` is added to `Transition.RESERVED_METADATA_KEYS`.
+- [x] `"opaque"` (superseding `"dummy"`) is added to `Transition.RESERVED_METADATA_KEYS` for canonical domain terminology consistency.
 - [x] Integration tests verify: `--fold` JSON schema, `--fold` DOT penultimate state, `--no-fold` passthrough, `--weights` override changes SM score, `--inline` without `--context` raises error, backward-compatible output unchanged.
 - [x] Existing tests continue to pass.

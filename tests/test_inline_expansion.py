@@ -416,5 +416,36 @@ class TestInlineExpansionEngine(unittest.TestCase):
         self.assertEqual(sink.id, "p_end")
 
 
+    def test_same_file_cross_class_method_name_collision_no_false_recursion(self):
+        """Validates that distinct classes in the same file with identical method names (e.g. ClassA.step calling ClassB.step) do not falsely trigger recursion."""
+        code = (
+            "class Engine:\n"
+            "    def step(self):\n"
+            "        x = 1\n"
+            "\n"
+            "engine = Engine()\n"
+            "\n"
+            "class Game:\n"
+            "    def step(self):\n"
+            "        engine.step()\n"
+        )
+        fp = self._write_temp_file("cross_class.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        game_node = self.py_walker.find_function(tree, "Game.step")
+        res = self.py_walker.walk_function(game_node, "Game.step", filepath=fp)
+
+        composite_net = inline_expand(res.net, res.call_sites, symbol_table, max_depth=1)
+        assert_valid_petri_net(self, composite_net)
+
+        # Engine.step must be inlined and NOT marked as a recursive cycle
+        inlined_engine_step = [t for t in composite_net.transitions if "Engine.step" in t.id]
+        self.assertGreater(len(inlined_engine_step), 0, "Engine.step was not inlined")
+        cycle_trans = [t for t in composite_net.transitions if t.metadata and t.metadata.get("recursive_cycle")]
+        self.assertEqual(len(cycle_trans), 0, "False positive recursion cycle detected for distinct class method")
+
+
 if __name__ == "__main__":
     unittest.main()

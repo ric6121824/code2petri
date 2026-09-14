@@ -14,9 +14,26 @@ class CallFrame:
     name: str
 
     @property
+    def is_qualified(self) -> bool:
+        """Returns True if the name is qualified with an owner or class."""
+        return "." in self.name
+
+    @property
     def bare_name(self) -> str:
         """Extracts the unqualified function or method name."""
         return self.name.rsplit(".", 1)[-1] if "." in self.name else self.name
+
+    def variants(self) -> Set["CallFrame"]:
+        """Returns matching CallFrame representations.
+
+        For qualified class methods (e.g. 'ClassA.step'), bare name ('step')
+        is excluded to prevent false-positive recursion detection between distinct
+        classes sharing a method name in the same file.
+        """
+        result = {self}
+        if not self.is_qualified and self.bare_name != self.name:
+            result.add(CallFrame(filepath=self.filepath, name=self.bare_name))
+        return result
 
     @classmethod
     def from_caller(cls, cs: CallSite) -> Optional["CallFrame"]:
@@ -165,27 +182,22 @@ def _splice_callee_net(
     caller_net.remove_nodes({call_transition.id})
 
 
-def _is_self_referencing_game_loop(
+def _is_self_referencing_loop(
     net: PetriNet,
     cs: CallSite,
     trans: Transition,
 ) -> bool:
-    """Checks whether a call site is a self-referencing game loop cycle like requestAnimationFrame(loop)."""
-    if cs.callee_name != "requestAnimationFrame":
-        return False
-    # Structural check: JavascriptWalker wires recursive RAF loop back-arcs directly to the start place
+    """Checks whether a call site is an annotated or structural self-referencing loop cycle."""
+    if cs.is_callback_loop:
+        return True
+    if trans.metadata and (trans.metadata.get("is_callback_loop") or trans.metadata.get("recursive_cycle")):
+        return True
+
+    # Structural check: Walker wired loop back-arc directly to start place
     start_places = {p.id for p in net.places if p.is_start}
     if any(a.source.id == trans.id and a.target.id in start_places for a in net.arcs):
         return True
 
-    # Fallback check: label explicitly references caller function via structured CallFrame
-    frame = CallFrame.from_caller(cs)
-    if frame:
-        return (
-            f"({frame.name})" in trans.label
-            or f"({frame.bare_name})" in trans.label
-            or f"this.{frame.bare_name}" in trans.label
-        )
     return False
 
 
@@ -214,8 +226,8 @@ def _inline_expand_recursive(
         if trans is None or not isinstance(trans, Transition):
             continue
 
-        # Check self-referencing game loop (e.g. requestAnimationFrame(loop)) before external symbol lookup
-        if _is_self_referencing_game_loop(composite_net, cs, trans):
+        # Check self-referencing loop (e.g. recursive callback) before external symbol lookup
+        if _is_self_referencing_loop(composite_net, cs, trans):
             trans.mark_recursive_cycle()
             continue
 
@@ -237,16 +249,12 @@ def _inline_expand_recursive(
             active_stack = set()
             caller_frame = CallFrame.from_caller(cs)
             if caller_frame:
-                active_stack.add(caller_frame)
-                if caller_frame.bare_name != caller_frame.name:
-                    active_stack.add(CallFrame(filepath=caller_frame.filepath, name=caller_frame.bare_name))
+                active_stack.update(caller_frame.variants())
 
         # Recursion Guard: check matching call frames in the active vertical expansion call stack
         callee_file = sym.filepath or (os.path.abspath(cs.caller_file) if cs.caller_file else "")
         callee_frame = CallFrame(filepath=callee_file, name=sym.name)
-        callee_frames = {callee_frame}
-        if sym.bare_name and sym.bare_name != sym.name:
-            callee_frames.add(CallFrame(filepath=callee_file, name=sym.bare_name))
+        callee_frames = callee_frame.variants()
 
         if any(f in active_stack for f in callee_frames):
             trans.mark_recursive_cycle()

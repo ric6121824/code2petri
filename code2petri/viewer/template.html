@@ -486,18 +486,20 @@
         wheelSensitivity: 0.25
       });
 
-      function applyLayout() {
+      function applyLayout(animate) {
         const layout = cy.layout({
           name: 'dagre',
           rankDir: 'TB',
           nodeDimensionsIncludeLabels: true,
           spacingFactor: 1.15,
-          animate: false
+          animate: Boolean(animate),
+          animationDuration: 350,
+          animationEasing: 'ease-in-out'
         });
         layout.run();
       }
 
-      applyLayout();
+      applyLayout(false);
 
       // Compute initial SM score from initial net transitions
       const initialTransitions = initialNet.transitions || [];
@@ -546,12 +548,29 @@
         }
       }
 
-      function renderStep(stepIndex) {
+      function renderStep(stepIndex, animate) {
+        if (animate === undefined) animate = true;
         currentStep = Math.max(0, Math.min(stepIndex, totalSteps));
         const net = stepNets[currentStep];
+
+        const oldPositions = {};
+        cy.nodes().forEach(function(n) {
+          const pos = n.position();
+          if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+            oldPositions[n.id()] = { x: pos.x, y: pos.y };
+          }
+        });
+
+        const elements = netToElements(net);
+        elements.forEach(function(el) {
+          if (el.group === 'nodes' && oldPositions[el.data.id]) {
+            el.position = { x: oldPositions[el.data.id].x, y: oldPositions[el.data.id].y };
+          }
+        });
+
         cy.elements().remove();
-        cy.add(netToElements(net));
-        applyLayout();
+        cy.add(elements);
+        applyLayout(animate);
         updateUI();
       }
 

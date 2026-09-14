@@ -16,7 +16,6 @@ from code2petri.fold import (
     Component,
     ComponentType,
     calculate_symmetry_multiplier,
-    load_fold_config,
     detect_components,
 )
 
@@ -129,7 +128,7 @@ class TestFoldConfig(unittest.TestCase):
         self.assertEqual(config.loop, 4.5)
         self.assertEqual(config.unstructured, 9.5)
 
-    def test_from_json_full(self):
+    def test_load_json_full(self):
         json_str = json.dumps({
             "sequence": 0.5,
             "choice": 2.0,
@@ -137,28 +136,28 @@ class TestFoldConfig(unittest.TestCase):
             "loop": 5.0,
             "unstructured": 8.0,
         })
-        config = FoldConfig.from_json(json_str)
+        config = FoldConfig.load(json_str)
         self.assertEqual(config.sequence, 0.5)
         self.assertEqual(config.choice, 2.0)
         self.assertEqual(config.marked_graph, 3.0)
         self.assertEqual(config.loop, 5.0)
         self.assertEqual(config.unstructured, 8.0)
 
-    def test_from_json_partial(self):
+    def test_load_json_partial(self):
         json_str = '{"choice": 4.0, "loop": 6.0}'
-        config = FoldConfig.from_json(json_str)
+        config = FoldConfig.load(json_str)
         self.assertEqual(config.choice, 4.0)
         self.assertEqual(config.loop, 6.0)
         self.assertEqual(config.sequence, 0.0)
         self.assertEqual(config.marked_graph, 2.0)
         self.assertEqual(config.unstructured, 7.0)
 
-    def test_from_file(self):
+    def test_load_from_file(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             f.write(json.dumps({"choice": 3.5, "loop": 4.5}))
             tmp_path = f.name
         try:
-            config = FoldConfig.from_file(tmp_path)
+            config = FoldConfig.load(tmp_path)
             self.assertEqual(config.choice, 3.5)
             self.assertEqual(config.loop, 4.5)
             self.assertEqual(config.sequence, 0.0)
@@ -168,7 +167,7 @@ class TestFoldConfig(unittest.TestCase):
 
     def test_load_polymorphic(self):
         # From JSON string
-        config_from_str = load_fold_config('{"choice": 4.5, "loop": 6.5}')
+        config_from_str = FoldConfig.load('{"choice": 4.5, "loop": 6.5}')
         self.assertEqual(config_from_str.choice, 4.5)
         self.assertEqual(config_from_str.loop, 6.5)
 
@@ -177,7 +176,7 @@ class TestFoldConfig(unittest.TestCase):
             f.write(json.dumps({"choice": 2.5, "sequence": 1.0}))
             tmp_path = f.name
         try:
-            config_from_file = load_fold_config(tmp_path)
+            config_from_file = FoldConfig.load(tmp_path)
             self.assertEqual(config_from_file.choice, 2.5)
             self.assertEqual(config_from_file.sequence, 1.0)
         finally:

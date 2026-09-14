@@ -149,3 +149,12 @@ The HTML Viewer is a 100% offline, self-contained file using Cytoscape.js with D
 - Conforms to ADR 0001 (Constructor-Only Variable Resolution) for inline expansion callee resolution.
 - The folding algorithm follows Lassen & van der Aalst (2008), Definitions 17–23, as annotated in `Source Notes/Lassen and van der Aalst 2008.md` and synthesized in `Knowledge_Base/Structuredness Metrics.md` and `Knowledge_Base/Fold (Workflow Nets).md`.
 - Walkers and `ControlFlowBuilder` are NOT modified by Phase 2.5. The fold engine and inline expansion operate purely on `PetriNet` instances produced by the existing Phase 2 pipeline.
+
+## Architectural Decision Records (ADR)
+
+### ADR 0002: Boundary Place Unification for Bipartite Graph Integrity
+
+- **Status**: Accepted
+- **Context**: In Phase 2.5, Inline Expansion splices resolved callee subnets into caller Petri nets where opaque call transitions reside. The entrance of the callee subnet must receive control flow from the caller transition's preset place, and the exit of the callee subnet must transfer control flow to the caller transition's postset place.
+- **Decision**: Unify the boundary places by redirecting incoming arcs from the caller's preset place directly to the callee's entrance transitions, and redirecting outgoing arcs from the callee's exit transitions directly to the caller's postset place (boundary place unification / place fusion), rather than attempting to connect caller places to callee places via direct arcs.
+- **Rationale**: Petri nets are fundamentally bipartite graphs $(P, T, F)$ where flow arcs strictly connect places to transitions or transitions to places ($F \subseteq (P \times T) \cup (T \times P)$). Connecting the caller preset place to the callee start place with a direct arc would introduce a place-to-place arc ($P \times P$), which directly violates the bipartite structural invariant and breaks reachability and token game firing semantics. By fusing boundary places, bipartite graph integrity is strictly preserved, sound token flow is maintained, and no synthetic intermediate transitions are required.

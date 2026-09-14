@@ -62,21 +62,6 @@ class FoldConfig:
                 kwargs[f_name] = float(data[f_name])
         return cls(**kwargs)
 
-    @classmethod
-    def from_json(cls, json_str: str) -> "FoldConfig":
-        """Loads a FoldConfig from a JSON string."""
-        return cls.load(json_str)
-
-    @classmethod
-    def from_file(cls, file_path: str) -> "FoldConfig":
-        """Loads a FoldConfig from a JSON configuration file."""
-        return cls.load(file_path)
-
-
-def load_fold_config(source: str) -> FoldConfig:
-    """Unified factory function to load FoldConfig from either a file path or JSON string."""
-    return FoldConfig.load(source)
-
 
 @dataclass
 class Component:
@@ -251,7 +236,7 @@ class NetTopology:
 
 
 def calculate_symmetry_multiplier(
-    net: PetriNet,
+    net_or_topology: Union[PetriNet, NetTopology],
     component_node_ids: Iterable[str],
     target_node_ids: Optional[Iterable[str]] = None,
     topology: Optional[NetTopology] = None,
@@ -261,7 +246,9 @@ def calculate_symmetry_multiplier(
     diff(X) = ||{x in X | |x*| > 1}| - |{x in X | |*x| > 1}|| + 1
     where degrees are computed in the subnet projection PN|C.
     """
-    topo = topology if topology is not None else NetTopology(net)
+    topo = topology if topology is not None else (
+        net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
+    )
     comp_set = set(component_node_ids)
     target_set = set(target_node_ids) if target_node_ids is not None else comp_set
 
@@ -273,14 +260,20 @@ def calculate_symmetry_multiplier(
     return abs(splits - joins) + 1
 
 
-def detect_sequences(net: PetriNet, config: FoldConfig, topology: Optional[NetTopology] = None) -> List[Component]:
+def detect_sequences(
+    net_or_topology: Union[PetriNet, NetTopology],
+    config: FoldConfig,
+    topology: Optional[NetTopology] = None,
+) -> List[Component]:
     """Detects linear chains of place -> transition -> place with no branching.
 
     Per Definition 17 & 18:
     A sequence component is a maximal linear chain starting and ending with a place,
     containing >= 2 transitions with no internal branching.
     """
-    topo = topology if topology is not None else NetTopology(net)
+    topo = topology if topology is not None else (
+        net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
+    )
 
     def can_extend_backwards(place_id: str) -> bool:
         if topo.in_degree(place_id) != 1:
@@ -359,15 +352,21 @@ def detect_sequences(net: PetriNet, config: FoldConfig, topology: Optional[NetTo
     return sequences
 
 
-def detect_choices(net: PetriNet, config: FoldConfig, topology: Optional[NetTopology] = None) -> List[Component]:
+def detect_choices(
+    net_or_topology: Union[PetriNet, NetTopology],
+    config: FoldConfig,
+    topology: Optional[NetTopology] = None,
+) -> List[Component]:
     """Detects XOR-split/join Choice components per Definition 18.
 
     A Choice component has P_C = {p_i, p_o} and T_C = p_i* = *p_o with |T_C| >= 2.
     """
-    topo = topology if topology is not None else NetTopology(net)
+    topo = topology if topology is not None else (
+        net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
+    )
     choices: List[Component] = []
 
-    for place in net.places:
+    for place in topo.net.places:
         p_split = place.id
         choice_transitions = topo.postsets(p_split)
         if len(choice_transitions) < 2:
@@ -399,7 +398,7 @@ def detect_choices(net: PetriNet, config: FoldConfig, topology: Optional[NetTopo
             continue
 
         component_nodes = {p_split, p_merge} | choice_transitions
-        diff_val = calculate_symmetry_multiplier(net, component_nodes, [p_split, p_merge], topo)
+        diff_val = calculate_symmetry_multiplier(topo, component_nodes, [p_split, p_merge])
         omega = config.choice * diff_val
 
         choices.append(
@@ -444,10 +443,16 @@ def _find_elementary_cycles(net: PetriNet, topology: NetTopology) -> List[List[s
     return cycles
 
 
-def detect_loops(net: PetriNet, config: FoldConfig, topology: Optional[NetTopology] = None) -> List[Component]:
+def detect_loops(
+    net_or_topology: Union[PetriNet, NetTopology],
+    config: FoldConfig,
+    topology: Optional[NetTopology] = None,
+) -> List[Component]:
     """Detects simple directed cycles with a single entry place and a single exit arc."""
-    topo = topology if topology is not None else NetTopology(net)
-    cycles = _find_elementary_cycles(net, topo)
+    topo = topology if topology is not None else (
+        net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
+    )
+    cycles = _find_elementary_cycles(topo.net, topo)
     loops: List[Component] = []
     seen_cycles: Set[Tuple[str, ...]] = set()
 
@@ -471,7 +476,7 @@ def detect_loops(net: PetriNet, config: FoldConfig, topology: Optional[NetTopolo
                 continue
         else:
             entry_candidates = [
-                p.id for p in net.places
+                p.id for p in topo.net.places
                 if p.id in cycle_nodes and (topo.in_degree(p.id) == 0 or p.initial_tokens > 0)
             ]
             if len(entry_candidates) == 1:
@@ -518,9 +523,9 @@ def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> Lis
 
     topo = NetTopology(net)
     components: List[Component] = []
-    components.extend(detect_sequences(net, config, topo))
-    components.extend(detect_choices(net, config, topo))
-    components.extend(detect_loops(net, config, topo))
+    components.extend(detect_sequences(topo, config))
+    components.extend(detect_choices(topo, config))
+    components.extend(detect_loops(topo, config))
 
     # Definition 21 sorting:
     # 1. priority rank (lowest integer = highest priority)

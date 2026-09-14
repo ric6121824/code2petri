@@ -6,6 +6,7 @@ Viewer features:
 - **Fold/Unfold/Reset controls**: Step forward (fold the next component), step backward (unfold the last), and reset to the initial net.
 - **Step counter**: Displays "Step N / Total" updating with each action.
 - **Live SM score**: Displays the current accumulated SM score, updating with each fold/unfold.
+- **Contextual Info Panel & Legend**: Displays current step details (component type, consumed nodes, $\omega$ penalty, $\tau$ weight) and an interactive visual color legend (`#info-panel`).
 - **Visual conventions**: Places as circles, transitions as filled rectangles, dummy transitions ($t_C$) as distinctly styled rectangles with a visible $\tau$ badge. Call resolution colors preserved: `#2e7d32` (resolved), `#e65100` (unresolved).
 - **`--no-fold` mode**: Produces a static interactive HTML view (pan/zoom, no fold controls).
 

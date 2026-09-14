@@ -14,6 +14,7 @@ class CallSite:
     callee_owner: Optional[str]
     line_number: int
     transition_id: str
+    is_callback_loop: bool = False
 
 
 class WalkResult(NamedTuple):

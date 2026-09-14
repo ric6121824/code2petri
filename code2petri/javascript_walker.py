@@ -652,7 +652,12 @@ class _JavascriptControlFlowWalker:
     ) -> Optional[Place]:
         label = self._format_statement_label(stmt)
         trans = self.builder.new_transition(label=label, line_number=ctx.lineno)
+        trans.mark_recursive_cycle()
+        trans.metadata["is_callback_loop"] = True
+        call_sites_before = len(self.call_sites)
         self._record_calls_in_node(stmt, trans.id, ctx.lineno or 0)
+        for cs in self.call_sites[call_sites_before:]:
+            cs.is_callback_loop = True
         self.builder.add_arc(source=ctx.current_place, target=trans)
         self.builder.add_arc(source=trans, target=self.start_place)
 

@@ -65,11 +65,9 @@ def generate_html(
     template = _load_template()
     vendor_scripts = _load_vendor_scripts()
 
-    is_fold_result = hasattr(net_or_fold, "initial_net") and hasattr(net_or_fold, "steps")
-    if is_fold_result:
-        fold_dict = net_or_fold.to_dict() if hasattr(net_or_fold, "to_dict") else {}
-        final_sm = float(getattr(net_or_fold, "final_sm", 0.0))
-        display_title = title if title is not None else f"SM Score = {final_sm}"
+    if isinstance(net_or_fold, FoldResult):
+        fold_dict = net_or_fold.to_dict()
+        display_title = title if title is not None else f"SM Score = {net_or_fold.final_sm}"
         payload: Dict[str, Any] = {
             "mode": "fold",
             "title": display_title,
