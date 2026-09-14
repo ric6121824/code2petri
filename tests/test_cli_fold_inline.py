@@ -78,9 +78,9 @@ class TestCLIFoldAndInlineIntegration(unittest.TestCase):
         self.assertIn('labelloc="t";', content)
         self.assertIn('label="SM score = ', content)
 
-        # Penultimate state has dummy transitions styled with bold border and tau labels
+        # Penultimate state has opaque transitions styled with bold border and tau labels
         self.assertIn('style="filled,bold"', content)
-        self.assertIn('penwidth="2"', content)
+        self.assertNotIn('penwidth="2"', content)
         self.assertIn("(tau=", content)
 
     def test_fold_pnml_penultimate_state(self):

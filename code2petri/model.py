@@ -101,7 +101,7 @@ class Transition:
     """Represents a Petri net Transition (an action or statement execution)."""
 
     RESERVED_METADATA_KEYS: Set[str] = {
-        "resolved", "resolved_to", "target_file", "status", "opaque", "dummy", "inline_expansion"
+        "resolved", "resolved_to", "target_file", "status", "opaque", "inline_expansion"
     }
 
     def __init__(
@@ -157,12 +157,7 @@ class Transition:
     @property
     def is_opaque(self) -> bool:
         """Returns True if this transition is an opaque transition (folded component or unexpanded call)."""
-        return bool(self.metadata and (self.metadata.get("opaque") or self.metadata.get("dummy")))
-
-    @property
-    def is_dummy(self) -> bool:
-        """Deprecated alias for is_opaque per CONTEXT.md."""
-        return self.is_opaque
+        return bool(self.metadata and self.metadata.get("opaque"))
 
     @property
     def is_inlined(self) -> bool:
@@ -236,7 +231,6 @@ class Transition:
         fillcolor = dot_attrs.get("fillcolor", RenderingConfig.DEFAULT_FILLCOLOR)
         fillcolor_val = f'"{fillcolor}"' if fillcolor.startswith("#") else fillcolor
         style_val = '"filled,bold"' if self.is_opaque else "filled"
-        penwidth_attr = ', penwidth="2"' if self.is_opaque else ""
         extra_attrs = ""
         if dot_attrs:
             attrs_parts = []
@@ -248,7 +242,7 @@ class Transition:
             if attrs_parts:
                 extra_attrs = ", " + ", ".join(attrs_parts)
         return (
-            f'    "{escaped_id}" [shape=rect, style={style_val}{penwidth_attr}, fillcolor={fillcolor_val}, '
+            f'    "{escaped_id}" [shape=rect, style={style_val}, fillcolor={fillcolor_val}, '
             f'fontcolor={RenderingConfig.DEFAULT_FONTCOLOR}, label="{escaped_label}"{extra_attrs}];'
         )
 
