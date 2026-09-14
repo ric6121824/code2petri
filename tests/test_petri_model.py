@@ -603,16 +603,20 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         self.assertEqual(dot_attrs["fillcolor"], RenderingConfig.UNRESOLVED_COLOR)
         self.assertEqual(dot_attrs["tooltip"], "Unresolved call")
 
-    def test_dummy_in_reserved_metadata_keys(self):
+    def test_dummy_and_opaque_in_reserved_metadata_keys(self):
+        self.assertIn("opaque", Transition.RESERVED_METADATA_KEYS)
         self.assertIn("dummy", Transition.RESERVED_METADATA_KEYS)
+        self.assertIn("inline_expansion", Transition.RESERVED_METADATA_KEYS)
 
-    def test_dummy_transition_to_dot_node_rendering(self):
-        t_dummy = Transition(
+    def test_opaque_transition_to_dot_node_rendering(self):
+        t_opaque = Transition(
             id="t_C1",
             label="t_C1",
-            metadata={"dummy": True, "component_type": "sequence", "tau": 3.0},
+            metadata={"opaque": True, "component_type": "sequence", "tau": 3.0},
         )
-        dot_str = t_dummy.to_dot_node()
+        self.assertTrue(t_opaque.is_opaque)
+        self.assertTrue(t_opaque.is_dummy)
+        dot_str = t_opaque.to_dot_node()
         self.assertIn('style="filled,bold"', dot_str)
         self.assertIn('penwidth="2"', dot_str)
         self.assertIn('label="t_C1 (tau=3.0)"', dot_str)

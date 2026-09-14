@@ -100,7 +100,9 @@ class CallResolution:
 class Transition:
     """Represents a Petri net Transition (an action or statement execution)."""
 
-    RESERVED_METADATA_KEYS: Set[str] = {"resolved", "resolved_to", "target_file", "status", "dummy"}
+    RESERVED_METADATA_KEYS: Set[str] = {
+        "resolved", "resolved_to", "target_file", "status", "opaque", "dummy", "inline_expansion"
+    }
 
     def __init__(
         self,
@@ -153,9 +155,19 @@ class Transition:
         return d
 
     @property
+    def is_opaque(self) -> bool:
+        """Returns True if this transition is an opaque transition (folded component or unexpanded call)."""
+        return bool(self.metadata and (self.metadata.get("opaque") or self.metadata.get("dummy")))
+
+    @property
     def is_dummy(self) -> bool:
-        """Returns True if this transition is a folded dummy transition."""
-        return bool(self.metadata and self.metadata.get("dummy"))
+        """Deprecated alias for is_opaque per CONTEXT.md."""
+        return self.is_opaque
+
+    @property
+    def is_inlined(self) -> bool:
+        """Returns True if this transition was introduced via inline expansion."""
+        return bool(self.metadata and self.metadata.get("inline_expansion"))
 
     def get_tau(self) -> float:
         """Returns the accumulated complexity weight tau for this transition (default 1.0)."""
@@ -213,7 +225,7 @@ class Transition:
         label = self.label
         if self.line_number is not None:
             label = f"{label} (line {self.line_number})"
-        if self.is_dummy and self.metadata and "tau" in self.metadata:
+        if self.is_opaque and self.metadata and "tau" in self.metadata:
             tau_val = self.get_tau()
             tau_str = f"{tau_val:.1f}" if isinstance(tau_val, float) and tau_val.is_integer() else f"{tau_val}"
             if "(tau=" not in label and "tau=" not in label:
@@ -223,8 +235,8 @@ class Transition:
         dot_attrs = self.get_dot_attributes()
         fillcolor = dot_attrs.get("fillcolor", RenderingConfig.DEFAULT_FILLCOLOR)
         fillcolor_val = f'"{fillcolor}"' if fillcolor.startswith("#") else fillcolor
-        style_val = '"filled,bold"' if self.is_dummy else "filled"
-        penwidth_attr = ', penwidth="2"' if self.is_dummy else ""
+        style_val = '"filled,bold"' if self.is_opaque else "filled"
+        penwidth_attr = ', penwidth="2"' if self.is_opaque else ""
         extra_attrs = ""
         if dot_attrs:
             attrs_parts = []

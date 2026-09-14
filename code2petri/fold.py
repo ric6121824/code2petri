@@ -165,6 +165,14 @@ class FoldResult:
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent) + "\n"
 
+    def to_dot(self) -> str:
+        """Serializes the penultimate fold state to Graphviz DOT format with the final SM score in the title."""
+        return self.penultimate_net.to_dot(title=f"SM score = {self.final_sm}")
+
+    def to_pnml(self) -> str:
+        """Serializes the penultimate fold state to PNML format."""
+        return self.penultimate_net.to_pnml()
+
 
 class NetTopology:
     """Encapsulates indexed graph topology and queries for a PetriNet."""
@@ -543,7 +551,6 @@ def _add_opaque_transition(
         id=opaque_id,
         label=opaque_id,
         metadata={
-            "dummy": True,
             "opaque": True,
             "component_type": component_type,
             "tau": tau,

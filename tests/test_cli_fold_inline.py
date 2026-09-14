@@ -213,12 +213,15 @@ class TestCLIFoldAndInlineIntegration(unittest.TestCase):
             inline_depth=1,
         )
         self.assertIsInstance(res, PetriNet)
-        inlined_trans = [t for t in res.transitions if "inline_" in t.id]
+        inlined_trans = [t for t in res.transitions if t.is_inlined]
         self.assertGreater(len(inlined_trans), 0)
 
         with open(out_json, "r", encoding="utf-8") as f:
             data = json.load(f)
-        inlined_dict_trans = [t for t in data["transitions"] if "inline_" in t["id"]]
+        inlined_dict_trans = [
+            t for t in data["transitions"]
+            if t.get("metadata", {}).get("inline_expansion")
+        ]
         self.assertGreater(len(inlined_dict_trans), 0)
 
     def test_inline_combined_with_fold(self):
@@ -235,8 +238,8 @@ class TestCLIFoldAndInlineIntegration(unittest.TestCase):
         )
         self.assertIsInstance(res, FoldResult)
         # Composite net before folding had inlined nodes
-        initial_trans_ids = [t["id"] for t in res.initial_net.to_dict()["transitions"]]
-        self.assertTrue(any("inline_" in tid for tid in initial_trans_ids))
+        inlined_initial = [t for t in res.initial_net.transitions if t.is_inlined]
+        self.assertGreater(len(inlined_initial), 0)
         self.assertGreater(res.final_sm, 0.0)
 
     def test_stderr_sm_score_output(self):

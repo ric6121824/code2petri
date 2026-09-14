@@ -106,7 +106,8 @@ def _splice_callee_net(
     cloned_transitions: Dict[str, Transition] = {}
     for ct in callee_net.transitions:
         new_id = f"{prefix}{ct.id}"
-        new_meta = dict(ct.metadata) if ct.metadata is not None else None
+        new_meta = dict(ct.metadata) if ct.metadata is not None else {}
+        new_meta["inline_expansion"] = True
         cloned_t = caller_net.add_transition(
             id=new_id,
             label=ct.label,

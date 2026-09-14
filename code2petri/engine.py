@@ -212,7 +212,6 @@ def code2petri(
     )
 
     # Determine fold activation
-    ext = os.path.splitext(output_file)[1].lstrip(".").lower() if output_file else ""
     is_html = (ext == "html")
     fold_active = (fold or is_html) and not no_fold
 
@@ -235,18 +234,16 @@ def code2petri(
     if output_file:
         logger.debug("Writing serialized net to format '.%s' at '%s'...", ext, output_file)
         if ext in IMAGE_EXTENSIONS:
-            dot_title = f"SM score = {fold_result.final_sm}" if (fold_active and fold_result is not None) else None
-            target_net = fold_result.penultimate_net if (fold_active and fold_result is not None) else net
-            dot_content = target_net.to_dot(title=dot_title)
+            dot_content = fold_result.to_dot() if (fold_active and fold_result is not None) else net.to_dot()
             _render_dot_to_image(dot_content, ext, output_file)
         else:
             if fold_active and fold_result is not None:
                 if ext == "json":
                     content = fold_result.to_json()
                 elif ext in ("dot", "gv"):
-                    content = fold_result.penultimate_net.to_dot(title=f"SM score = {fold_result.final_sm}")
+                    content = fold_result.to_dot()
                 elif ext == "pnml":
-                    content = fold_result.penultimate_net.to_pnml()
+                    content = fold_result.to_pnml()
             else:
                 content = TEXT_SERIALIZERS[ext](net)
 
