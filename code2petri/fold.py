@@ -531,6 +531,26 @@ def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> Lis
     return components
 
 
+def _add_opaque_transition(
+    net: PetriNet,
+    step_number: int,
+    component_type: str,
+    tau: float,
+) -> Tuple[str, Transition]:
+    """Adds a standard Transition representing an opaque folded component."""
+    opaque_id = f"t_C{step_number}"
+    opaque_t = net.add_transition(
+        id=opaque_id,
+        label=opaque_id,
+        metadata={
+            "opaque": True,
+            "component_type": component_type,
+            "tau": tau,
+        },
+    )
+    return opaque_id, opaque_t
+
+
 def fold_component(
     net: PetriNet,
     component: Component,
@@ -565,16 +585,9 @@ def fold_component(
     accumulated_tau = float(component.omega) + tau_sum
 
     # 4. Create fresh opaque transition t_C
-    opaque_id = f"t_C{step_number}"
     comp_type_str = component.component_type.value
-    opaque_t = folded_net.add_transition(
-        id=opaque_id,
-        label=opaque_id,
-        metadata={
-            "opaque": True,
-            "component_type": comp_type_str,
-            "tau": accumulated_tau,
-        },
+    opaque_id, opaque_t = _add_opaque_transition(
+        folded_net, step_number, comp_type_str, accumulated_tau
     )
 
     node_map = folded_net.get_node_map()
@@ -655,15 +668,8 @@ def fold_unstructured(
     omega = float(cfg.unstructured)
     accumulated_tau = omega + tau_sum
 
-    opaque_id = f"t_C{step_number}"
-    opaque_t = folded_net.add_transition(
-        id=opaque_id,
-        label=opaque_id,
-        metadata={
-            "opaque": True,
-            "component_type": ComponentType.UNSTRUCTURED.value,
-            "tau": accumulated_tau,
-        },
+    opaque_id, opaque_t = _add_opaque_transition(
+        folded_net, step_number, ComponentType.UNSTRUCTURED.value, accumulated_tau
     )
 
     # Retain only boundary places and the new opaque transition
@@ -707,9 +713,7 @@ def _is_trivial_workflow_net(net: PetriNet) -> bool:
             return False
         if {p.id for p in net.places} != {p_in_id, p_out_id}:
             return False
-        p_in_sources = {s for s in topo.presets(p_in_id) if s != t.id}
-        p_out_targets = {target for target in topo.postsets(p_out_id) if target != t.id}
-        if p_in_sources or p_out_targets:
+        if topo.presets(p_in_id) or topo.postsets(p_out_id):
             return False
         return True
     return False
@@ -739,21 +743,7 @@ def fold_net(
     step_number = 1
     fully_reducible = True
 
-    # If the net is already trivial
-    if _is_trivial_workflow_net(current_net):
-        final_sm = current_net.transitions[0].get_tau() if current_net.transitions else 0.0
-        return FoldResult(
-            initial_net=initial_snapshot,
-            steps=[],
-            final_sm=final_sm,
-            fully_reducible=True,
-        )
-
-    while True:
-        if _is_trivial_workflow_net(current_net):
-            fully_reducible = True
-            break
-
+    while not _is_trivial_workflow_net(current_net):
         components = detect_components(current_net, cfg)
         if components:
             # Pick highest priority / smallest component per Definition 21
