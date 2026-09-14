@@ -328,6 +328,72 @@ class TestInlineExpansionEngine(unittest.TestCase):
         step_cpu_inlined = [t for t in composite_net.transitions if "inline_stepCpu__" in t.id]
         self.assertGreater(len(step_cpu_inlined), 0)
 
+    def test_class_method_recursion_guard(self):
+        """Validates recursion guard on class method where caller_function is qualified or bare."""
+        code = (
+            "class Worker:\n"
+            "    def process(self):\n"
+            "        self.process()\n"
+        )
+        fp = self._write_temp_file("method_recursion.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        worker_node = self.py_walker.find_function(tree, "Worker.process")
+        res = self.py_walker.walk_function(worker_node, "Worker.process", filepath=fp)
+
+        composite_net = inline_expand(res.net, res.call_sites, symbol_table, max_depth=1)
+        assert_valid_petri_net(self, composite_net)
+
+        rec_trans = next(t for t in composite_net.transitions if "process" in t.label)
+        self.assertIsNotNone(rec_trans.metadata)
+        self.assertTrue(rec_trans.metadata.get("recursive_cycle"))
+
+    def test_multi_caller_initial_stack(self):
+        """Validates that call sites from multiple callers populate the initial call stack."""
+        from code2petri.walker_protocol import CallSite
+        code = (
+            "def worker_a():\n"
+            "    worker_a()\n"
+            "def worker_b():\n"
+            "    worker_b()\n"
+        )
+        fp = self._write_temp_file("multi_callers.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        node_a = self.py_walker.find_function(tree, "worker_a")
+        res_a = self.py_walker.walk_function(node_a, "worker_a", filepath=fp)
+
+        node_b = self.py_walker.find_function(tree, "worker_b")
+        res_b = self.py_walker.walk_function(node_b, "worker_b", filepath=fp)
+
+        # Merge net and call sites from both
+        combined_net = PetriNet()
+        combined_net.places.extend(res_a.net.places)
+        combined_net.transitions.extend(res_a.net.transitions)
+        combined_net.arcs.extend(res_a.net.arcs)
+        combined_call_sites = list(res_a.call_sites) + list(res_b.call_sites)
+
+        composite_net = inline_expand(combined_net, combined_call_sites, symbol_table, max_depth=1)
+        cycle_transitions = [t for t in composite_net.transitions if t.metadata and t.metadata.get("recursive_cycle")]
+        self.assertEqual(len(cycle_transitions), 1)  # worker_a call marked recursive
+
+    def test_petrinet_find_boundary_places(self):
+        """Validates PetriNet.find_boundary_places identifies source and sink."""
+        net = PetriNet()
+        p_start = net.add_place(id="p_start", label="start", initial_tokens=1)
+        t1 = net.add_transition(id="t1", label="t1")
+        p_end = net.add_place(id="p_end", label="end", initial_tokens=0)
+        net.add_arc(p_start, t1)
+        net.add_arc(t1, p_end)
+
+        source, sink = net.find_boundary_places()
+        self.assertEqual(source.id, "p_start")
+        self.assertEqual(sink.id, "p_end")
+
 
 if __name__ == "__main__":
     unittest.main()

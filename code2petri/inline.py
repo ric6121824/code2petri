@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -6,17 +7,23 @@ from code2petri.symbol_table import SUPPORTED_WALKERS, Symbol, SymbolTable, norm
 from code2petri.walker_protocol import CallSite, WalkerProtocol
 
 
-def _find_boundary_places(
-    net: PetriNet,
-) -> Tuple[Optional[Place], Optional[Place]]:
-    """Identifies the single source and sink places of a PetriNet."""
-    start_places = [p for p in net.places if p.initial_tokens > 0 or p.label == "start"]
-    source_place = start_places[0] if start_places else (net.places[0] if net.places else None)
+@dataclass(frozen=True)
+class CallFrame:
+    """Represents an activation record in the expansion call stack."""
+    filepath: str
+    name: str
 
-    end_places = [p for p in net.places if p.label == "end"]
-    sink_place = end_places[0] if end_places else (net.places[-1] if net.places else None)
 
-    return source_place, sink_place
+def _is_start_place(place: Place) -> bool:
+    """Returns True if place is designated as a workflow net start place."""
+    return place.initial_tokens > 0 or place.label == "start"
+
+
+def _mark_recursive_cycle(trans: Transition) -> None:
+    """Annotates an opaque transition with recursive cycle metadata."""
+    if trans.metadata is None:
+        trans.metadata = {}
+    trans.metadata["recursive_cycle"] = True
 
 
 def _get_callee_net(
@@ -79,8 +86,12 @@ def _splice_callee_net(
     if not preset_places or not postset_places:
         return
 
-    callee_source_place, callee_sink_place = _find_boundary_places(callee_net)
-    if callee_source_place is None or callee_sink_place is None:
+    callee_source_place, callee_sink_place = callee_net.find_boundary_places()
+    if (
+        callee_source_place is None
+        or callee_sink_place is None
+        or callee_source_place.id == callee_sink_place.id
+    ):
         return
 
     base_prefix = f"inline_{callee_id}__"
@@ -164,11 +175,11 @@ def _is_self_referencing_game_loop(
     if cs.callee_name != "requestAnimationFrame":
         return False
     # Structural check: JavascriptWalker wires recursive RAF loop back-arcs directly to the start place
-    start_places = {p.id for p in net.places if p.initial_tokens > 0 or p.label == "start"}
+    start_places = {p.id for p in net.places if _is_start_place(p)}
     if any(a.source.id == trans.id and a.target.id in start_places for a in net.arcs):
         return True
 
-    # Secondary check: label explicitly references caller function
+    # Fallback check: label explicitly references caller function
     if cs.caller_function:
         bare_name = cs.caller_function.split(".")[-1]
         return (
@@ -184,7 +195,7 @@ def _inline_expand_recursive(
     call_sites: List[CallSite],
     symbol_table: SymbolTable,
     max_depth: int,
-    call_stack: Set[Tuple[str, str]],
+    call_stack: Set[CallFrame],
 ) -> PetriNet:
     """Internal recursive worker for inline expansion."""
     composite_net = net.clone()
@@ -207,9 +218,7 @@ def _inline_expand_recursive(
 
         # Check self-referencing game loop (e.g. requestAnimationFrame(loop)) before external symbol lookup
         if _is_self_referencing_game_loop(composite_net, cs, trans):
-            if trans.metadata is None:
-                trans.metadata = {}
-            trans.metadata["recursive_cycle"] = True
+            _mark_recursive_cycle(trans)
             continue
 
         sym = symbol_table.resolve_call(cs)
@@ -223,12 +232,16 @@ def _inline_expand_recursive(
             target_file=sym.filepath,
         )
 
-        # Recursion Guard: check exact qualified symbol identity in active expansion call stack
-        callee_key = (sym.filepath, sym.name)
-        if callee_key in call_stack or (not sym.filepath and (cs.caller_file, sym.name) in call_stack):
-            if trans.metadata is None:
-                trans.metadata = {}
-            trans.metadata["recursive_cycle"] = True
+        # Recursion Guard: check matching call frames in the active expansion call stack
+        callee_file = sym.filepath or (os.path.abspath(cs.caller_file) if cs.caller_file else "")
+        callee_frames = {
+            CallFrame(filepath=callee_file, name=sym.name),
+        }
+        if sym.bare_name:
+            callee_frames.add(CallFrame(filepath=callee_file, name=sym.bare_name))
+
+        if any(f in call_stack for f in callee_frames):
+            _mark_recursive_cycle(trans)
             continue
 
         callee_net, callee_call_sites = _get_callee_net(sym, walker_cache=walker_cache)
@@ -236,7 +249,7 @@ def _inline_expand_recursive(
             continue
 
         new_stack = set(call_stack)
-        new_stack.add(callee_key)
+        new_stack.update(callee_frames)
 
         if max_depth > 1:
             callee_net = _inline_expand_recursive(
@@ -246,8 +259,6 @@ def _inline_expand_recursive(
                 max_depth=max_depth - 1,
                 call_stack=new_stack,
             )
-        else:
-            symbol_table.resolve_call_sites(callee_net, callee_call_sites)
 
         _splice_callee_net(
             caller_net=composite_net,
@@ -277,10 +288,13 @@ def inline_expand(
     Returns:
         A new PetriNet instance with resolved callee subnets spliced in.
     """
-    initial_stack: Set[Tuple[str, str]] = set()
-    if call_sites and call_sites[0].caller_function:
-        c_file = os.path.abspath(call_sites[0].caller_file) if call_sites[0].caller_file else ""
-        initial_stack.add((c_file, call_sites[0].caller_function))
+    initial_stack: Set[CallFrame] = set()
+    for cs in call_sites:
+        if cs.caller_function:
+            c_file = os.path.abspath(cs.caller_file) if cs.caller_file else ""
+            initial_stack.add(CallFrame(filepath=c_file, name=cs.caller_function))
+            if "." in cs.caller_function:
+                initial_stack.add(CallFrame(filepath=c_file, name=cs.caller_function.split(".")[-1]))
 
     return _inline_expand_recursive(
         net=net,
@@ -289,3 +303,4 @@ def inline_expand(
         max_depth=max_depth,
         call_stack=initial_stack,
     )
+

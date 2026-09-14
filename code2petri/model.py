@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 import json
-from typing import Optional, Union, List, Dict, Any, Set
+from typing import Optional, Union, List, Dict, Any, Set, Tuple
 import xml.etree.ElementTree as ET
 
 
@@ -465,4 +465,14 @@ class PetriNet:
             a for a in self.arcs
             if a.source.id not in ids_to_remove and a.target.id not in ids_to_remove
         ]
+
+    def find_boundary_places(self) -> Tuple[Optional[Place], Optional[Place]]:
+        """Identifies the primary source (start) and sink (end) boundary places of the Petri net."""
+        start_places = [p for p in self.places if p.initial_tokens > 0 or p.label == "start"]
+        source_place = start_places[0] if start_places else (self.places[0] if self.places else None)
+
+        end_places = [p for p in self.places if p.label == "end"]
+        sink_place = end_places[0] if end_places else (self.places[-1] if self.places else None)
+
+        return source_place, sink_place
 
