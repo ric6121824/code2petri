@@ -173,6 +173,11 @@ class FoldResult:
         """Serializes the penultimate fold state to PNML format."""
         return self.penultimate_net.to_pnml()
 
+    def to_html(self, title: Optional[str] = None) -> str:
+        """Serializes the fold reduction history into an interactive offline HTML viewer."""
+        from code2petri.viewer import generate_html
+        return generate_html(self, title=title)
+
 
 class NetTopology:
     """Encapsulates indexed graph topology and queries for a PetriNet."""

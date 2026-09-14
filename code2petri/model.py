@@ -453,6 +453,11 @@ class PetriNet:
         """Serializes the Petri net into formatted JSON."""
         return json.dumps(self.to_dict(), indent=indent) + "\n"
 
+    def to_html(self, title: Optional[str] = None) -> str:
+        """Serializes the Petri net into a self-contained offline interactive HTML viewer."""
+        from code2petri.viewer import generate_html
+        return generate_html(self, title=title)
+
     def get_node_map(self) -> Dict[str, Union[Place, Transition]]:
         """Returns a mapping of node IDs to Place and Transition instances."""
         nodes: Dict[str, Union[Place, Transition]] = {p.id: p for p in self.places}

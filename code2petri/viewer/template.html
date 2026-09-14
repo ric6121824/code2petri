@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{TITLE}} - code2petri Viewer</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #f8f9fa;
+      color: #212529;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    header {
+      background-color: #24292e;
+      color: #ffffff;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+      z-index: 10;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    .header-title {
+      font-size: 16px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    .header-subtitle {
+      font-size: 12px;
+      color: #adb5bd;
+    }
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn {
+      background-color: #343a40;
+      color: #ffffff;
+      border: 1px solid #495057;
+      padding: 6px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background-color 0.15s ease, border-color 0.15s ease;
+    }
+    .btn:hover:not(:disabled) {
+      background-color: #495057;
+      border-color: #6c757d;
+    }
+    .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .btn-primary {
+      background-color: #0366d6;
+      border-color: #0366d6;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background-color: #0256b9;
+      border-color: #0256b9;
+    }
+    .status-badge {
+      background-color: #343a40;
+      border: 1px solid #495057;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    .status-badge .label {
+      color: #adb5bd;
+      font-size: 11px;
+      text-transform: uppercase;
+    }
+    .status-badge .value {
+      font-weight: 600;
+      color: #61afef;
+    }
+    .status-badge .value.sm-score {
+      color: #98c379;
+    }
+    #main-container {
+      flex: 1;
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+    #cy {
+      width: 100%;
+      height: 100%;
+      background-color: #ffffff;
+    }
+    #info-panel {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      background: rgba(255, 255, 255, 0.95);
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 12px 16px;
+      font-size: 12px;
+      max-width: 380px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+      z-index: 5;
+      backdrop-filter: blur(4px);
+    }
+    #info-panel h4 {
+      margin-bottom: 6px;
+      font-size: 13px;
+      color: #343a40;
+    }
+    #info-panel p {
+      margin-bottom: 4px;
+      color: #495057;
+    }
+    #info-panel .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid #e9ecef;
+      font-size: 11px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .legend-swatch {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      border: 1px solid #333;
+    }
+    .legend-swatch.place {
+      border-radius: 50%;
+      background: #fff;
+    }
+    .legend-swatch.trans {
+      background: #f8f9fa;
+    }
+    .legend-swatch.resolved {
+      background: #2e7d32;
+      border-color: #2e7d32;
+    }
+    .legend-swatch.unresolved {
+      background: #e65100;
+      border-color: #e65100;
+    }
+    .legend-swatch.opaque {
+      background: #f8f9fa;
+      border: 2px dashed #111;
+    }
+    #node-details {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid #dee2e6;
+      border-radius: 6px;
+      padding: 14px 18px;
+      font-size: 12px;
+      min-width: 260px;
+      max-width: 350px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      display: none;
+      z-index: 5;
+      backdrop-filter: blur(4px);
+    }
+    #node-details h3 {
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: #212529;
+      word-break: break-all;
+    }
+    #node-details table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #node-details td {
+      padding: 3px 0;
+      vertical-align: top;
+    }
+    #node-details td.k {
+      color: #6c757d;
+      width: 40%;
+    }
+    #node-details td.v {
+      color: #212529;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      word-break: break-word;
+    }
+    #node-details .close-btn {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: none;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+      color: #6c757d;
+    }
+    #node-details .close-btn:hover {
+      color: #000;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <div>
+        <div class="header-title">{{TITLE}}</div>
+        <div class="header-subtitle">code2petri Petri Net Viewer</div>
+      </div>
+    </div>
+
+    <div class="controls" id="fold-controls" style="display: none;">
+      <button class="btn" id="btn-reset" title="Reset to initial un-folded net">Reset</button>
+      <button class="btn" id="btn-unfold" title="Step backward (unfold last component)">◀ Unfold</button>
+      <button class="btn btn-primary" id="btn-fold" title="Step forward (fold next component)">Fold ▶</button>
+
+      <div class="status-badge" id="badge-step">
+        <span class="label">Step</span>
+        <span class="value" id="val-step">0 / 0</span>
+      </div>
+
+      <div class="status-badge" id="badge-sm">
+        <span class="label">SM Score</span>
+        <span class="value sm-score" id="val-sm">0.0</span>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="btn" id="btn-fit" title="Fit graph to view">Fit</button>
+      <button class="btn" id="btn-zoom-in" title="Zoom in">+</button>
+      <button class="btn" id="btn-zoom-out" title="Zoom out">-</button>
+    </div>
+  </header>
+
+  <div id="main-container">
+    <div id="cy"></div>
+
+    <div id="info-panel">
+      <h4 id="info-step-title">Petri Net View</h4>
+      <p id="info-step-desc">Interactive Petri net graph representation.</p>
+      <div class="legend">
+        <div class="legend-item"><div class="legend-swatch place"></div>Place</div>
+        <div class="legend-item"><div class="legend-swatch trans"></div>Transition</div>
+        <div class="legend-item"><div class="legend-swatch opaque"></div>Opaque ($t_C$)</div>
+        <div class="legend-item"><div class="legend-swatch resolved"></div>Resolved</div>
+        <div class="legend-item"><div class="legend-swatch unresolved"></div>Unresolved</div>
+      </div>
+    </div>
+
+    <div id="node-details">
+      <button class="close-btn" id="btn-close-details">&times;</button>
+      <h3 id="details-id">Node ID</h3>
+      <table>
+        <tbody>
+          <tr><td class="k">Type:</td><td class="v" id="details-type">-</td></tr>
+          <tr><td class="k">Label:</td><td class="v" id="details-label">-</td></tr>
+          <tr id="row-line"><td class="k">Line:</td><td class="v" id="details-line">-</td></tr>
+          <tr id="row-tau"><td class="k">Weight (τ):</td><td class="v" id="details-tau">-</td></tr>
+          <tr id="row-resolution"><td class="k">Target:</td><td class="v" id="details-resolution">-</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- INLINED VENDOR LIBRARIES -->
+  {{VENDOR_SCRIPTS}}
+
+  <!-- INLINED PETRI NET & FOLD DATA -->
+  <script id="code2petri-data" type="application/json">
+{{DATA_JSON}}
+  </script>
+
+  <!-- CLIENT-SIDE APPLICATION LOGIC -->
+  <script>
+    (function() {
+      // Register dagre layout plugin with cytoscape if available
+      if (typeof cytoscape !== 'undefined' && typeof cytoscapeDagre !== 'undefined') {
+        try {
+          cytoscape.use(cytoscapeDagre);
+        } catch(e) {
+          // May already be auto-registered
+        }
+      }
+
+      // Parse embedded data
+      const dataEl = document.getElementById('code2petri-data');
+      if (!dataEl) return;
+      let payload = {};
+      try {
+        payload = JSON.parse(dataEl.textContent);
+      } catch (e) {
+        console.error("Could not parse code2petri-data:", e);
+        return;
+      }
+
+      const isFoldMode = payload.mode === "fold" && Array.isArray(payload.fold_steps) && payload.fold_steps.length > 0;
+      const initialNet = payload.initial_net || { places: [], transitions: [], arcs: [] };
+      const foldSteps = payload.fold_steps || [];
+      const totalSteps = foldSteps.length;
+      let currentStep = 0;
+
+      // Elements cache for each step
+      const stepNets = [initialNet];
+      for (let i = 0; i < foldSteps.length; i++) {
+        stepNets.push(foldSteps[i].net || initialNet);
+      }
+
+      // Convert PetriNet dict to Cytoscape elements
+      function netToElements(net) {
+        const elements = [];
+        const places = net.places || [];
+        const transitions = net.transitions || [];
+        const arcs = net.arcs || [];
+
+        places.forEach(function(p) {
+          const tokens = p.initial_tokens || 0;
+          const label = (p.label || p.id) + (tokens > 0 ? ' (' + tokens + ')' : '');
+          elements.push({
+            group: 'nodes',
+            data: {
+              id: p.id,
+              label: label,
+              type: 'Place',
+              tokens: tokens,
+              raw_label: p.label || p.id
+            },
+            classes: 'place' + (tokens > 0 ? ' has-tokens' : '')
+          });
+        });
+
+        transitions.forEach(function(t) {
+          const meta = t.metadata || {};
+          const isOpaque = Boolean(meta.opaque || (t.id && t.id.startsWith('t_C')));
+          const tau = meta.tau !== undefined ? Number(meta.tau) : (t.tau !== undefined ? Number(t.tau) : 1.0);
+          
+          let displayLabel = t.label || t.id;
+          if (t.line_number !== null && t.line_number !== undefined) {
+            displayLabel += ' (line ' + t.line_number + ')';
+          }
+          if (isOpaque && tau !== undefined) {
+            const tauStr = Number.isInteger(tau) ? tau.toFixed(1) : String(tau);
+            if (!displayLabel.includes('(tau=') && !displayLabel.includes('(τ=')) {
+              displayLabel += ' (τ=' + tauStr + ')';
+            }
+          }
+
+          let fillcolor = '#ffffff';
+          let statusClass = '';
+          if (t.resolved === true) {
+            fillcolor = '#2e7d32'; // Resolved green
+            statusClass = 'resolved';
+          } else if (t.resolved === false) {
+            fillcolor = '#e65100'; // Unresolved orange
+            statusClass = 'unresolved';
+          }
+
+          const classes = ['transition'];
+          if (isOpaque) classes.push('opaque');
+          if (statusClass) classes.push(statusClass);
+
+          elements.push({
+            group: 'nodes',
+            data: {
+              id: t.id,
+              label: displayLabel,
+              raw_label: t.label || t.id,
+              type: isOpaque ? 'Opaque Transition' : 'Transition',
+              line_number: t.line_number,
+              is_opaque: isOpaque,
+              tau: tau,
+              fillcolor: fillcolor,
+              resolved: t.resolved,
+              resolved_to: t.resolved_to,
+              target_file: t.target_file,
+              component_type: meta.component_type
+            },
+            classes: classes.join(' ')
+          });
+        });
+
+        arcs.forEach(function(a, idx) {
+          const src = typeof a.source === 'object' ? a.source.id : a.source;
+          const tgt = typeof a.target === 'object' ? a.target.id : a.target;
+          elements.push({
+            group: 'edges',
+            data: {
+              id: 'arc_' + idx + '_' + src + '_' + tgt,
+              source: src,
+              target: tgt
+            },
+            classes: 'arc'
+          });
+        });
+
+        return elements;
+      }
+
+      // Initialize Cytoscape
+      const cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements: netToElements(stepNets[0]),
+        style: [
+          {
+            selector: 'node.place',
+            style: {
+              'shape': 'ellipse',
+              'background-color': '#ffffff',
+              'border-width': 2,
+              'border-color': '#24292e',
+              'width': 36,
+              'height': 36,
+              'label': 'data(label)',
+              'text-valign': 'bottom',
+              'text-halign': 'center',
+              'text-margin-y': 5,
+              'font-size': '11px',
+              'font-family': 'ui-monospace, monospace',
+              'color': '#24292e',
+              'text-background-opacity': 0.8,
+              'text-background-color': '#ffffff',
+              'text-background-padding': '2px',
+              'text-background-shape': 'roundrectangle'
+            }
+          },
+          {
+            selector: 'node.place.has-tokens',
+            style: {
+              'background-color': '#e8f0fe',
+              'border-width': 3,
+              'border-color': '#1a73e8'
+            }
+          },
+          {
+            selector: 'node.transition',
+            style: {
+              'shape': 'rectangle',
+              'background-color': 'data(fillcolor)',
+              'border-width': 1.5,
+              'border-color': '#24292e',
+              'width': 'label',
+              'height': 30,
+              'padding': '8px',
+              'label': 'data(label)',
+              'text-valign': 'center',
+              'text-halign': 'center',
+              'font-size': '11px',
+              'font-family': 'ui-monospace, monospace',
+              'color': '#24292e'
+            }
+          },
+          {
+            selector: 'node.transition.resolved',
+            style: {
+              'background-color': '#2e7d32',
+              'border-color': '#1b5e20',
+              'color': '#ffffff'
+            }
+          },
+          {
+            selector: 'node.transition.unresolved',
+            style: {
+              'background-color': '#e65100',
+              'border-color': '#bf360c',
+              'color': '#ffffff'
+            }
+          },
+          {
+            selector: 'node.transition.opaque',
+            style: {
+              'border-width': 3,
+              'border-style': 'dashed',
+              'border-color': '#111111',
+              'font-weight': 'bold'
+            }
+          },
+          {
+            selector: 'node:selected',
+            style: {
+              'border-color': '#0366d6',
+              'border-width': 3,
+              'shadow-blur': 8,
+              'shadow-color': 'rgba(3, 102, 214, 0.4)',
+              'shadow-opacity': 0.8
+            }
+          },
+          {
+            selector: 'edge.arc',
+            style: {
+              'curve-style': 'bezier',
+              'target-arrow-shape': 'triangle',
+              'target-arrow-color': '#495057',
+              'line-color': '#495057',
+              'width': 1.8,
+              'arrow-scale': 1.2
+            }
+          }
+        ],
+        layout: {
+          name: 'dagre',
+          rankDir: 'TB',
+          nodeDimensionsIncludeLabels: true,
+          spacingFactor: 1.15
+        },
+        minZoom: 0.2,
+        maxZoom: 3.5,
+        wheelSensitivity: 0.25
+      });
+
+      function applyLayout() {
+        const layout = cy.layout({
+          name: 'dagre',
+          rankDir: 'TB',
+          nodeDimensionsIncludeLabels: true,
+          spacingFactor: 1.15,
+          animate: false
+        });
+        layout.run();
+      }
+
+      applyLayout();
+
+      // UI Element references
+      const foldControls = document.getElementById('fold-controls');
+      const btnFold = document.getElementById('btn-fold');
+      const btnUnfold = document.getElementById('btn-unfold');
+      const btnReset = document.getElementById('btn-reset');
+      const valStep = document.getElementById('val-step');
+      const valSm = document.getElementById('val-sm');
+      const infoTitle = document.getElementById('info-step-title');
+      const infoDesc = document.getElementById('info-step-desc');
+      const nodeDetails = document.getElementById('node-details');
+
+      if (isFoldMode) {
+        foldControls.style.display = 'flex';
+        updateUI();
+      }
+
+      function updateUI() {
+        if (!isFoldMode) return;
+        valStep.textContent = currentStep + ' / ' + totalSteps;
+        btnFold.disabled = (currentStep >= totalSteps);
+        btnUnfold.disabled = (currentStep <= 0);
+        btnReset.disabled = (currentStep === 0);
+
+        if (currentStep === 0) {
+          valSm.textContent = '0.0';
+          infoTitle.textContent = 'Initial Petri Net';
+          infoDesc.textContent = 'Original unreduced control flow net prior to structural folding.';
+        } else {
+          const stepInfo = foldSteps[currentStep - 1];
+          const smVal = stepInfo.sm_score !== undefined ? Number(stepInfo.sm_score).toFixed(1) : '0.0';
+          valSm.textContent = smVal;
+          const compType = stepInfo.component_type || 'component';
+          const opaqueId = stepInfo.opaque_transition || ('t_C' + currentStep);
+          const omegaVal = stepInfo.omega !== undefined ? stepInfo.omega : 0;
+          const tauVal = stepInfo.tau !== undefined ? stepInfo.tau : 0;
+          infoTitle.textContent = 'Step ' + currentStep + ': Folded ' + compType;
+          infoDesc.textContent = 'Collapsed into opaque transition ' + opaqueId + ' (penalty ω=' + omegaVal + ', accumulated weight τ=' + tauVal + ').';
+        }
+      }
+
+      function renderStep(stepIndex) {
+        currentStep = Math.max(0, Math.min(stepIndex, totalSteps));
+        const net = stepNets[currentStep];
+        cy.elements().remove();
+        cy.add(netToElements(net));
+        applyLayout();
+        updateUI();
+        nodeDetails.style.display = 'none';
+      }
+
+      if (btnFold) {
+        btnFold.addEventListener('click', function() {
+          if (currentStep < totalSteps) {
+            renderStep(currentStep + 1);
+          }
+        });
+      }
+
+      if (btnUnfold) {
+        btnUnfold.addEventListener('click', function() {
+          if (currentStep > 0) {
+            renderStep(currentStep - 1);
+          }
+        });
+      }
+
+      if (btnReset) {
+        btnReset.addEventListener('click', function() {
+          renderStep(0);
+        });
+      }
+
+      // Fit / Zoom controls
+      document.getElementById('btn-fit').addEventListener('click', function() {
+        cy.fit(undefined, 30);
+      });
+      document.getElementById('btn-zoom-in').addEventListener('click', function() {
+        cy.zoom(cy.zoom() * 1.25);
+      });
+      document.getElementById('btn-zoom-out').addEventListener('click', function() {
+        cy.zoom(cy.zoom() / 1.25);
+      });
+
+      // Node selection details
+      cy.on('tap', 'node', function(evt) {
+        const node = evt.target;
+        const d = node.data();
+        document.getElementById('details-id').textContent = d.id;
+        document.getElementById('details-type').textContent = d.type || 'Node';
+        document.getElementById('details-label').textContent = d.raw_label || d.label || '-';
+
+        const rowLine = document.getElementById('row-line');
+        if (d.line_number !== null && d.line_number !== undefined) {
+          rowLine.style.display = 'table-row';
+          document.getElementById('details-line').textContent = d.line_number;
+        } else {
+          rowLine.style.display = 'none';
+        }
+
+        const rowTau = document.getElementById('row-tau');
+        if (d.tau !== undefined && d.tau !== null) {
+          rowTau.style.display = 'table-row';
+          document.getElementById('details-tau').textContent = d.tau;
+        } else {
+          rowTau.style.display = 'none';
+        }
+
+        const rowRes = document.getElementById('row-resolution');
+        if (d.resolved_to) {
+          rowRes.style.display = 'table-row';
+          const fileInfo = d.target_file ? ' (' + d.target_file + ')' : '';
+          document.getElementById('details-resolution').textContent = d.resolved_to + fileInfo;
+        } else if (d.resolved === false) {
+          rowRes.style.display = 'table-row';
+          document.getElementById('details-resolution').textContent = '[unresolved call]';
+        } else {
+          rowRes.style.display = 'none';
+        }
+
+        nodeDetails.style.display = 'block';
+      });
+
+      document.getElementById('btn-close-details').addEventListener('click', function() {
+        nodeDetails.style.display = 'none';
+      });
+
+      // Keyboard navigation: ArrowRight to Fold, ArrowLeft to Unfold, Escape to close details
+      window.addEventListener('keydown', function(e) {
+        if (e.key === 'ArrowRight' && isFoldMode && currentStep < totalSteps) {
+          renderStep(currentStep + 1);
+        } else if (e.key === 'ArrowLeft' && isFoldMode && currentStep > 0) {
+          renderStep(currentStep - 1);
+        } else if (e.key === 'Escape') {
+          nodeDetails.style.display = 'none';
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

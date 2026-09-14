@@ -51,10 +51,11 @@ def discover_context_files(context_paths: Sequence[str]) -> List[str]:
 
 IMAGE_EXTENSIONS = {"png", "svg"}
 TEXT_SERIALIZERS = {
-    "pnml": lambda net: net.to_pnml(),
-    "dot": lambda net: net.to_dot(),
-    "gv": lambda net: net.to_dot(),
-    "json": lambda net: net.to_json(),
+    "pnml": lambda target: target.to_pnml(),
+    "dot": lambda target: target.to_dot(),
+    "gv": lambda target: target.to_dot(),
+    "json": lambda target: target.to_json(),
+    "html": lambda target: target.to_html(),
 }
 SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | set(TEXT_SERIALIZERS.keys())
 
@@ -237,15 +238,8 @@ def code2petri(
             dot_content = fold_result.to_dot() if (fold_active and fold_result is not None) else net.to_dot()
             _render_dot_to_image(dot_content, ext, output_file)
         else:
-            if fold_active and fold_result is not None:
-                if ext == "json":
-                    content = fold_result.to_json()
-                elif ext in ("dot", "gv"):
-                    content = fold_result.to_dot()
-                elif ext == "pnml":
-                    content = fold_result.to_pnml()
-            else:
-                content = TEXT_SERIALIZERS[ext](net)
+            target = fold_result if (fold_active and fold_result is not None) else net
+            content = TEXT_SERIALIZERS[ext](target)
 
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -261,7 +255,7 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
     """CLI entry point for code2petri."""
     parser = argparse.ArgumentParser(
         prog="code2petri",
-        description="Convert function control flow into Petri nets (PNML, DOT, JSON, SVG, PNG).",
+        description="Convert function control flow into Petri nets (PNML, DOT, JSON, SVG, PNG, HTML).",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
@@ -275,7 +269,7 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
     parser.add_argument(
         "--output", "-o",
         default="out.pnml",
-        help="Output file path (.pnml, .dot, .gv, .json, .png, .svg).",
+        help="Output file path (.pnml, .dot, .gv, .json, .png, .svg, .html).",
     )
     parser.add_argument(
         "--list-functions",

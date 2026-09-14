@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 
 from code2petri.engine import code2petri, main
 from code2petri.model import PetriNet, RenderingConfig
+from code2petri.fold import FoldResult
 
 
 class TestGameOfLifeCrossFileValidation(unittest.TestCase):
@@ -227,6 +228,58 @@ class TestGameOfLifeCrossFileValidation(unittest.TestCase):
         self.assertGreaterEqual(len(unresolved_json), 1)
         step_json = next(t for t in resolved_json if t.get("resolved_to") == "WebGLEngine.step")
         self.assertEqual(step_json.get("target_file"), self.webgl_js)
+
+    def test_game_of_life_step_cpu_fold_html_output(self):
+        """Validates that stepCpu with --fold generates a valid self-contained HTML file."""
+        out_html = os.path.join(self.temp_dir.name, "stepCpu.html")
+        res = code2petri(
+            source_path=self.app_js,
+            target_function="stepCpu",
+            fold=True,
+            context=[self.game_of_life_dir],
+            output_file=out_html,
+        )
+        self.assertIsInstance(res, FoldResult)
+        self.assertTrue(os.path.exists(out_html))
+        self.assertGreater(os.path.getsize(out_html), 0)
+        self.assertGreater(res.final_sm, 0.0)
+        self.assertGreater(len(res.steps), 0)
+
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("<!DOCTYPE html>", content)
+        self.assertIn("</html>", content)
+        self.assertIn('<script id="code2petri-data"', content)
+        self.assertIn('"mode": "fold"', content)
+        self.assertIn('"fold_steps"', content)
+        self.assertIn(f'"final_sm": {res.final_sm}', content)
+
+    def test_game_of_life_loop_inline_composite_html_output(self):
+        """Validates that loop with --inline produces a Composite Net HTML with inlined subnodes."""
+        out_html = os.path.join(self.temp_dir.name, "composite.html")
+        res = code2petri(
+            source_path=self.app_js,
+            target_function="loop",
+            inline=True,
+            inline_depth=1,
+            context=[self.game_of_life_dir],
+            output_file=out_html,
+        )
+        self.assertIsInstance(res, FoldResult)
+        self.assertTrue(os.path.exists(out_html))
+        self.assertGreater(os.path.getsize(out_html), 0)
+
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("<!DOCTYPE html>", content)
+        self.assertIn("</html>", content)
+        self.assertIn('<script id="code2petri-data"', content)
+        # Composite net before folding must contain inlined WebGLEngine.step nodes
+        initial_trans_ids = [t.id for t in res.initial_net.transitions]
+        self.assertTrue(any("WebGLEngine.step" in tid for tid in initial_trans_ids))
+        self.assertIn("WebGLEngine.step", content)
 
 
 if __name__ == "__main__":

@@ -22,7 +22,7 @@ setup(
     author_email='scottmrogowski@gmail.com',
     url=url_base,
     download_url=download_url,
-    packages=['code2flow', 'code2petri'],
+    packages=['code2flow', 'code2petri', 'code2petri.viewer'],
     python_requires='>=3.6',
     include_package_data=True,
     classifiers=[
