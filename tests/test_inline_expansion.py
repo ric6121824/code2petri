@@ -166,6 +166,32 @@ class TestInlineExpansionEngine(unittest.TestCase):
         self.assertIsNotNone(cycle_trans.metadata)
         self.assertTrue(cycle_trans.metadata.get("recursive_cycle"))
 
+    def test_request_animation_frame_recursion_guard(self):
+        """Validates that requestAnimationFrame(loop) retains the call transition with recursive_cycle metadata."""
+        code = (
+            "function gameLoop() {\n"
+            "    update();\n"
+            "    requestAnimationFrame(gameLoop);\n"
+            "}\n"
+        )
+        fp = self._write_temp_file("raf_loop.js", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.js_walker.parse_file(fp)
+        loop_node = self.js_walker.find_function(tree, "gameLoop")
+        loop_res = self.js_walker.walk_function(loop_node, "gameLoop", filepath=fp)
+
+        composite_net = inline_expand(loop_res.net, loop_res.call_sites, symbol_table, max_depth=1)
+        assert_valid_petri_net(self, composite_net)
+
+        raf_trans = next(
+            t for t in composite_net.transitions
+            if "requestAnimationFrame" in t.label
+        )
+        self.assertIsNotNone(raf_trans.metadata)
+        self.assertTrue(raf_trans.metadata.get("recursive_cycle"))
+
     def test_mutual_recursion_guard(self):
         """Validates that mutual/indirect recursion (f -> g -> f) halts and annotates the cycle point."""
         code = (

@@ -2,7 +2,7 @@ import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from code2petri.model import CallResolution, PetriNet, Place, Transition
-from code2petri.symbol_table import SUPPORTED_WALKERS, Symbol, SymbolTable
+from code2petri.symbol_table import SUPPORTED_WALKERS, Symbol, SymbolTable, normalize_language
 from code2petri.walker_protocol import CallSite, WalkerProtocol
 
 
@@ -21,42 +21,33 @@ def _find_boundary_places(
 
 def _get_callee_net(
     symbol: Symbol,
-    walker_cache: Optional[Dict[str, WalkerProtocol]] = None,
+    walker_cache: Optional[Dict[str, Tuple[WalkerProtocol, Any]]] = None,
 ) -> Tuple[Optional[PetriNet], List[CallSite]]:
     """Walks the callee symbol's AST node to produce its PetriNet and CallSite records."""
-    if hasattr(symbol, "net") and symbol.net is not None:
-        return symbol.net.clone(), list(getattr(symbol, "call_sites", []))
-
     ext = os.path.splitext(symbol.filepath)[1].lower() if symbol.filepath else ""
-    walker_cls = SUPPORTED_WALKERS.get(ext)
+    norm_lang = normalize_language(symbol.language or ext)
+    walker_cls = SUPPORTED_WALKERS.get(ext) or SUPPORTED_WALKERS.get(f".{norm_lang}")
     if walker_cls is None:
-        if symbol.language == "javascript":
-            from code2petri.javascript_walker import JavascriptWalker
-            walker_cls = JavascriptWalker
-        else:
-            from code2petri.python_walker import PythonWalker
-            walker_cls = PythonWalker
+        return None, []
 
     cache = walker_cache if walker_cache is not None else {}
     cache_key = f"{walker_cls.__name__}:{symbol.filepath}"
+
     if cache_key in cache:
-        walker = cache[cache_key]
+        walker, tree = cache[cache_key]
     else:
         walker = walker_cls()
+        tree = None
         if symbol.filepath and os.path.exists(symbol.filepath):
             try:
-                walker.parse_file(symbol.filepath)
+                tree = walker.parse_file(symbol.filepath)
             except Exception:
-                pass
-        cache[cache_key] = walker
+                tree = None
+        cache[cache_key] = (walker, tree)
 
     ast_node = symbol.ast_node
-    if ast_node is None and symbol.filepath and os.path.exists(symbol.filepath):
-        try:
-            tree = walker.parse_file(symbol.filepath)
-            ast_node = walker.find_function(tree, symbol.name) or walker.find_function(tree, symbol.bare_name)
-        except Exception:
-            return None, []
+    if ast_node is None and tree is not None:
+        ast_node = walker.find_function(tree, symbol.name) or walker.find_function(tree, symbol.bare_name)
 
     if ast_node is None:
         return None, []
@@ -107,21 +98,12 @@ def _splice_callee_net(
     for ct in callee_net.transitions:
         new_id = f"{prefix}{ct.id}"
         new_meta = dict(ct.metadata) if ct.metadata is not None else None
-        new_res = (
-            CallResolution(
-                resolved=ct.resolution.resolved,
-                resolved_to=ct.resolution.resolved_to,
-                target_file=ct.resolution.target_file,
-            )
-            if ct.resolution is not None
-            else None
-        )
         cloned_t = caller_net.add_transition(
             id=new_id,
             label=ct.label,
             line_number=ct.line_number,
             metadata=new_meta,
-            resolution=new_res,
+            resolution=ct.resolution,
         )
         cloned_transitions[ct.id] = cloned_t
 
@@ -173,44 +155,44 @@ def _splice_callee_net(
     caller_net.remove_nodes({call_transition.id})
 
 
-def inline_expand(
+def _is_self_referencing_game_loop(
+    net: PetriNet,
+    cs: CallSite,
+    trans: Transition,
+) -> bool:
+    """Checks whether a call site is a self-referencing game loop cycle like requestAnimationFrame(loop)."""
+    if cs.callee_name != "requestAnimationFrame":
+        return False
+    # Structural check: JavascriptWalker wires recursive RAF loop back-arcs directly to the start place
+    start_places = {p.id for p in net.places if p.initial_tokens > 0 or p.label == "start"}
+    if any(a.source.id == trans.id and a.target.id in start_places for a in net.arcs):
+        return True
+
+    # Secondary check: label explicitly references caller function
+    if cs.caller_function:
+        bare_name = cs.caller_function.split(".")[-1]
+        return (
+            f"({cs.caller_function})" in trans.label
+            or f"({bare_name})" in trans.label
+            or f"this.{bare_name}" in trans.label
+        )
+    return False
+
+
+def _inline_expand_recursive(
     net: PetriNet,
     call_sites: List[CallSite],
     symbol_table: SymbolTable,
-    max_depth: int = 1,
-    current_stack: Optional[Set[str]] = None,
-    caller_function: Optional[str] = None,
+    max_depth: int,
+    call_stack: Set[Tuple[str, str]],
 ) -> PetriNet:
-    """Recursively inlines resolved callee Petri nets into caller net producing a Composite Net.
-
-    Args:
-        net: The caller PetriNet instance.
-        call_sites: List of CallSite records extracted from the caller net.
-        symbol_table: Multi-file symbol table used for cross-file call resolution.
-        max_depth: Maximum recursion depth for expanding nested callee calls (default 1).
-        current_stack: Internal call stack tracking active function identifiers to guard against recursion.
-        caller_function: Optional name of the caller function to initialize the call stack.
-
-    Returns:
-        A new PetriNet instance with resolved callee subnets spliced in.
-    """
+    """Internal recursive worker for inline expansion."""
     composite_net = net.clone()
     if max_depth <= 0:
         return composite_net
 
-    stack = set(current_stack) if current_stack is not None else set()
-    if caller_function:
-        stack.add(caller_function)
-        if "." in caller_function:
-            stack.add(caller_function.rsplit(".", 1)[1])
-    elif call_sites and call_sites[0].caller_function:
-        c_func = call_sites[0].caller_function
-        stack.add(c_func)
-        if "." in c_func:
-            stack.add(c_func.rsplit(".", 1)[1])
-
     used_prefixes: Set[str] = set()
-    walker_cache: Dict[str, WalkerProtocol] = {}
+    walker_cache: Dict[str, Tuple[WalkerProtocol, Any]] = {}
     processed_trans_ids: Set[str] = set()
 
     for cs in call_sites:
@@ -223,6 +205,13 @@ def inline_expand(
         if trans is None or not isinstance(trans, Transition):
             continue
 
+        # Check self-referencing game loop (e.g. requestAnimationFrame(loop)) before external symbol lookup
+        if _is_self_referencing_game_loop(composite_net, cs, trans):
+            if trans.metadata is None:
+                trans.metadata = {}
+            trans.metadata["recursive_cycle"] = True
+            continue
+
         sym = symbol_table.resolve_call(cs)
         if sym is None:
             # Unresolved call transition remains untouched
@@ -233,20 +222,12 @@ def inline_expand(
             resolved_to=sym.name,
             target_file=sym.filepath,
         )
-        if trans.metadata is None:
-            trans.metadata = {}
-        trans.metadata["resolved"] = True
-        trans.metadata["resolved_to"] = sym.name
-        trans.metadata["target_file"] = sym.filepath
 
-        # Recursion Guard: check if callee appears in the active expansion call stack
-        callee_identifiers = {sym.name, sym.bare_name, cs.callee_name}
-        is_recursive = any(ident in stack for ident in callee_identifiers if ident)
-        if not is_recursive and cs.caller_function and cs.caller_function in stack:
-            if cs.callee_name == "requestAnimationFrame" and f"({cs.caller_function})" in trans.label:
-                is_recursive = True
-
-        if is_recursive:
+        # Recursion Guard: check exact qualified symbol identity in active expansion call stack
+        callee_key = (sym.filepath, sym.name)
+        if callee_key in call_stack or (not sym.filepath and (cs.caller_file, sym.name) in call_stack):
+            if trans.metadata is None:
+                trans.metadata = {}
             trans.metadata["recursive_cycle"] = True
             continue
 
@@ -254,22 +235,16 @@ def inline_expand(
         if callee_net is None:
             continue
 
-        new_stack = set(stack)
-        if sym.name:
-            new_stack.add(sym.name)
-        if sym.bare_name:
-            new_stack.add(sym.bare_name)
-        if cs.callee_name:
-            new_stack.add(cs.callee_name)
+        new_stack = set(call_stack)
+        new_stack.add(callee_key)
 
         if max_depth > 1:
-            callee_net = inline_expand(
+            callee_net = _inline_expand_recursive(
                 net=callee_net,
                 call_sites=callee_call_sites,
                 symbol_table=symbol_table,
                 max_depth=max_depth - 1,
-                current_stack=new_stack,
-                caller_function=sym.name,
+                call_stack=new_stack,
             )
         else:
             symbol_table.resolve_call_sites(callee_net, callee_call_sites)
@@ -283,3 +258,34 @@ def inline_expand(
         )
 
     return composite_net
+
+
+def inline_expand(
+    net: PetriNet,
+    call_sites: List[CallSite],
+    symbol_table: SymbolTable,
+    max_depth: int = 1,
+) -> PetriNet:
+    """Recursively inlines resolved callee Petri nets into caller net producing a Composite Net.
+
+    Args:
+        net: The caller PetriNet instance.
+        call_sites: List of CallSite records extracted from the caller net.
+        symbol_table: Multi-file symbol table used for cross-file call resolution.
+        max_depth: Maximum recursion depth for expanding nested callee calls (default 1).
+
+    Returns:
+        A new PetriNet instance with resolved callee subnets spliced in.
+    """
+    initial_stack: Set[Tuple[str, str]] = set()
+    if call_sites and call_sites[0].caller_function:
+        c_file = os.path.abspath(call_sites[0].caller_file) if call_sites[0].caller_file else ""
+        initial_stack.add((c_file, call_sites[0].caller_function))
+
+    return _inline_expand_recursive(
+        net=net,
+        call_sites=call_sites,
+        symbol_table=symbol_table,
+        max_depth=max_depth,
+        call_stack=initial_stack,
+    )
