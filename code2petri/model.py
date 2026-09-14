@@ -404,3 +404,44 @@ class PetriNet:
     def to_json(self, indent: int = 2) -> str:
         """Serializes the Petri net into formatted JSON."""
         return json.dumps(self.to_dict(), indent=indent) + "\n"
+
+    def clone(self) -> "PetriNet":
+        """Creates a deep copy of the PetriNet including places, transitions, metadata, and arcs."""
+        new_net = PetriNet()
+        node_map: Dict[str, Union[Place, Transition]] = {}
+
+        for p in self.places:
+            new_p = new_net.add_place(
+                id=p.id,
+                label=p.label,
+                line_number=p.line_number,
+                initial_tokens=p.initial_tokens,
+            )
+            node_map[p.id] = new_p
+
+        for t in self.transitions:
+            new_meta = dict(t.metadata) if t.metadata else None
+            new_res = None
+            if t.resolution is not None:
+                new_res = CallResolution(
+                    resolved=t.resolution.resolved,
+                    resolved_to=t.resolution.resolved_to,
+                    target_file=t.resolution.target_file,
+                )
+            new_t = new_net.add_transition(
+                id=t.id,
+                label=t.label,
+                line_number=t.line_number,
+                metadata=new_meta,
+                resolution=new_res,
+            )
+            node_map[t.id] = new_t
+
+        for a in self.arcs:
+            new_net.add_arc(
+                source=node_map[a.source.id],
+                target=node_map[a.target.id],
+                weight=a.weight,
+            )
+
+        return new_net

@@ -8,9 +8,14 @@ from code2petri.fold import (
     FoldConfig,
     Component,
     ComponentType,
+    FoldStep,
+    FoldResult,
     calculate_symmetry_multiplier,
     load_fold_config,
     detect_components,
+    fold_component,
+    fold_net,
+    fold,
 )
 
 __all__ = [
@@ -32,9 +37,14 @@ __all__ = [
     "FoldConfig",
     "Component",
     "ComponentType",
+    "FoldStep",
+    "FoldResult",
     "calculate_symmetry_multiplier",
     "load_fold_config",
     "detect_components",
+    "fold_component",
+    "fold_net",
+    "fold",
 ]
 
 

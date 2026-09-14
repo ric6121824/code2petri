@@ -9,9 +9,9 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import os
-from typing import Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
-from code2petri.model import PetriNet
+from code2petri.model import PetriNet, Place, Transition
 
 
 class ComponentType(str, Enum):
@@ -94,6 +94,105 @@ class Component:
     entrance: str
     exit: str
     omega: float
+
+
+@dataclass
+class FoldStep:
+    """Represents a single reduction step in the structural fold algorithm.
+
+    Attributes:
+        step: 1-indexed step number.
+        component_type: Type of the component folded.
+        consumed_node_ids: Set of node IDs consumed by this fold step.
+        dummy_transition_id: ID of the generated dummy transition (e.g. 't_C1').
+        omega: Penalty weight for this component per Definition 22.
+        tau: Accumulated weight on the dummy transition.
+        running_sm: Running SM score (sum of transition weights) after this step.
+        net: Snapshot of the PetriNet after this fold step.
+    """
+    step: int
+    component_type: Union[ComponentType, str]
+    consumed_node_ids: Set[str]
+    dummy_transition_id: str
+    omega: float
+    tau: float
+    running_sm: float
+    net: PetriNet
+
+    @property
+    def step_number(self) -> int:
+        return self.step
+
+    @property
+    def folded_nodes(self) -> List[str]:
+        return sorted(list(self.consumed_node_ids))
+
+    @property
+    def sm_score(self) -> float:
+        return self.running_sm
+
+    def to_dict(self) -> Dict[str, Any]:
+        c_type = (
+            self.component_type.value
+            if hasattr(self.component_type, "value")
+            else str(self.component_type)
+        )
+        return {
+            "step": self.step,
+            "component_type": c_type,
+            "folded_nodes": self.folded_nodes,
+            "dummy_transition": self.dummy_transition_id,
+            "omega": float(self.omega),
+            "tau": float(self.tau),
+            "sm_score": float(self.running_sm),
+            "net": self.net.to_dict(),
+        }
+
+
+@dataclass
+class FoldResult:
+    """Represents the complete result of reducing a Petri net via Definition 23.
+
+    Attributes:
+        initial_net: Initial PetriNet prior to any reduction steps.
+        steps: Ordered list of FoldStep snapshots.
+        final_sm: Final Structuredness Metric score (raw unnormalized tau).
+        fully_reducible: True if net reduced to a single transition with no unstructured fallback.
+        function_name: Optional analyzed function name for serialization.
+        file_path: Optional source file path for serialization.
+    """
+    initial_net: PetriNet
+    steps: List[FoldStep]
+    final_sm: float
+    fully_reducible: bool
+    function_name: Optional[str] = None
+    file_path: Optional[str] = None
+
+    @property
+    def penultimate_net(self) -> PetriNet:
+        """Returns the PetriNet state immediately prior to the final fold."""
+        if len(self.steps) >= 2:
+            return self.steps[-2].net
+        return self.initial_net
+
+    @property
+    def penultimate_state(self) -> PetriNet:
+        return self.penultimate_net
+
+    def to_dict(self) -> Dict[str, Any]:
+        data: Dict[str, Any] = {}
+        if self.function_name is not None:
+            data["function"] = self.function_name
+        if self.file_path is not None:
+            data["file"] = self.file_path
+        data["initial_net"] = self.initial_net.to_dict()
+        data["fold_steps"] = [s.to_dict() for s in self.steps]
+        data["final_sm"] = float(self.final_sm)
+        data["fully_reducible"] = bool(self.fully_reducible)
+        return data
+
+    def to_json(self, indent: int = 2) -> str:
+        return json.dumps(self.to_dict(), indent=indent) + "\n"
 
 
 class NetTopology:
@@ -450,3 +549,269 @@ def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> Lis
     )
 
     return components
+
+
+def fold_component(
+    net: PetriNet,
+    component: Component,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Tuple[PetriNet, FoldStep]:
+    """Replaces component C in net by a single dummy transition t_C per Definition 19.
+
+    Args:
+        net: The PetriNet containing component.
+        component: The Component to fold.
+        step_number: 1-indexed reduction step number.
+        config: Optional fold configuration.
+
+    Returns:
+        A tuple of (folded_petri_net, fold_step_record).
+    """
+    cfg = config if config is not None else FoldConfig()
+    folded_net = net.clone()
+    topo = NetTopology(folded_net)
+
+    # 1. Determine consumed nodes
+    consumed_node_ids: Set[str] = set(component.internal_node_ids)
+    if topo.is_transition(component.entrance):
+        consumed_node_ids.add(component.entrance)
+    if topo.is_transition(component.exit):
+        consumed_node_ids.add(component.exit)
+
+    # 2. Identify all transitions belonging to component C
+    comp_trans_ids = (consumed_node_ids | {component.entrance, component.exit}) & topo.trans_ids
+    comp_transitions = [t for t in folded_net.transitions if t.id in comp_trans_ids]
+
+    # 3. Calculate accumulated tau: tau(t_C) = omega(C) + sum(tau(t) for t in T_C)
+    tau_sum = sum(
+        float(t.metadata.get("tau", 1.0)) if t.metadata and "tau" in t.metadata else 1.0
+        for t in comp_transitions
+    )
+    accumulated_tau = float(component.omega) + tau_sum
+
+    # 4. Create fresh dummy transition t_C
+    dummy_id = f"t_C{step_number}"
+    comp_type_str = (
+        component.component_type.value
+        if hasattr(component.component_type, "value")
+        else str(component.component_type)
+    )
+    dummy_t = folded_net.add_transition(
+        id=dummy_id,
+        label=dummy_id,
+        metadata={
+            "dummy": True,
+            "component_type": comp_type_str,
+            "tau": accumulated_tau,
+        },
+    )
+
+    node_map = {p.id: p for p in folded_net.places}
+    node_map.update({t.id: t for t in folded_net.transitions})
+
+    # 5. Rewire boundary arcs per Definition 19
+    if topo.is_place(component.entrance):
+        folded_net.add_arc(node_map[component.entrance], dummy_t)
+    else:
+        for p_id in topo.presets(component.entrance):
+            if p_id not in consumed_node_ids and p_id in node_map:
+                folded_net.add_arc(node_map[p_id], dummy_t)
+
+    if topo.is_place(component.exit):
+        folded_net.add_arc(dummy_t, node_map[component.exit])
+    else:
+        for p_id in topo.postsets(component.exit):
+            if p_id not in consumed_node_ids and p_id in node_map:
+                folded_net.add_arc(dummy_t, node_map[p_id])
+
+    # 6. Remove consumed nodes and any incident arcs
+    folded_net.places = [p for p in folded_net.places if p.id not in consumed_node_ids]
+    folded_net.transitions = [t for t in folded_net.transitions if t.id not in consumed_node_ids]
+    folded_net.arcs = [
+        a for a in folded_net.arcs
+        if a.source.id not in consumed_node_ids and a.target.id not in consumed_node_ids
+    ]
+
+    # 7. Compute running SM score: sum of all tau weights on remaining transitions
+    running_sm = sum(
+        float(t.metadata.get("tau", 1.0)) if t.metadata and "tau" in t.metadata else 1.0
+        for t in folded_net.transitions
+    )
+
+    step = FoldStep(
+        step=step_number,
+        component_type=component.component_type,
+        consumed_node_ids=consumed_node_ids,
+        dummy_transition_id=dummy_id,
+        omega=float(component.omega),
+        tau=accumulated_tau,
+        running_sm=running_sm,
+        net=folded_net.clone(),
+    )
+
+    return folded_net, step
+
+
+def fold_unstructured(
+    net: PetriNet,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Tuple[PetriNet, FoldStep]:
+    """Folds all remaining irreducible internal nodes as a single Unstructured component (rho = 7).
+
+    Args:
+        net: The irreducible PetriNet.
+        step_number: 1-indexed reduction step number.
+        config: Optional fold configuration.
+
+    Returns:
+        A tuple of (folded_petri_net, fold_step_record).
+    """
+    cfg = config if config is not None else FoldConfig()
+    folded_net = net.clone()
+    topo = NetTopology(folded_net)
+
+    # Identify global entrance and exit places
+    source_candidates = [
+        p for p in folded_net.places
+        if topo.in_degree(p.id) == 0 or p.initial_tokens > 0
+    ]
+    sink_candidates = [
+        p for p in folded_net.places
+        if topo.out_degree(p.id) == 0
+    ]
+
+    p_src = source_candidates[0] if source_candidates else folded_net.places[0]
+    p_snk = sink_candidates[0] if sink_candidates else folded_net.places[-1]
+
+    # If source and sink resolve to the same place but other places exist, pick a distinct sink
+    if p_src.id == p_snk.id and len(folded_net.places) > 1:
+        other_places = [p for p in folded_net.places if p.id != p_src.id]
+        if other_places:
+            p_snk = other_places[-1]
+
+    # Consumed nodes: all transitions, and all places except p_src and p_snk
+    consumed_places = {p.id for p in folded_net.places if p.id not in (p_src.id, p_snk.id)}
+    consumed_transitions = {t.id for t in folded_net.transitions}
+    consumed_node_ids = consumed_places | consumed_transitions
+
+    tau_sum = sum(
+        float(t.metadata.get("tau", 1.0)) if t.metadata and "tau" in t.metadata else 1.0
+        for t in folded_net.transitions
+    )
+    omega = float(cfg.unstructured)
+    accumulated_tau = omega + tau_sum
+
+    dummy_id = f"t_C{step_number}"
+    dummy_t = Transition(
+        id=dummy_id,
+        label=dummy_id,
+        metadata={
+            "dummy": True,
+            "component_type": ComponentType.UNSTRUCTURED.value,
+            "tau": accumulated_tau,
+        },
+    )
+
+    # Retain only boundary places and the new dummy transition
+    folded_net.places = [p for p in folded_net.places if p.id in (p_src.id, p_snk.id)]
+    folded_net.transitions = [dummy_t]
+    folded_net.arcs = []
+
+    node_map = {p.id: p for p in folded_net.places}
+    folded_net.add_arc(node_map[p_src.id], dummy_t)
+    if p_src.id != p_snk.id:
+        folded_net.add_arc(dummy_t, node_map[p_snk.id])
+
+    running_sm = accumulated_tau
+
+    step = FoldStep(
+        step=step_number,
+        component_type=ComponentType.UNSTRUCTURED,
+        consumed_node_ids=consumed_node_ids,
+        dummy_transition_id=dummy_id,
+        omega=omega,
+        tau=accumulated_tau,
+        running_sm=running_sm,
+        net=folded_net.clone(),
+    )
+
+    return folded_net, step
+
+
+def fold_net(
+    net: PetriNet,
+    config: Optional[FoldConfig] = None,
+    function_name: Optional[str] = None,
+    file_path: Optional[str] = None,
+) -> FoldResult:
+    """Executes the full Lassen & van der Aalst reduction loop (Definition 23).
+
+    Iteratively detects the simplest/smallest remaining component, folds it into a dummy
+    transition, and accumulates the penalty omega onto the transition weight tau.
+    If the net is irreducible, terminates with the unstructured penalty.
+
+    Args:
+        net: The target PetriNet to reduce.
+        config: Optional FoldConfig base penalty configuration.
+        function_name: Optional analyzed function name for serialization.
+        file_path: Optional source file path for serialization.
+
+    Returns:
+        FoldResult containing initial net, fold steps, final SM, and reducibility flag.
+    """
+    cfg = config if config is not None else FoldConfig()
+    current_net = net.clone()
+    initial_snapshot = net.clone()
+    steps: List[FoldStep] = []
+    step_number = 1
+    fully_reducible = True
+
+    # If the net is already trivial (<= 1 transition)
+    if len(current_net.transitions) <= 1:
+        final_sm = 0.0
+        if current_net.transitions:
+            t0 = current_net.transitions[0]
+            final_sm = float(t0.metadata.get("tau", 1.0)) if t0.metadata and "tau" in t0.metadata else 1.0
+        return FoldResult(
+            initial_net=initial_snapshot,
+            steps=[],
+            final_sm=final_sm,
+            fully_reducible=True,
+            function_name=function_name,
+            file_path=file_path,
+        )
+
+    while len(current_net.transitions) > 1:
+        components = detect_components(current_net, cfg)
+        if components:
+            # Pick highest priority / smallest component per Definition 21
+            best_comp = components[0]
+            current_net, step = fold_component(current_net, best_comp, step_number, cfg)
+            steps.append(step)
+            step_number += 1
+        else:
+            # Irreducible net with > 1 transitions remaining
+            current_net, step = fold_unstructured(current_net, step_number, cfg)
+            steps.append(step)
+            fully_reducible = False
+            break
+
+    final_sm = 0.0
+    if current_net.transitions:
+        t_final = current_net.transitions[0]
+        final_sm = float(t_final.metadata.get("tau", 1.0)) if t_final.metadata and "tau" in t_final.metadata else 1.0
+
+    return FoldResult(
+        initial_net=initial_snapshot,
+        steps=steps,
+        final_sm=final_sm,
+        fully_reducible=fully_reducible,
+        function_name=function_name,
+        file_path=file_path,
+    )
+
+
+# Convenience alias per Lassen & van der Aalst Definition 23
+fold = fold_net
