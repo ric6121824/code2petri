@@ -34,51 +34,48 @@ PRIORITY_MAP: Dict[ComponentType, int] = {
 class FoldConfig:
     """Configurable base penalty weights (rho) for structural folding.
 
-    Default base penalty weights:
+    Default base penalty weights per Definition 21:
       sequence = 0.0
       choice = 1.0
+      marked_graph = 2.0
       loop = 3.0
       unstructured = 7.0
     """
     sequence: float = 0.0
     choice: float = 1.0
+    marked_graph: float = 2.0
     loop: float = 3.0
     unstructured: float = 7.0
 
     @classmethod
+    def load(cls, source: str) -> "FoldConfig":
+        """Factory method to load FoldConfig from either a file path or JSON string."""
+        if os.path.isfile(source):
+            with open(source, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = json.loads(source)
+
+        kwargs: Dict[str, float] = {}
+        for f_name in ("sequence", "choice", "marked_graph", "loop", "unstructured"):
+            if f_name in data:
+                kwargs[f_name] = float(data[f_name])
+        return cls(**kwargs)
+
+    @classmethod
     def from_json(cls, json_str: str) -> "FoldConfig":
-        return load_fold_config_from_json(json_str)
+        """Loads a FoldConfig from a JSON string."""
+        return cls.load(json_str)
 
     @classmethod
     def from_file(cls, file_path: str) -> "FoldConfig":
-        return load_fold_config_from_file(file_path)
-
-    @classmethod
-    def load(cls, source: str) -> "FoldConfig":
-        return load_fold_config(source)
-
-
-def load_fold_config_from_json(json_str: str) -> FoldConfig:
-    """Creates a FoldConfig from a JSON string, applying defaults for omitted fields."""
-    data = json.loads(json_str)
-    kwargs: Dict[str, float] = {}
-    for f_name in ("sequence", "choice", "loop", "unstructured"):
-        if f_name in data:
-            kwargs[f_name] = float(data[f_name])
-    return FoldConfig(**kwargs)
-
-
-def load_fold_config_from_file(file_path: str) -> FoldConfig:
-    """Loads a FoldConfig from a JSON configuration file."""
-    with open(file_path, "r", encoding="utf-8") as f:
-        return load_fold_config_from_json(f.read())
+        """Loads a FoldConfig from a JSON configuration file."""
+        return cls.load(file_path)
 
 
 def load_fold_config(source: str) -> FoldConfig:
-    """Unified factory method to load FoldConfig from either a file path or JSON string."""
-    if os.path.isfile(source):
-        return load_fold_config_from_file(source)
-    return load_fold_config_from_json(source)
+    """Unified factory function to load FoldConfig from either a file path or JSON string."""
+    return FoldConfig.load(source)
 
 
 @dataclass
@@ -189,10 +186,6 @@ def calculate_symmetry_multiplier(
     return abs(splits - joins) + 1
 
 
-# Backward-compatible alias
-calculate_diff = calculate_symmetry_multiplier
-
-
 def detect_sequences(net: PetriNet, config: FoldConfig, topology: Optional[NetTopology] = None) -> List[Component]:
     """Detects linear chains of place -> transition -> place with no branching.
 
@@ -205,8 +198,17 @@ def detect_sequences(net: PetriNet, config: FoldConfig, topology: Optional[NetTo
     def can_extend_backwards(place_id: str) -> bool:
         if topo.in_degree(place_id) != 1:
             return False
-        pred_trans = next(iter(topo.presets(place_id)))
-        return topo.out_degree(pred_trans) == 1 and topo.in_degree(pred_trans) == 1
+        preds = topo.presets(place_id)
+        if len(preds) != 1:
+            return False
+        pred_trans = next(iter(preds))
+        if topo.out_degree(pred_trans) != 1 or topo.in_degree(pred_trans) != 1:
+            return False
+        pred_places = topo.presets(pred_trans)
+        if len(pred_places) != 1:
+            return False
+        pred_place = next(iter(pred_places))
+        return topo.out_degree(pred_place) == 1
 
     # Place-started candidate start nodes
     start_places = [
@@ -231,13 +233,11 @@ def detect_sequences(net: PetriNet, config: FoldConfig, topology: Optional[NetTo
                 break  # Cycle encountered
 
             if topo.is_place(nxt):
-                if topo.in_degree(nxt) != 1:
-                    break  # Join place, cannot enter
                 chain.append(nxt)
                 visited.add(nxt)
                 curr = nxt
-                if topo.out_degree(nxt) != 1:
-                    break  # Split place or sink, chain ends
+                if topo.in_degree(nxt) != 1 or topo.out_degree(nxt) != 1:
+                    break  # Split place, join place, or sink: cannot be internal, ends sequence here as exit
             else:  # nxt is a transition
                 if topo.in_degree(nxt) != 1 or topo.out_degree(nxt) != 1:
                     break

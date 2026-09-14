@@ -16,7 +16,6 @@ from code2petri.fold import (
     Component,
     ComponentType,
     calculate_symmetry_multiplier,
-    calculate_diff,
     load_fold_config,
     detect_components,
 )
@@ -92,11 +91,27 @@ def build_loop_net(prefix: str = "") -> Tuple[PetriNet, str, str, List[str]]:
     return net, entrance, exit_node, internal
 
 
+def merge_net(dest: PetriNet, src: PetriNet) -> None:
+    """Copies all places, transitions, and arcs from src into dest without duplication."""
+    dest_nodes = {p.id: p for p in dest.places}
+    dest_nodes.update({t.id: t for t in dest.transitions})
+
+    for p in src.places:
+        if p.id not in dest_nodes:
+            dest_nodes[p.id] = dest.add_place(p.id)
+    for t in src.transitions:
+        if t.id not in dest_nodes:
+            dest_nodes[t.id] = dest.add_transition(t.id)
+    for a in src.arcs:
+        dest.add_arc(dest_nodes[a.source.id], dest_nodes[a.target.id])
+
+
 class TestFoldConfig(unittest.TestCase):
     def test_default_weights(self):
         config = FoldConfig()
         self.assertEqual(config.sequence, 0.0)
         self.assertEqual(config.choice, 1.0)
+        self.assertEqual(config.marked_graph, 2.0)
         self.assertEqual(config.loop, 3.0)
         self.assertEqual(config.unstructured, 7.0)
 
@@ -104,11 +119,13 @@ class TestFoldConfig(unittest.TestCase):
         config = FoldConfig(
             sequence=1.5,
             choice=2.5,
+            marked_graph=3.5,
             loop=4.5,
             unstructured=9.5,
         )
         self.assertEqual(config.sequence, 1.5)
         self.assertEqual(config.choice, 2.5)
+        self.assertEqual(config.marked_graph, 3.5)
         self.assertEqual(config.loop, 4.5)
         self.assertEqual(config.unstructured, 9.5)
 
@@ -116,12 +133,14 @@ class TestFoldConfig(unittest.TestCase):
         json_str = json.dumps({
             "sequence": 0.5,
             "choice": 2.0,
+            "marked_graph": 3.0,
             "loop": 5.0,
             "unstructured": 8.0,
         })
         config = FoldConfig.from_json(json_str)
         self.assertEqual(config.sequence, 0.5)
         self.assertEqual(config.choice, 2.0)
+        self.assertEqual(config.marked_graph, 3.0)
         self.assertEqual(config.loop, 5.0)
         self.assertEqual(config.unstructured, 8.0)
 
@@ -131,6 +150,7 @@ class TestFoldConfig(unittest.TestCase):
         self.assertEqual(config.choice, 4.0)
         self.assertEqual(config.loop, 6.0)
         self.assertEqual(config.sequence, 0.0)
+        self.assertEqual(config.marked_graph, 2.0)
         self.assertEqual(config.unstructured, 7.0)
 
     def test_from_file(self):
@@ -223,11 +243,6 @@ class TestSymmetryMultiplierCalculation(unittest.TestCase):
         multiplier = calculate_symmetry_multiplier(net, comp_nodes, ["p1", "p2", "p3"])
         self.assertEqual(multiplier, 2)
 
-    def test_backward_compatible_calculate_diff_alias(self):
-        net, p_in, p_out, trans_ids = build_choice_net(2)
-        comp_nodes = {p_in, p_out} | set(trans_ids)
-        self.assertEqual(calculate_diff(net, comp_nodes, [p_in, p_out]), 1)
-
 
 class TestDetectPureSequence(unittest.TestCase):
     def test_detect_3_transition_sequence(self):
@@ -256,6 +271,66 @@ class TestDetectPureSequence(unittest.TestCase):
         net, _, _, _ = build_sequence_net(1)
         components = detect_components(net)
         self.assertEqual(len(components), 0)
+
+    def test_sequence_following_branch_place(self):
+        # p_split -> t1 -> p1 -> t2 -> p2 -> t3 -> p3
+        # p_split -> t_other -> p_other
+        net = PetriNet()
+        p_split = net.add_place("p_split")
+        p_other = net.add_place("p_other")
+        p1 = net.add_place("p1")
+        p2 = net.add_place("p2")
+        p3 = net.add_place("p3")
+
+        t1 = net.add_transition("t1")
+        t_other = net.add_transition("t_other")
+        t2 = net.add_transition("t2")
+        t3 = net.add_transition("t3")
+
+        net.add_arc(p_split, t1)
+        net.add_arc(p_split, t_other)
+        net.add_arc(t_other, p_other)
+
+        net.add_arc(t1, p1)
+        net.add_arc(p1, t2)
+        net.add_arc(t2, p2)
+        net.add_arc(p2, t3)
+        net.add_arc(t3, p3)
+
+        components = detect_components(net)
+        seq_comps = [c for c in components if c.component_type == ComponentType.SEQUENCE]
+        self.assertEqual(len(seq_comps), 1)
+        self.assertEqual(seq_comps[0].entrance, "p1")
+        self.assertEqual(seq_comps[0].exit, "p3")
+        self.assertEqual(seq_comps[0].internal_node_ids, {"t2", "p2", "t3"})
+
+    def test_sequence_terminating_at_join_place(self):
+        # p0 -> t1 -> p1 -> t2 -> p_join
+        # p_other -> t_other -> p_join
+        net = PetriNet()
+        p0 = net.add_place("p0")
+        p1 = net.add_place("p1")
+        p_other = net.add_place("p_other")
+        p_join = net.add_place("p_join")
+
+        t1 = net.add_transition("t1")
+        t2 = net.add_transition("t2")
+        t_other = net.add_transition("t_other")
+
+        net.add_arc(p0, t1)
+        net.add_arc(t1, p1)
+        net.add_arc(p1, t2)
+        net.add_arc(t2, p_join)
+
+        net.add_arc(p_other, t_other)
+        net.add_arc(t_other, p_join)
+
+        components = detect_components(net)
+        seq_comps = [c for c in components if c.component_type == ComponentType.SEQUENCE]
+        self.assertEqual(len(seq_comps), 1)
+        self.assertEqual(seq_comps[0].entrance, "p0")
+        self.assertEqual(seq_comps[0].exit, "p_join")
+        self.assertEqual(seq_comps[0].internal_node_ids, {"t1", "p1", "t2"})
 
 
 class TestDetectChoice(unittest.TestCase):
@@ -297,36 +372,16 @@ class TestDetectLoop(unittest.TestCase):
 
 class TestPrioritySortingAndTieBreaking(unittest.TestCase):
     def test_mixed_net_priority_sorting(self):
-        # Build composite net using shared builders
+        # Build composite net using shared builders and merge_net
         net = PetriNet()
 
-        # Sequence sub-net
-        _, s_ent, s_exit, _ = build_sequence_net(2, prefix="s_")
-        for p in build_sequence_net(2, prefix="s_")[0].places:
-            net.add_place(p.id)
-        for t in build_sequence_net(2, prefix="s_")[0].transitions:
-            net.add_transition(t.id)
-        for a in build_sequence_net(2, prefix="s_")[0].arcs:
-            net.add_arc(next(p for p in net.places + net.transitions if p.id == a.source.id),
-                        next(p for p in net.places + net.transitions if p.id == a.target.id))
+        seq_net, _, _, _ = build_sequence_net(2, prefix="s_")
+        choice_net, _, _, _ = build_choice_net(2, prefix="c_")
+        loop_net, _, _, _ = build_loop_net(prefix="l_")
 
-        # Choice sub-net
-        for p in build_choice_net(2, prefix="c_")[0].places:
-            net.add_place(p.id)
-        for t in build_choice_net(2, prefix="c_")[0].transitions:
-            net.add_transition(t.id)
-        for a in build_choice_net(2, prefix="c_")[0].arcs:
-            net.add_arc(next(p for p in net.places + net.transitions if p.id == a.source.id),
-                        next(p for p in net.places + net.transitions if p.id == a.target.id))
-
-        # Loop sub-net
-        for p in build_loop_net(prefix="l_")[0].places:
-            net.add_place(p.id)
-        for t in build_loop_net(prefix="l_")[0].transitions:
-            net.add_transition(t.id)
-        for a in build_loop_net(prefix="l_")[0].arcs:
-            net.add_arc(next(p for p in net.places + net.transitions if p.id == a.source.id),
-                        next(p for p in net.places + net.transitions if p.id == a.target.id))
+        merge_net(net, seq_net)
+        merge_net(net, choice_net)
+        merge_net(net, loop_net)
 
         components = detect_components(net)
         types_in_order = [c.component_type for c in components]
@@ -345,22 +400,12 @@ class TestPrioritySortingAndTieBreaking(unittest.TestCase):
         net = PetriNet()
 
         # Sequence 1 (shorter, 2 transitions -> internal nodes len 3)
-        for p in build_sequence_net(2, prefix="a_")[0].places:
-            net.add_place(p.id)
-        for t in build_sequence_net(2, prefix="a_")[0].transitions:
-            net.add_transition(t.id)
-        for a in build_sequence_net(2, prefix="a_")[0].arcs:
-            net.add_arc(next(p for p in net.places + net.transitions if p.id == a.source.id),
-                        next(p for p in net.places + net.transitions if p.id == a.target.id))
-
+        seq1_net, _, _, _ = build_sequence_net(2, prefix="a_")
         # Sequence 2 (longer, 3 transitions -> internal nodes len 5)
-        for p in build_sequence_net(3, prefix="b_")[0].places:
-            net.add_place(p.id)
-        for t in build_sequence_net(3, prefix="b_")[0].transitions:
-            net.add_transition(t.id)
-        for a in build_sequence_net(3, prefix="b_")[0].arcs:
-            net.add_arc(next(p for p in net.places + net.transitions if p.id == a.source.id),
-                        next(p for p in net.places + net.transitions if p.id == a.target.id))
+        seq2_net, _, _, _ = build_sequence_net(3, prefix="b_")
+
+        merge_net(net, seq1_net)
+        merge_net(net, seq2_net)
 
         components = detect_components(net)
         self.assertEqual(len(components), 2)
