@@ -100,7 +100,7 @@ class CallResolution:
 class Transition:
     """Represents a Petri net Transition (an action or statement execution)."""
 
-    RESERVED_METADATA_KEYS: Set[str] = {"resolved", "resolved_to", "target_file", "status"}
+    RESERVED_METADATA_KEYS: Set[str] = {"resolved", "resolved_to", "target_file", "status", "dummy"}
 
     def __init__(
         self,
@@ -151,6 +151,11 @@ class Transition:
             if not self.resolution.resolved:
                 d["status"] = "[unresolved]"
         return d
+
+    @property
+    def is_dummy(self) -> bool:
+        """Returns True if this transition is a folded dummy transition."""
+        return bool(self.metadata and self.metadata.get("dummy"))
 
     def get_tau(self) -> float:
         """Returns the accumulated complexity weight tau for this transition (default 1.0)."""
@@ -208,11 +213,18 @@ class Transition:
         label = self.label
         if self.line_number is not None:
             label = f"{label} (line {self.line_number})"
+        if self.is_dummy and self.metadata and "tau" in self.metadata:
+            tau_val = self.get_tau()
+            tau_str = f"{tau_val:.1f}" if isinstance(tau_val, float) and tau_val.is_integer() else f"{tau_val}"
+            if "(tau=" not in label and "tau=" not in label:
+                label = f"{label} (tau={tau_str})"
         escaped_label = escape_dot(label)
         escaped_id = escape_dot(self.id)
         dot_attrs = self.get_dot_attributes()
         fillcolor = dot_attrs.get("fillcolor", RenderingConfig.DEFAULT_FILLCOLOR)
         fillcolor_val = f'"{fillcolor}"' if fillcolor.startswith("#") else fillcolor
+        style_val = '"filled,bold"' if self.is_dummy else "filled"
+        penwidth_attr = ', penwidth="2"' if self.is_dummy else ""
         extra_attrs = ""
         if dot_attrs:
             attrs_parts = []
@@ -224,7 +236,7 @@ class Transition:
             if attrs_parts:
                 extra_attrs = ", " + ", ".join(attrs_parts)
         return (
-            f'    "{escaped_id}" [shape=rect, style=filled, fillcolor={fillcolor_val}, '
+            f'    "{escaped_id}" [shape=rect, style={style_val}{penwidth_attr}, fillcolor={fillcolor_val}, '
             f'fontcolor={RenderingConfig.DEFAULT_FONTCOLOR}, label="{escaped_label}"{extra_attrs}];'
         )
 
@@ -393,14 +405,20 @@ class PetriNet:
         ET.indent(pnml, space="  ", level=0)
         return ET.tostring(pnml, encoding="utf-8", xml_declaration=True).decode("utf-8")
 
-    def to_dot(self) -> str:
-        """Serializes the Petri net to Graphviz DOT format."""
+    def to_dot(self, title: Optional[str] = None) -> str:
+        """Serializes the Petri net to Graphviz DOT format.
+
+        :param title: Optional graph title/label to render at top of graph.
+        """
         lines = [
             "digraph PetriNet {",
             "    rankdir=TB;",
-            "",
-            "    // Places",
         ]
+        if title:
+            lines.append('    labelloc="t";')
+            lines.append(f'    label="{escape_dot(title)}";')
+        lines.append("")
+        lines.append("    // Places")
         for place in self.places:
             lines.append(place.to_dot_node())
 

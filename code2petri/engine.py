@@ -3,10 +3,12 @@ import logging
 import os
 import subprocess
 import sys
-from typing import Optional, List, Sequence, Set
+from typing import Optional, List, Sequence, Set, Union
 
 from code2petri.model import PetriNet
 from code2petri.symbol_table import SymbolTable, SUPPORTED_WALKERS
+from code2petri.fold import FoldConfig, FoldResult, fold_net
+from code2petri.inline import inline_expand
 
 WALKERS = SUPPORTED_WALKERS
 
@@ -67,6 +69,28 @@ def is_installed(executable_cmd: str) -> bool:
     return False
 
 
+def _render_dot_to_image(dot_content: str, ext: str, output_file: str) -> None:
+    """Renders Graphviz DOT content to an image file via the 'dot' CLI tool."""
+    if not is_installed("dot") and not is_installed("dot.exe"):
+        raise AssertionError(
+            "Cannot generate image because Graphviz 'dot' executable was not found on PATH. "
+            "Install Graphviz or use a text extension (.pnml, .dot, .gv, .json)."
+        )
+    cmd = ["dot", f"-T{ext}", "-o", output_file]
+    result = subprocess.run(
+        cmd,
+        input=dot_content.encode("utf-8"),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise AssertionError(
+            f"Graphviz command failed with exit code {result.returncode}: "
+            f"{result.stderr.decode('utf-8', errors='replace')}"
+        )
+
+
 def code2petri(
     source_path: str,
     output_file: Optional[str] = "out.pnml",
@@ -74,7 +98,12 @@ def code2petri(
     list_functions: bool = False,
     level: Optional[int] = None,
     context: Optional[List[str]] = None,
-) -> Optional[PetriNet]:
+    fold: bool = False,
+    no_fold: bool = False,
+    weights: Optional[Union[str, FoldConfig]] = None,
+    inline: bool = False,
+    inline_depth: int = 1,
+) -> Union[PetriNet, FoldResult, None]:
     """Generates a Petri net from a source file and writes the serialized output.
 
     :param source_path: Path to the source file.
@@ -83,7 +112,12 @@ def code2petri(
     :param list_functions: If True, prints all function names found and exits without analyzing.
     :param level: Optional logging level to set on the logger.
     :param context: Optional list of context file or directory paths for cross-file call resolution.
-    :return: The generated PetriNet instance, or None if list_functions is True.
+    :param fold: If True, activates structural fold analysis.
+    :param no_fold: If True, explicitly disables fold analysis.
+    :param weights: Path or JSON string overriding default FoldConfig penalty weights.
+    :param inline: If True, activates inline expansion of resolved call transitions (requires context).
+    :param inline_depth: Maximum recursion depth for inline expansion (default: 1).
+    :return: The generated PetriNet instance (or FoldResult if fold is active), or None if list_functions is True.
     """
     logger = logging.getLogger("code2petri")
     if level is not None:
@@ -98,6 +132,15 @@ def code2petri(
         raise AssertionError(
             f"Unsupported source extension '{src_ext}'. Supported extensions are: {supported_src}"
         )
+
+    ext = ""
+    if output_file and not list_functions:
+        ext = os.path.splitext(output_file)[1].lstrip(".").lower()
+        if ext not in SUPPORTED_EXTENSIONS:
+            supported = ", ".join(sorted(SUPPORTED_EXTENSIONS))
+            raise AssertionError(
+                f"Unsupported output extension '.{ext}'. Supported extensions are: {supported}"
+            )
 
     symbol_table = None
     if context:
@@ -152,6 +195,15 @@ def code2petri(
         logger.debug("Resolving %d call site(s) against symbol table...", len(call_sites))
         symbol_table.resolve_call_sites(net, call_sites)
 
+    # Inline Expansion (runs first if active)
+    if inline:
+        if not context:
+            raise AssertionError("Inline expansion requires --context to be provided.")
+        if symbol_table is None:
+            symbol_table = SymbolTable()
+        logger.info("Executing inline expansion with depth %d...", inline_depth)
+        net = inline_expand(net, call_sites, symbol_table, max_depth=inline_depth)
+
     logger.info(
         "Constructed Petri net with %d places, %d transitions, and %d arcs.",
         len(net.places),
@@ -159,42 +211,52 @@ def code2petri(
         len(net.arcs),
     )
 
-    if output_file:
-        ext = os.path.splitext(output_file)[1].lstrip(".").lower()
-        if ext not in SUPPORTED_EXTENSIONS:
-            raise AssertionError(
-                f"Unsupported output extension '.{ext}'. Supported extensions are: "
-                f"{', '.join(sorted(SUPPORTED_EXTENSIONS))}"
-            )
+    # Determine fold activation
+    ext = os.path.splitext(output_file)[1].lstrip(".").lower() if output_file else ""
+    is_html = (ext == "html")
+    fold_active = (fold or is_html) and not no_fold
 
+    fold_result: Optional[FoldResult] = None
+    if fold_active:
+        fold_config: FoldConfig
+        if weights is not None:
+            if isinstance(weights, FoldConfig):
+                fold_config = weights
+            else:
+                fold_config = FoldConfig.load(weights)
+        else:
+            fold_config = FoldConfig()
+
+        logger.info("Executing structural fold analysis...")
+        fold_result = fold_net(net, config=fold_config)
+        sys.stderr.write(f"Code2Petri: SM score = {fold_result.final_sm}\n")
+        sys.stderr.flush()
+
+    if output_file:
         logger.debug("Writing serialized net to format '.%s' at '%s'...", ext, output_file)
-        if ext in TEXT_SERIALIZERS:
-            content = TEXT_SERIALIZERS[ext](net)
+        if ext in IMAGE_EXTENSIONS:
+            dot_title = f"SM score = {fold_result.final_sm}" if (fold_active and fold_result is not None) else None
+            target_net = fold_result.penultimate_net if (fold_active and fold_result is not None) else net
+            dot_content = target_net.to_dot(title=dot_title)
+            _render_dot_to_image(dot_content, ext, output_file)
+        else:
+            if fold_active and fold_result is not None:
+                if ext == "json":
+                    content = fold_result.to_json()
+                elif ext in ("dot", "gv"):
+                    content = fold_result.penultimate_net.to_dot(title=f"SM score = {fold_result.final_sm}")
+                elif ext == "pnml":
+                    content = fold_result.penultimate_net.to_pnml()
+            else:
+                content = TEXT_SERIALIZERS[ext](net)
+
             with open(output_file, "w", encoding="utf-8") as f:
                 f.write(content)
-        elif ext in IMAGE_EXTENSIONS:
-            if not is_installed("dot") and not is_installed("dot.exe"):
-                raise AssertionError(
-                    "Cannot generate image because Graphviz 'dot' executable was not found on PATH. "
-                    "Install Graphviz or use a text extension (.pnml, .dot, .gv, .json)."
-                )
-            dot_content = net.to_dot()
-            cmd = ["dot", f"-T{ext}", "-o", output_file]
-            result = subprocess.run(
-                cmd,
-                input=dot_content.encode("utf-8"),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-            if result.returncode != 0:
-                raise AssertionError(
-                    f"Graphviz command failed with exit code {result.returncode}: "
-                    f"{result.stderr.decode('utf-8', errors='replace')}"
-                )
 
         logger.info("Wrote output file to '%s'.", output_file)
 
+    if fold_active and fold_result is not None:
+        return fold_result
     return net
 
 
@@ -230,6 +292,34 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
         help="One or more context file or directory paths for cross-file call resolution.",
     )
     parser.add_argument(
+        "--fold",
+        action="store_true",
+        default=False,
+        help="Activate structural fold analysis on the generated Petri net.",
+    )
+    parser.add_argument(
+        "--no-fold",
+        action="store_true",
+        default=False,
+        help="Explicitly disable fold analysis (overrides implicit activation).",
+    )
+    parser.add_argument(
+        "--weights",
+        help="Override default FoldConfig penalty weights via a JSON file path or JSON string.",
+    )
+    parser.add_argument(
+        "--inline",
+        action="store_true",
+        default=False,
+        help="Activate inline expansion of resolved call transitions (requires --context).",
+    )
+    parser.add_argument(
+        "--inline-depth",
+        type=int,
+        default=1,
+        help="Maximum depth for inline expansion of nested callee calls (default: 1).",
+    )
+    parser.add_argument(
         "--quiet", "-q",
         action="store_true",
         help="Suppress informational logging.",
@@ -260,6 +350,11 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
         list_functions=args.list_functions,
         level=level,
         context=args.context,
+        fold=args.fold,
+        no_fold=args.no_fold,
+        weights=args.weights,
+        inline=args.inline,
+        inline_depth=args.inline_depth,
     )
 
 

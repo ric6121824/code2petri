@@ -603,6 +603,28 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         self.assertEqual(dot_attrs["fillcolor"], RenderingConfig.UNRESOLVED_COLOR)
         self.assertEqual(dot_attrs["tooltip"], "Unresolved call")
 
+    def test_dummy_in_reserved_metadata_keys(self):
+        self.assertIn("dummy", Transition.RESERVED_METADATA_KEYS)
+
+    def test_dummy_transition_to_dot_node_rendering(self):
+        t_dummy = Transition(
+            id="t_C1",
+            label="t_C1",
+            metadata={"dummy": True, "component_type": "sequence", "tau": 3.0},
+        )
+        dot_str = t_dummy.to_dot_node()
+        self.assertIn('style="filled,bold"', dot_str)
+        self.assertIn('penwidth="2"', dot_str)
+        self.assertIn('label="t_C1 (tau=3.0)"', dot_str)
+
+    def test_petrinet_to_dot_with_title(self):
+        net = PetriNet()
+        net.add_place("p0", "start", initial_tokens=1)
+        net.add_transition("t0", "run")
+        dot_str = net.to_dot(title="SM score = 42.0")
+        self.assertIn('labelloc="t";', dot_str)
+        self.assertIn('label="SM score = 42.0";', dot_str)
+
 
 if __name__ == '__main__':
     unittest.main()

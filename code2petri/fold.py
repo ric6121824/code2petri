@@ -543,6 +543,7 @@ def _add_opaque_transition(
         id=opaque_id,
         label=opaque_id,
         metadata={
+            "dummy": True,
             "opaque": True,
             "component_type": component_type,
             "tau": tau,
