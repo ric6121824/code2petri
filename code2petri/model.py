@@ -141,6 +141,12 @@ class Transition:
                 d["status"] = "[unresolved]"
         return d
 
+    def get_tau(self) -> float:
+        """Returns the accumulated complexity weight tau for this transition (default 1.0)."""
+        if self.metadata and "tau" in self.metadata:
+            return float(self.metadata["tau"])
+        return 1.0
+
     def add_pnml_toolspecific(self, parent_element: ET.Element) -> Optional[ET.Element]:
         """Appends <toolspecific> XML element with metadata properties to parent_element."""
         if not self.metadata and self.resolution is None:

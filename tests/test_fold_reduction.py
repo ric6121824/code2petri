@@ -23,7 +23,7 @@ from tests.test_fold_detection import (
     build_sequence_net,
     build_choice_net,
     build_loop_net,
-    merge_net,
+    combine_into_composite_net,
 )
 
 
@@ -126,9 +126,9 @@ class TestFoldMixedAndPriority(unittest.TestCase):
         choice_net, _, _, _ = build_choice_net(2, prefix="c_")
         loop_net, _, _, _ = build_loop_net(prefix="l_")
 
-        merge_net(net, seq_net)
-        merge_net(net, choice_net)
-        merge_net(net, loop_net)
+        combine_into_composite_net(net, seq_net)
+        combine_into_composite_net(net, choice_net)
+        combine_into_composite_net(net, loop_net)
 
         result = fold_net(net)
         step_types = [s.component_type for s in result.steps]

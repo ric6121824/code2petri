@@ -91,7 +91,7 @@ def build_loop_net(prefix: str = "") -> Tuple[PetriNet, str, str, List[str]]:
     return net, entrance, exit_node, internal
 
 
-def merge_net(dest: PetriNet, src: PetriNet) -> None:
+def combine_into_composite_net(dest: PetriNet, src: PetriNet) -> None:
     """Copies all places, transitions, and arcs from src into dest without duplication."""
     dest_nodes = {p.id: p for p in dest.places}
     dest_nodes.update({t.id: t for t in dest.transitions})
@@ -104,6 +104,7 @@ def merge_net(dest: PetriNet, src: PetriNet) -> None:
             dest_nodes[t.id] = dest.add_transition(t.id)
     for a in src.arcs:
         dest.add_arc(dest_nodes[a.source.id], dest_nodes[a.target.id])
+
 
 
 class TestFoldConfig(unittest.TestCase):
@@ -372,16 +373,16 @@ class TestDetectLoop(unittest.TestCase):
 
 class TestPrioritySortingAndTieBreaking(unittest.TestCase):
     def test_mixed_net_priority_sorting(self):
-        # Build composite net using shared builders and merge_net
+        # Build composite net using shared builders and combine_into_composite_net
         net = PetriNet()
 
         seq_net, _, _, _ = build_sequence_net(2, prefix="s_")
         choice_net, _, _, _ = build_choice_net(2, prefix="c_")
         loop_net, _, _, _ = build_loop_net(prefix="l_")
 
-        merge_net(net, seq_net)
-        merge_net(net, choice_net)
-        merge_net(net, loop_net)
+        combine_into_composite_net(net, seq_net)
+        combine_into_composite_net(net, choice_net)
+        combine_into_composite_net(net, loop_net)
 
         components = detect_components(net)
         types_in_order = [c.component_type for c in components]
@@ -404,8 +405,8 @@ class TestPrioritySortingAndTieBreaking(unittest.TestCase):
         # Sequence 2 (longer, 3 transitions -> internal nodes len 5)
         seq2_net, _, _, _ = build_sequence_net(3, prefix="b_")
 
-        merge_net(net, seq1_net)
-        merge_net(net, seq2_net)
+        combine_into_composite_net(net, seq1_net)
+        combine_into_composite_net(net, seq2_net)
 
         components = detect_components(net)
         self.assertEqual(len(components), 2)

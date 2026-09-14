@@ -101,27 +101,31 @@ class FoldStep:
     """Represents a single reduction step in the structural fold algorithm.
 
     Attributes:
-        step: 1-indexed step number.
+        step_number: 1-indexed step number.
         component_type: Type of the component folded.
         consumed_node_ids: Set of node IDs consumed by this fold step.
         dummy_transition_id: ID of the generated dummy transition (e.g. 't_C1').
         omega: Penalty weight for this component per Definition 22.
         tau: Accumulated weight on the dummy transition.
         running_sm: Running SM score (sum of transition weights) after this step.
-        net: Snapshot of the PetriNet after this fold step.
+        snapshot: Snapshot of the PetriNet after this fold step.
     """
-    step: int
-    component_type: Union[ComponentType, str]
+    step_number: int
+    component_type: ComponentType
     consumed_node_ids: Set[str]
     dummy_transition_id: str
     omega: float
     tau: float
     running_sm: float
-    net: PetriNet
+    snapshot: PetriNet
 
     @property
-    def step_number(self) -> int:
-        return self.step
+    def step(self) -> int:
+        return self.step_number
+
+    @property
+    def net(self) -> PetriNet:
+        return self.snapshot
 
     @property
     def folded_nodes(self) -> List[str]:
@@ -132,20 +136,15 @@ class FoldStep:
         return self.running_sm
 
     def to_dict(self) -> Dict[str, Any]:
-        c_type = (
-            self.component_type.value
-            if hasattr(self.component_type, "value")
-            else str(self.component_type)
-        )
         return {
-            "step": self.step,
-            "component_type": c_type,
+            "step": self.step_number,
+            "component_type": self.component_type.value,
             "folded_nodes": self.folded_nodes,
             "dummy_transition": self.dummy_transition_id,
             "omega": float(self.omega),
             "tau": float(self.tau),
             "sm_score": float(self.running_sm),
-            "net": self.net.to_dict(),
+            "net": self.snapshot.to_dict(),
         }
 
 
@@ -172,7 +171,7 @@ class FoldResult:
     def penultimate_net(self) -> PetriNet:
         """Returns the PetriNet state immediately prior to the final fold."""
         if len(self.steps) >= 2:
-            return self.steps[-2].net
+            return self.steps[-2].snapshot
         return self.initial_net
 
     @property
@@ -180,16 +179,14 @@ class FoldResult:
         return self.penultimate_net
 
     def to_dict(self) -> Dict[str, Any]:
-        data: Dict[str, Any] = {}
-        if self.function_name is not None:
-            data["function"] = self.function_name
-        if self.file_path is not None:
-            data["file"] = self.file_path
-        data["initial_net"] = self.initial_net.to_dict()
-        data["fold_steps"] = [s.to_dict() for s in self.steps]
-        data["final_sm"] = float(self.final_sm)
-        data["fully_reducible"] = bool(self.fully_reducible)
-        return data
+        return {
+            "function": self.function_name,
+            "file": self.file_path,
+            "initial_net": self.initial_net.to_dict(),
+            "fold_steps": [s.to_dict() for s in self.steps],
+            "final_sm": float(self.final_sm),
+            "fully_reducible": bool(self.fully_reducible),
+        }
 
     def to_json(self, indent: int = 2) -> str:
         return json.dumps(self.to_dict(), indent=indent) + "\n"
@@ -584,19 +581,12 @@ def fold_component(
     comp_transitions = [t for t in folded_net.transitions if t.id in comp_trans_ids]
 
     # 3. Calculate accumulated tau: tau(t_C) = omega(C) + sum(tau(t) for t in T_C)
-    tau_sum = sum(
-        float(t.metadata.get("tau", 1.0)) if t.metadata and "tau" in t.metadata else 1.0
-        for t in comp_transitions
-    )
+    tau_sum = sum(t.get_tau() for t in comp_transitions)
     accumulated_tau = float(component.omega) + tau_sum
 
     # 4. Create fresh dummy transition t_C
     dummy_id = f"t_C{step_number}"
-    comp_type_str = (
-        component.component_type.value
-        if hasattr(component.component_type, "value")
-        else str(component.component_type)
-    )
+    comp_type_str = component.component_type.value
     dummy_t = folded_net.add_transition(
         id=dummy_id,
         label=dummy_id,
@@ -634,20 +624,17 @@ def fold_component(
     ]
 
     # 7. Compute running SM score: sum of all tau weights on remaining transitions
-    running_sm = sum(
-        float(t.metadata.get("tau", 1.0)) if t.metadata and "tau" in t.metadata else 1.0
-        for t in folded_net.transitions
-    )
+    running_sm = sum(t.get_tau() for t in folded_net.transitions)
 
     step = FoldStep(
-        step=step_number,
+        step_number=step_number,
         component_type=component.component_type,
         consumed_node_ids=consumed_node_ids,
         dummy_transition_id=dummy_id,
         omega=float(component.omega),
         tau=accumulated_tau,
         running_sm=running_sm,
-        net=folded_net.clone(),
+        snapshot=folded_net.clone(),
     )
 
     return folded_net, step
@@ -696,10 +683,7 @@ def fold_unstructured(
     consumed_transitions = {t.id for t in folded_net.transitions}
     consumed_node_ids = consumed_places | consumed_transitions
 
-    tau_sum = sum(
-        float(t.metadata.get("tau", 1.0)) if t.metadata and "tau" in t.metadata else 1.0
-        for t in folded_net.transitions
-    )
+    tau_sum = sum(t.get_tau() for t in folded_net.transitions)
     omega = float(cfg.unstructured)
     accumulated_tau = omega + tau_sum
 
@@ -727,17 +711,31 @@ def fold_unstructured(
     running_sm = accumulated_tau
 
     step = FoldStep(
-        step=step_number,
+        step_number=step_number,
         component_type=ComponentType.UNSTRUCTURED,
         consumed_node_ids=consumed_node_ids,
         dummy_transition_id=dummy_id,
         omega=omega,
         tau=accumulated_tau,
         running_sm=running_sm,
-        net=folded_net.clone(),
+        snapshot=folded_net.clone(),
     )
 
     return folded_net, step
+
+
+def _is_trivial_workflow_net(net: PetriNet) -> bool:
+    """Returns True if the net is reduced to a trivial workflow net (single transition and no internal places)."""
+    if len(net.transitions) == 0:
+        return True
+    if len(net.transitions) == 1:
+        topo = NetTopology(net)
+        source_places = [p for p in net.places if topo.in_degree(p.id) == 0 or p.initial_tokens > 0]
+        sink_places = [p for p in net.places if topo.out_degree(p.id) == 0]
+        boundary_place_ids = {p.id for p in source_places + sink_places}
+        internal_places = [p for p in net.places if p.id not in boundary_place_ids]
+        return len(internal_places) == 0 and len(net.places) <= 2
+    return False
 
 
 def fold_net(
@@ -768,12 +766,9 @@ def fold_net(
     step_number = 1
     fully_reducible = True
 
-    # If the net is already trivial (<= 1 transition)
-    if len(current_net.transitions) <= 1:
-        final_sm = 0.0
-        if current_net.transitions:
-            t0 = current_net.transitions[0]
-            final_sm = float(t0.metadata.get("tau", 1.0)) if t0.metadata and "tau" in t0.metadata else 1.0
+    # If the net is already trivial
+    if _is_trivial_workflow_net(current_net):
+        final_sm = current_net.transitions[0].get_tau() if current_net.transitions else 0.0
         return FoldResult(
             initial_net=initial_snapshot,
             steps=[],
@@ -783,7 +778,11 @@ def fold_net(
             file_path=file_path,
         )
 
-    while len(current_net.transitions) > 1:
+    while True:
+        if _is_trivial_workflow_net(current_net):
+            fully_reducible = True
+            break
+
         components = detect_components(current_net, cfg)
         if components:
             # Pick highest priority / smallest component per Definition 21
@@ -792,16 +791,13 @@ def fold_net(
             steps.append(step)
             step_number += 1
         else:
-            # Irreducible net with > 1 transitions remaining
+            # Irreducible net with multiple unreduced nodes remaining
             current_net, step = fold_unstructured(current_net, step_number, cfg)
             steps.append(step)
             fully_reducible = False
             break
 
-    final_sm = 0.0
-    if current_net.transitions:
-        t_final = current_net.transitions[0]
-        final_sm = float(t_final.metadata.get("tau", 1.0)) if t_final.metadata and "tau" in t_final.metadata else 1.0
+    final_sm = current_net.transitions[0].get_tau() if current_net.transitions else 0.0
 
     return FoldResult(
         initial_net=initial_snapshot,
