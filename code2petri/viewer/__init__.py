@@ -74,7 +74,7 @@ def generate_html(
             **fold_dict,
         }
     else:
-        net_dict = net_or_fold.to_dict() if hasattr(net_or_fold, "to_dict") else {}
+        net_dict = net_or_fold.to_dict() if isinstance(net_or_fold, PetriNet) else {}
         display_title = title if title is not None else "Petri Net"
         payload = {
             "mode": "no-fold",

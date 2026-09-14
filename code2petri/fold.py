@@ -239,16 +239,13 @@ def calculate_symmetry_multiplier(
     net_or_topology: Union[PetriNet, NetTopology],
     component_node_ids: Iterable[str],
     target_node_ids: Optional[Iterable[str]] = None,
-    topology: Optional[NetTopology] = None,
 ) -> int:
     """Calculates the symmetry multiplier diff(X) per Definition 22 in subnet PN|C.
 
     diff(X) = ||{x in X | |x*| > 1}| - |{x in X | |*x| > 1}|| + 1
     where degrees are computed in the subnet projection PN|C.
     """
-    topo = topology if topology is not None else (
-        net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
-    )
+    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
     comp_set = set(component_node_ids)
     target_set = set(target_node_ids) if target_node_ids is not None else comp_set
 
@@ -263,7 +260,6 @@ def calculate_symmetry_multiplier(
 def detect_sequences(
     net_or_topology: Union[PetriNet, NetTopology],
     config: FoldConfig,
-    topology: Optional[NetTopology] = None,
 ) -> List[Component]:
     """Detects linear chains of place -> transition -> place with no branching.
 
@@ -271,9 +267,7 @@ def detect_sequences(
     A sequence component is a maximal linear chain starting and ending with a place,
     containing >= 2 transitions with no internal branching.
     """
-    topo = topology if topology is not None else (
-        net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
-    )
+    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
 
     def can_extend_backwards(place_id: str) -> bool:
         if topo.in_degree(place_id) != 1:
@@ -355,15 +349,12 @@ def detect_sequences(
 def detect_choices(
     net_or_topology: Union[PetriNet, NetTopology],
     config: FoldConfig,
-    topology: Optional[NetTopology] = None,
 ) -> List[Component]:
     """Detects XOR-split/join Choice components per Definition 18.
 
     A Choice component has P_C = {p_i, p_o} and T_C = p_i* = *p_o with |T_C| >= 2.
     """
-    topo = topology if topology is not None else (
-        net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
-    )
+    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
     choices: List[Component] = []
 
     for place in topo.net.places:
@@ -446,12 +437,9 @@ def _find_elementary_cycles(net: PetriNet, topology: NetTopology) -> List[List[s
 def detect_loops(
     net_or_topology: Union[PetriNet, NetTopology],
     config: FoldConfig,
-    topology: Optional[NetTopology] = None,
 ) -> List[Component]:
     """Detects simple directed cycles with a single entry place and a single exit arc."""
-    topo = topology if topology is not None else (
-        net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
-    )
+    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
     cycles = _find_elementary_cycles(topo.net, topo)
     loops: List[Component] = []
     seen_cycles: Set[Tuple[str, ...]] = set()
