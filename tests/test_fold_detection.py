@@ -93,8 +93,7 @@ def build_loop_net(prefix: str = "") -> Tuple[PetriNet, str, str, List[str]]:
 
 def combine_into_composite_net(dest: PetriNet, src: PetriNet) -> None:
     """Copies all places, transitions, and arcs from src into dest without duplication."""
-    dest_nodes = {p.id: p for p in dest.places}
-    dest_nodes.update({t.id: t for t in dest.transitions})
+    dest_nodes = dest.get_node_map()
 
     for p in src.places:
         if p.id not in dest_nodes:

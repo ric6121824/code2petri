@@ -18,6 +18,7 @@ from code2petri.fold import (
     fold_net,
     fold_component,
     detect_components,
+    _is_trivial_workflow_net,
 )
 from tests.test_fold_detection import (
     build_sequence_net,
@@ -36,22 +37,20 @@ class TestFoldSequence(unittest.TestCase):
         self.assertEqual(len(result.steps), 1)
 
         step1 = result.steps[0]
-        self.assertEqual(step1.step, 1)
         self.assertEqual(step1.step_number, 1)
         self.assertEqual(step1.component_type, ComponentType.SEQUENCE)
-        self.assertEqual(step1.dummy_transition_id, "t_C1")
+        self.assertEqual(step1.opaque_transition_id, "t_C1")
         self.assertEqual(step1.omega, 0.0)
         # 3 transitions initially with tau=1.0 -> 0.0 + 1 + 1 + 1 = 3.0
         self.assertEqual(step1.tau, 3.0)
         self.assertEqual(step1.running_sm, 3.0)
-        self.assertEqual(step1.sm_score, 3.0)
         self.assertEqual(result.final_sm, 3.0)
 
         # Folded net at step 1 should have exactly 1 transition (t_C1) between p0 and p3
-        folded_net = step1.net
+        folded_net = step1.snapshot
         self.assertEqual(len(folded_net.transitions), 1)
         self.assertEqual(folded_net.transitions[0].id, "t_C1")
-        self.assertTrue(folded_net.transitions[0].metadata.get("dummy"))
+        self.assertTrue(folded_net.transitions[0].metadata.get("opaque"))
         self.assertEqual(folded_net.transitions[0].metadata.get("tau"), 3.0)
         self.assertEqual(len(folded_net.places), 2)
         place_ids = {p.id for p in folded_net.places}
@@ -85,7 +84,7 @@ class TestFoldChoice(unittest.TestCase):
         self.assertEqual(step1.running_sm, 3.0)
         self.assertEqual(result.final_sm, 3.0)
 
-        folded_net = step1.net
+        folded_net = step1.snapshot
         self.assertEqual(len(folded_net.transitions), 1)
         self.assertEqual(folded_net.transitions[0].id, "t_C1")
         self.assertEqual(folded_net.transitions[0].metadata.get("tau"), 3.0)
@@ -106,13 +105,13 @@ class TestFoldLoop(unittest.TestCase):
         self.assertEqual(step1.component_type, ComponentType.LOOP)
         self.assertEqual(step1.omega, 3.0)
         self.assertEqual(step1.tau, 6.0)
-        self.assertEqual(step1.dummy_transition_id, "t_C1")
+        self.assertEqual(step1.opaque_transition_id, "t_C1")
 
         step2 = result.steps[1]
         self.assertEqual(step2.component_type, ComponentType.SEQUENCE)
         self.assertEqual(step2.omega, 0.0)
         self.assertEqual(step2.tau, 7.0)
-        self.assertEqual(step2.dummy_transition_id, "t_C2")
+        self.assertEqual(step2.opaque_transition_id, "t_C2")
         self.assertEqual(result.final_sm, 7.0)
 
 
@@ -201,22 +200,32 @@ class TestFoldIrreducible(unittest.TestCase):
         net.add_arc(p, t2)
         net.add_arc(t2, p)
 
+        self.assertFalse(_is_trivial_workflow_net(net))
         result = fold_net(net)
         self.assertFalse(result.fully_reducible)
         self.assertEqual(len(result.steps), 1)
         step = result.steps[0]
         self.assertEqual(step.component_type, ComponentType.UNSTRUCTURED)
-        # Verify dummy transition has both input and output arcs connected to p0
+        # Verify opaque transition has both input and output arcs connected to p0
         final_net = step.snapshot
         self.assertEqual(len(final_net.transitions), 1)
-        dummy_t = final_net.transitions[0]
+        opaque_t = final_net.transitions[0]
         self.assertEqual(len(final_net.arcs), 2)
         sources = {a.source.id for a in final_net.arcs}
         targets = {a.target.id for a in final_net.arcs}
         self.assertIn("p0", sources)
-        self.assertIn(dummy_t.id, sources)
+        self.assertIn(opaque_t.id, sources)
         self.assertIn("p0", targets)
-        self.assertIn(dummy_t.id, targets)
+        self.assertIn(opaque_t.id, targets)
+
+    def test_single_place_self_loop_not_trivial_workflow_net(self):
+        # A single-place net with a self-loop is NOT a trivial workflow net (must have distinct source and sink)
+        net = PetriNet()
+        p0 = net.add_place("p0")
+        t0 = net.add_transition("t0")
+        net.add_arc(p0, t0)
+        net.add_arc(t0, p0)
+        self.assertFalse(_is_trivial_workflow_net(net))
 
 
 class TestFoldConfigOverrides(unittest.TestCase):
@@ -237,9 +246,8 @@ class TestFoldResultPropertiesAndSerialization(unittest.TestCase):
         result = fold_net(net)
 
         self.assertEqual(len(result.steps), 2)
-        # Penultimate net is step 1's net
-        self.assertEqual(result.penultimate_net, result.steps[0].net)
-        self.assertEqual(result.penultimate_state, result.steps[0].net)
+        # Penultimate net is step 1's snapshot
+        self.assertEqual(result.penultimate_net, result.steps[0].snapshot)
 
     def test_penultimate_net_single_step(self):
         net, _, _, _ = build_sequence_net(2)
@@ -251,11 +259,11 @@ class TestFoldResultPropertiesAndSerialization(unittest.TestCase):
 
     def test_json_serialization_schema(self):
         net, _, _, _ = build_sequence_net(2)
-        result = fold_net(net, function_name="testFunc", file_path="test.js")
+        result = fold_net(net)
 
         d = result.to_dict()
-        self.assertEqual(d["function"], "testFunc")
-        self.assertEqual(d["file"], "test.js")
+        self.assertNotIn("function", d)
+        self.assertNotIn("file", d)
         self.assertIn("initial_net", d)
         self.assertIn("fold_steps", d)
         self.assertIn("final_sm", d)
@@ -266,7 +274,7 @@ class TestFoldResultPropertiesAndSerialization(unittest.TestCase):
         step_d = d["fold_steps"][0]
         self.assertEqual(step_d["step"], 1)
         self.assertEqual(step_d["component_type"], "sequence")
-        self.assertEqual(step_d["dummy_transition"], "t_C1")
+        self.assertEqual(step_d["opaque_transition"], "t_C1")
         self.assertEqual(step_d["omega"], 0.0)
         self.assertEqual(step_d["tau"], 2.0)
         self.assertEqual(step_d["sm_score"], 2.0)

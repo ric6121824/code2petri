@@ -104,43 +104,27 @@ class FoldStep:
         step_number: 1-indexed step number.
         component_type: Type of the component folded.
         consumed_node_ids: Set of node IDs consumed by this fold step.
-        dummy_transition_id: ID of the generated dummy transition (e.g. 't_C1').
+        opaque_transition_id: ID of the generated opaque transition (e.g. 't_C1').
         omega: Penalty weight for this component per Definition 22.
-        tau: Accumulated weight on the dummy transition.
+        tau: Accumulated weight on the opaque transition.
         running_sm: Running SM score (sum of transition weights) after this step.
         snapshot: Snapshot of the PetriNet after this fold step.
     """
     step_number: int
     component_type: ComponentType
     consumed_node_ids: Set[str]
-    dummy_transition_id: str
+    opaque_transition_id: str
     omega: float
     tau: float
     running_sm: float
     snapshot: PetriNet
 
-    @property
-    def step(self) -> int:
-        return self.step_number
-
-    @property
-    def net(self) -> PetriNet:
-        return self.snapshot
-
-    @property
-    def folded_nodes(self) -> List[str]:
-        return sorted(list(self.consumed_node_ids))
-
-    @property
-    def sm_score(self) -> float:
-        return self.running_sm
-
     def to_dict(self) -> Dict[str, Any]:
         return {
             "step": self.step_number,
             "component_type": self.component_type.value,
-            "folded_nodes": self.folded_nodes,
-            "dummy_transition": self.dummy_transition_id,
+            "folded_nodes": sorted(list(self.consumed_node_ids)),
+            "opaque_transition": self.opaque_transition_id,
             "omega": float(self.omega),
             "tau": float(self.tau),
             "sm_score": float(self.running_sm),
@@ -157,15 +141,11 @@ class FoldResult:
         steps: Ordered list of FoldStep snapshots.
         final_sm: Final Structuredness Metric score (raw unnormalized tau).
         fully_reducible: True if net reduced to a single transition with no unstructured fallback.
-        function_name: Optional analyzed function name for serialization.
-        file_path: Optional source file path for serialization.
     """
     initial_net: PetriNet
     steps: List[FoldStep]
     final_sm: float
     fully_reducible: bool
-    function_name: Optional[str] = None
-    file_path: Optional[str] = None
 
     @property
     def penultimate_net(self) -> PetriNet:
@@ -174,14 +154,8 @@ class FoldResult:
             return self.steps[-2].snapshot
         return self.initial_net
 
-    @property
-    def penultimate_state(self) -> PetriNet:
-        return self.penultimate_net
-
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "function": self.function_name,
-            "file": self.file_path,
             "initial_net": self.initial_net.to_dict(),
             "fold_steps": [s.to_dict() for s in self.steps],
             "final_sm": float(self.final_sm),
@@ -562,7 +536,7 @@ def fold_component(
     component: Component,
     step_number: int,
 ) -> Tuple[PetriNet, FoldStep]:
-    """Replaces component C in net by a single dummy transition t_C per Definition 19.
+    """Replaces component C in net by a single opaque transition t_C per Definition 19.
 
     Args:
         net: The PetriNet containing component.
@@ -590,36 +564,35 @@ def fold_component(
     tau_sum = sum(t.get_tau() for t in comp_transitions)
     accumulated_tau = float(component.omega) + tau_sum
 
-    # 4. Create fresh dummy transition t_C
-    dummy_id = f"t_C{step_number}"
+    # 4. Create fresh opaque transition t_C
+    opaque_id = f"t_C{step_number}"
     comp_type_str = component.component_type.value
-    dummy_t = folded_net.add_transition(
-        id=dummy_id,
-        label=dummy_id,
+    opaque_t = folded_net.add_transition(
+        id=opaque_id,
+        label=opaque_id,
         metadata={
-            "dummy": True,
+            "opaque": True,
             "component_type": comp_type_str,
             "tau": accumulated_tau,
         },
     )
 
-    node_map = {p.id: p for p in folded_net.places}
-    node_map.update({t.id: t for t in folded_net.transitions})
+    node_map = folded_net.get_node_map()
 
     # 5. Rewire boundary arcs per Definition 19
     if topo.is_place(component.entrance):
-        folded_net.add_arc(node_map[component.entrance], dummy_t)
+        folded_net.add_arc(node_map[component.entrance], opaque_t)
     else:
         for p_id in topo.presets(component.entrance):
             if p_id not in consumed_node_ids and p_id in node_map:
-                folded_net.add_arc(node_map[p_id], dummy_t)
+                folded_net.add_arc(node_map[p_id], opaque_t)
 
     if topo.is_place(component.exit):
-        folded_net.add_arc(dummy_t, node_map[component.exit])
+        folded_net.add_arc(opaque_t, node_map[component.exit])
     else:
         for p_id in topo.postsets(component.exit):
             if p_id not in consumed_node_ids and p_id in node_map:
-                folded_net.add_arc(dummy_t, node_map[p_id])
+                folded_net.add_arc(opaque_t, node_map[p_id])
 
     # 6. Remove consumed nodes and any incident arcs
     folded_net.remove_nodes(consumed_node_ids)
@@ -631,7 +604,7 @@ def fold_component(
         step_number=step_number,
         component_type=component.component_type,
         consumed_node_ids=consumed_node_ids,
-        dummy_transition_id=dummy_id,
+        opaque_transition_id=opaque_id,
         omega=float(component.omega),
         tau=accumulated_tau,
         running_sm=running_sm,
@@ -660,7 +633,7 @@ def fold_unstructured(
     folded_net = net.clone()
     topo = NetTopology(folded_net)
 
-    # Identify global entrance and exit places
+    # Identify net entrance and exit places
     source_candidates = topo.source_places()
     sink_candidates = topo.sink_places()
 
@@ -682,24 +655,24 @@ def fold_unstructured(
     omega = float(cfg.unstructured)
     accumulated_tau = omega + tau_sum
 
-    dummy_id = f"t_C{step_number}"
-    dummy_t = folded_net.add_transition(
-        id=dummy_id,
-        label=dummy_id,
+    opaque_id = f"t_C{step_number}"
+    opaque_t = folded_net.add_transition(
+        id=opaque_id,
+        label=opaque_id,
         metadata={
-            "dummy": True,
+            "opaque": True,
             "component_type": ComponentType.UNSTRUCTURED.value,
             "tau": accumulated_tau,
         },
     )
 
-    # Retain only boundary places and the new dummy transition
+    # Retain only boundary places and the new opaque transition
     folded_net.remove_nodes(consumed_node_ids)
     folded_net.arcs = []
 
-    node_map = {p.id: p for p in folded_net.places}
-    folded_net.add_arc(node_map[p_src.id], dummy_t)
-    folded_net.add_arc(dummy_t, node_map[p_snk.id])
+    node_map = folded_net.get_node_map()
+    folded_net.add_arc(node_map[p_src.id], opaque_t)
+    folded_net.add_arc(opaque_t, node_map[p_snk.id])
 
     running_sm = accumulated_tau
 
@@ -707,7 +680,7 @@ def fold_unstructured(
         step_number=step_number,
         component_type=ComponentType.UNSTRUCTURED,
         consumed_node_ids=consumed_node_ids,
-        dummy_transition_id=dummy_id,
+        opaque_transition_id=opaque_id,
         omega=omega,
         tau=accumulated_tau,
         running_sm=running_sm,
@@ -718,7 +691,7 @@ def fold_unstructured(
 
 
 def _is_trivial_workflow_net(net: PetriNet) -> bool:
-    """Returns True if the net is reduced to a trivial workflow net (single transition connecting source to sink)."""
+    """Returns True if the net is reduced to a trivial workflow net (single transition connecting distinct source to sink)."""
     if len(net.transitions) == 0:
         return len(net.places) <= 1
     if len(net.transitions) == 1:
@@ -730,6 +703,8 @@ def _is_trivial_workflow_net(net: PetriNet) -> bool:
             return False
         p_in_id = next(iter(presets))
         p_out_id = next(iter(postsets))
+        if p_in_id == p_out_id:
+            return False
         if {p.id for p in net.places} != {p_in_id, p_out_id}:
             return False
         p_in_sources = {s for s in topo.presets(p_in_id) if s != t.id}
@@ -743,20 +718,16 @@ def _is_trivial_workflow_net(net: PetriNet) -> bool:
 def fold_net(
     net: PetriNet,
     config: Optional[FoldConfig] = None,
-    function_name: Optional[str] = None,
-    file_path: Optional[str] = None,
 ) -> FoldResult:
     """Executes the full Lassen & van der Aalst reduction loop (Definition 23).
 
-    Iteratively detects the simplest/smallest remaining component, folds it into a dummy
+    Iteratively detects the simplest/smallest remaining component, folds it into an opaque
     transition, and accumulates the penalty omega onto the transition weight tau.
     If the net is irreducible, terminates with the unstructured penalty.
 
     Args:
         net: The target PetriNet to reduce.
         config: Optional FoldConfig base penalty configuration.
-        function_name: Optional analyzed function name for serialization.
-        file_path: Optional source file path for serialization.
 
     Returns:
         FoldResult containing initial net, fold steps, final SM, and reducibility flag.
@@ -776,8 +747,6 @@ def fold_net(
             steps=[],
             final_sm=final_sm,
             fully_reducible=True,
-            function_name=function_name,
-            file_path=file_path,
         )
 
     while True:
@@ -806,10 +775,4 @@ def fold_net(
         steps=steps,
         final_sm=final_sm,
         fully_reducible=fully_reducible,
-        function_name=function_name,
-        file_path=file_path,
     )
-
-
-# Convenience alias per Lassen & van der Aalst Definition 23
-fold = fold_net

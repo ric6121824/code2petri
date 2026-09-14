@@ -15,7 +15,6 @@ from code2petri.fold import (
     detect_components,
     fold_component,
     fold_net,
-    fold,
 )
 
 __all__ = [
@@ -44,7 +43,6 @@ __all__ = [
     "detect_components",
     "fold_component",
     "fold_net",
-    "fold",
 ]
 
 

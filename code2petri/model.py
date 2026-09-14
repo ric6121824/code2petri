@@ -411,19 +411,23 @@ class PetriNet:
         """Serializes the Petri net into formatted JSON."""
         return json.dumps(self.to_dict(), indent=indent) + "\n"
 
+    def get_node_map(self) -> Dict[str, Union[Place, Transition]]:
+        """Returns a mapping of node IDs to Place and Transition instances."""
+        nodes: Dict[str, Union[Place, Transition]] = {p.id: p for p in self.places}
+        nodes.update({t.id: t for t in self.transitions})
+        return nodes
+
     def clone(self) -> "PetriNet":
         """Creates a deep copy of the PetriNet including places, transitions, metadata, and arcs."""
         new_net = PetriNet()
-        node_map: Dict[str, Union[Place, Transition]] = {}
 
         for p in self.places:
-            new_p = new_net.add_place(
+            new_net.add_place(
                 id=p.id,
                 label=p.label,
                 line_number=p.line_number,
                 initial_tokens=p.initial_tokens,
             )
-            node_map[p.id] = new_p
 
         for t in self.transitions:
             new_meta = dict(t.metadata) if t.metadata else None
@@ -434,15 +438,15 @@ class PetriNet:
                     resolved_to=t.resolution.resolved_to,
                     target_file=t.resolution.target_file,
                 )
-            new_t = new_net.add_transition(
+            new_net.add_transition(
                 id=t.id,
                 label=t.label,
                 line_number=t.line_number,
                 metadata=new_meta,
                 resolution=new_res,
             )
-            node_map[t.id] = new_t
 
+        node_map = new_net.get_node_map()
         for a in self.arcs:
             new_net.add_arc(
                 source=node_map[a.source.id],
