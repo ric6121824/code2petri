@@ -43,3 +43,27 @@ _Avoid_: Secondary files, include paths, library files
 **Variable Binding**:
 A constructor-assignment mapping (`variable → class`) extracted from file scope to resolve instance method calls to their class definitions.
 _Avoid_: Type inference, symbol alias
+
+**Structural Fold**:
+The reduction operation (Lassen & van der Aalst 2008, Def. 19) replacing a well-structured single-entry/single-exit (SESE) subnet with an opaque transition carrying accumulated complexity weight.
+_Avoid_: Graph compression, subnet deletion, macro collapsing
+
+**Structuredness Metric (SM)**:
+The quantitative complexity metric derived from iterative structural reduction and component penalty weighting, representing the raw accumulated weight $\\tau$ upon termination.
+_Avoid_: Complexity index, structuredness score normalization
+
+**Component Penalty ($\\omega$)**:
+The structural penalty score assigned to a recognized component based on its structural type and branch symmetry multiplier.
+_Avoid_: Weight cost, complexity penalty points
+
+**Transition Weight ($\\tau$)**:
+The scalar complexity metric accumulated on a transition (initial = 1.0; increases as components are folded into opaque transitions).
+_Avoid_: Firing cost, step weight
+
+**Fold Config**:
+A typed configuration object holding the base penalty weights ($\\rho$) for each component type.
+_Avoid_: Weight options, reduction settings
+
+**Fold Step**:
+A serializable snapshot recording a single reduction operation: detected component type, consumed node IDs, created opaque transition ID, $\\omega$, $\\tau$, running SM score, and resulting net state.
+_Avoid_: Intermediate net, reduction snapshot

@@ -32,11 +32,16 @@ code2flow/
 │   ├── javascript_walker.py       # JavaScript Acorn AST walker implementing WalkerProtocol & variable binding extraction
 │   ├── fold.py                    # Structural component detection, fold reduction engine, & SM computation (Tickets 17-18)
 │   ├── inline.py                  # Inline expansion engine, composite net splicing, & recursion guard (Ticket 19)
+│   ├── viewer/                    # Interactive offline HTML viewer generator & embedded assets (Ticket 21)
+│   │   ├── __init__.py            # HTML generator dispatch (`generate_html`)
+│   │   ├── template.html          # Standalone Cytoscape.js player template with Dagre animations
+│   │   └── vendor/                # Embedded minified client libraries (cytoscape.min.js, dagre.min.js, cytoscape-dagre.js)
 │   └── engine.py                  # Pipeline orchestrator, CLI (`code2petri`), `--context` file discovery & Graphviz renderer
 ├── docs/                          # Architecture decision records and specifications
 │   └── adr/
-│       └── 0001-constructor-only-variable-resolution.md # ADR on constructor-only variable binding resolution
-├── tests/                         # Comprehensive unit, integration, & validation test suites (287 passing tests)
+│       ├── 0001-constructor-only-variable-resolution.md # ADR on constructor-only variable binding resolution
+│       └── 0002-boundary-place-unification.md           # ADR on boundary place unification for bipartite graph integrity
+├── tests/                         # Comprehensive unit, integration, & validation test suites (318 passing tests)
 │   ├── petri_assertions.py        # Shared structural assertion utilities for Petri nets
 │   ├── test_petri_model.py        # Tests for Place, Transition, Arc, PetriNet, CallResolution, and serializers
 │   ├── test_walker_protocol.py    # Contract adherence & instantiation tests for WalkerProtocol & WalkResult
@@ -48,6 +53,8 @@ code2flow/
 │   ├── test_fold_detection.py     # Structural component detection & FoldConfig tests (Ticket 17)
 │   ├── test_fold_reduction.py     # Fold reduction engine & SM computation tests (Ticket 18)
 │   ├── test_inline_expansion.py   # Inline expansion engine & recursion guard tests (Ticket 19)
+│   ├── test_cli_fold_inline.py    # CLI integration tests for --fold, --inline, and headless exports (Ticket 20)
+│   ├── test_html_viewer.py        # Self-contained offline HTML viewer generation & DOM tests (Ticket 21)
 │   ├── test_petri_if_branching.py # Python if/elif/else branching tests
 │   ├── test_petri_loops.py        # Python while/for loop tests
 │   ├── test_petri_try.py          # Python try/except/finally tests
@@ -59,8 +66,8 @@ code2flow/
 └── .scratch/code2petri/           # Local documentation, grand roadmap, specs, issues, and review logs
     ├── codebase_summary.md        # This document
     ├── grand_plan.md              # Grand roadmap from Phase 1 to Phase 6
-    ├── issues/                    # Detailed ticket task specifications (Tickets 01–15)
-    ├── specs/                     # Master phase specifications (Phase 1, Phase 2)
+    ├── issues/                    # Detailed ticket task specifications (Tickets 01–21)
+    ├── specs/                     # Master phase specifications (Phases 1, 2, 2.5)
     └── reviews/                   # Two-axis code review audit reports
 ```
 
@@ -132,6 +139,47 @@ Walkers compose `ControlFlowBuilder` to manage state, counters, context stacks, 
 
 ---
 
+
+### 6. `code2petri/fold.py` (Structural Folding & SM Complexity Computation)
+Implements structural component recognition and iterative reduction per Lassen & van der Aalst (2008):
+- **`Component`**: Abstract base dataclass with `component_type`, `node_ids`, `entry_place_id`, `exit_place_id`, and `priority`.
+  - Subtypes: `SequenceComponent`, `ChoiceComponent`, `LoopComponent`, `UnstructuredComponent`.
+- **`FoldConfig`**: Configurable penalty weights $\\rho$ (defaults: Sequence=0, Choice=1, Marked-Graph=2, Loop=3, Unstructured=7).
+  - `load(path_or_json)`: Loads config overrides from JSON file or literal JSON string.
+- **Detection Functions**:
+  - `detect_sequences`: Identifies maximal unbranched linear chains ($p \\to t \\to p \\to \\dots$).
+  - `detect_choices`: Identifies XOR-split/join diamonds sharing single entry and merge places ($|T_C| \\ge 2$).
+  - `detect_loops`: Identifies elementary cycles with single entry place and single exit arc.
+  - `detect_components`: Aggregates all components sorted by Definition 21 priority and size.
+- **Symmetry Multipliers & Penalties**:
+  - `calculate_symmetry_multiplier`: Computes $\\text{diff}(X) = ||\\{x \\in X \\mid |x*| > 1\\}| - |\\{x \\in X \\mid |*x| > 1\\}|| + 1$ on subnet projection $PN|C$.
+  - Component penalty $\\omega = \\rho \\times \\text{diff}(X)$.
+- **Reduction Loop (`fold_reduction`)**:
+  - Greedily collapses simplest components into opaque transitions ($t_{C1}, t_{C2}, \\dots$).
+  - Boundary places unified, internal places/transitions removed, accumulated weight $\\tau$ updated on opaque transition.
+  - Unstructured fallback folds remaining irreducible nodes with $\\rho = 7$.
+  - Returns `FoldResult` with snapshots (`FoldStep`), `final_sm`, and `fully_reducible`.
+
+### 7. `code2petri/inline.py` (Inline Expansion & Composite Net Construction)
+Splices resolved callee subnets into caller Petri nets at the data-model level:
+- **`CallFrame` (frozen dataclass)**: Identifies invocation frame `(file_path, function_name, is_method, class_name)`. Generates candidate `variants()` to match caller/callee signatures.
+- **Boundary Place Unification ([ADR 0002](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0002-boundary-place-unification.md))**:
+  - Callee source place is unified into caller call transition preset place; callee sink place is unified into caller call transition postset place.
+  - Preserves bipartite graph validity ($F \\subseteq (P \\times T) \\cup (T \\times P)$) without illegal place-to-place arcs.
+- **Recursion Guard**:
+  - Maintains vertical call-stack set during recursive descent.
+  - Halts expansion when callee frame is present in active stack, marking call transition with `metadata={"recursive_cycle": True}`.
+  - Honors `CallSite.is_callback_loop` to halt browser game loops (`requestAnimationFrame`).
+- **Depth Capping**: Configurable via `--inline-depth=N` (defaults to 1).
+
+### 8. `code2petri/viewer/` (Self-Contained Offline HTML Viewer)
+Generates single-file standalone interactive visualization using Cytoscape.js and Dagre layout:
+- **`generate_html(net_or_fold, title)`**: Inlines HTML template, minified vendor JS (`cytoscape.min.js`, `dagre.min.js`, `cytoscape-dagre.js`), and pre-computed JSON snapshots into a zero-dependency `.html` document.
+- **Interactive Controls**: Bidirectional step playback (`Fold`, `Unfold`, `Reset`), slider navigation, step counter, live SM score display, and contextual step inspection panel (`#info-panel`).
+- **Morphing Animations**: Configured with 350ms Dagre layout transitions preserving node coordinates across step snapshots for smooth visual collapse/expansion.
+
+---
+
 ## Control-Flow Walkers
 
 ### 1. Python Control-Flow Walker (`code2petri/python_walker.py`)
@@ -194,7 +242,7 @@ Translates Acorn JSON AST nodes into 1-safe, sound P/T nets:
 
 ### `code2petri` CLI
 ```bash
-code2petri <source_file> -t <target_function> [--context <context_path...>] [-o output_file] [--list-functions] [--verbose] [--quiet]
+code2petri <source_file> -t <target_function> [--context <context_path...>] [-o output_file] [--fold | --no-fold] [--weights <path_or_json>] [--inline] [--inline-depth <N>] [--list-functions] [--verbose] [--quiet]
 ```
 
 #### Language Dispatch
@@ -210,15 +258,21 @@ SUPPORTED_WALKERS = {
 - `<source_file>`: Primary source file containing the target function.
 - `-t / --target-function`: Name of the function, qualified method, or synthetic scope to analyze.
 - `--context`: One or more context files or directories parsed to build the `SymbolTable` for cross-file call resolution. Directories are recursively scanned for supported files (skipping macOS `._*` resource forks).
-- `-o / --output`: Destination path. Format determined by extension (`.pnml`, `.dot`, `.gv`, `.json`, `.png`, `.svg`).
+- `-o / --output`: Destination path. Format determined by extension (`.pnml`, `.dot`, `.gv`, `.json`, `.png`, `.svg`, `.html`).
+- `--fold`: Enables structural fold reduction and Structuredness Metric (SM) computation. Automatically enabled for `.html` output.
+- `--no-fold`: Disables structural fold reduction, outputting raw unreduced nets even for `.html`.
+- `--weights`: Path to a JSON configuration file or raw JSON string specifying custom base penalties $\\rho$.
+- `--inline`: Recursively splices resolved callee Petri nets into the caller net at call site boundaries.
+- `--inline-depth`: Maximum recursion depth for inline expansion (default: 1).
 - `--list-functions`: Lists all discoverable functions in the primary file and exits.
 - `--verbose`: Enables detailed debug logging (including symbol indexing and resolution diagnostics).
 
 #### Output Formats Supported by `code2petri`
-- `.pnml`: Standard ISO/IEC 15909-2 Petri net exchange XML with `<toolspecific>` metadata elements for resolved/unresolved calls.
-- `.dot` / `.gv`: Graphviz DOT syntax with tooltips and color-coded borders (`#2e7d32` for resolved calls, `#e65100` for unresolved calls).
-- `.json`: Structured schema with `places`, `transitions` (with inlined resolution properties), and `arcs`.
-- `.svg` / `.png`: Rendered visual diagrams generated automatically via Graphviz `dot`.
+- `.html`: Self-contained interactive offline viewer embedding Cytoscape.js, Dagre layout, live SM score display, and animated fold/unfold playback controls.
+- `.pnml`: Standard ISO/IEC 15909-2 Petri net exchange XML with `<toolspecific>` metadata elements. When `--fold` is active, outputs the penultimate fold state.
+- `.dot` / `.gv`: Graphviz DOT syntax with tooltips and color-coded borders. When `--fold` is active, renders the penultimate fold state with the SM score in the graph title.
+- `.json`: Structured schema. When `--fold` is active, serializes full `FoldResult` schema (initial net, ordered fold steps, final SM, and reducibility flag).
+- `.svg` / `.png`: Rendered visual diagrams generated automatically via Graphviz `dot` (renders penultimate fold state when `--fold` is active).
 
 ---
 
@@ -229,4 +283,7 @@ SUPPORTED_WALKERS = {
 3. **Constructor-Only Variable Resolution ([ADR 0001](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0001-constructor-only-variable-resolution.md))**: Lightweight, sound variable binding extraction targeting constructor instantiations (`x = Foo()` / `const x = new Foo()`) without full dynamic dataflow analysis.
 4. **Strict Language Boundary Enforcement**: Call resolution only links symbols between source files of the same programming language.
 5. **Non-Destructive Reference Serialization**: Cross-file references enrich Petri net transitions with metadata and visual styling without modifying underlying bipartite graph topology.
-6. **Comprehensive Verification**: Validated by **235 automated unit, integration, and cross-file validation tests**, including end-to-end multi-file tests against the [`GameOfLife_Simulator`](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator) validation target (`app.js` and `webgl-engine.js`).
+6. **Bipartite Graph Integrity via Boundary Place Unification ([ADR 0002](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0002-boundary-place-unification.md))**: Inline expansion fuses caller and callee boundary places rather than creating illegal place-to-place arcs, strictly preserving $F \\subseteq (P \\times T) \\cup (T \\times P)$ and 1-safe sound firing semantics.
+7. **Lassen & van der Aalst Structural Folding & SM Computation**: Quantifies control flow complexity via deterministic, greedy bottom-up component reduction (Sequence, Choice, Loop, Unstructured) and accumulates complexity weight $\\tau$.
+8. **Self-Contained Offline Visualization**: HTML viewer operates without external CDNs or network connections, embedding minified layout engines and serializing pre-computed fold snapshots directly into the document.
+9. **Comprehensive Verification**: Validated by **318 automated unit, integration, and cross-file validation tests**, including end-to-end multi-file tests against the [`GameOfLife_Simulator`](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator) validation target (`app.js` and `webgl-engine.js`).

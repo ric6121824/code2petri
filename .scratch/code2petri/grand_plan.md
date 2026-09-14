@@ -612,10 +612,10 @@ graph TD
     P2B --> P2C["2C: Reference serialization ✅"]
     P2C --> P2D["2D: Cross-file validation ✅"]
     
-    P2D --> P25A["2.5A: Structural fold\nalgorithm"]
-    P25A --> P25B["2.5B: Fold-step JSON"]
-    P25B --> P25C["2.5C: HTML viewer"]
-    P25C --> P25D["2.5D: CLI integration"]
+    P2D --> P25A["2.5A: Structural fold\nalgorithm ✅"]
+    P25A --> P25B["2.5B: Fold-step JSON ✅"]
+    P25B --> P25C["2.5C: HTML viewer ✅"]
+    P25C --> P25D["2.5D: CLI integration ✅"]
     
     P25D --> P3A["3A: C# walker"]
     P3A --> P3B["3B: Unity lifecycle"]
@@ -645,10 +645,10 @@ graph TD
     style P2B fill:#2d6a2d,color:#fff
     style P2C fill:#2d6a2d,color:#fff
     style P2D fill:#2d6a2d,color:#fff
-    style P25A fill:#148f77,color:#fff
-    style P25B fill:#148f77,color:#fff
-    style P25C fill:#148f77,color:#fff
-    style P25D fill:#148f77,color:#fff
+    style P25A fill:#2d6a2d,color:#fff
+    style P25B fill:#2d6a2d,color:#fff
+    style P25C fill:#2d6a2d,color:#fff
+    style P25D fill:#2d6a2d,color:#fff
     style P3A fill:#b7950b,color:#fff
     style P3B fill:#b7950b,color:#fff
     style P3C fill:#b7950b,color:#fff
@@ -717,8 +717,8 @@ graph TD
 |---|---|---|---|
 | Phase 1 — JS + abstraction | 4 tickets (Tickets 07–10) | 8 review rounds | ✅ Complete |
 | Phase 2 — Cross-file tracing | 5 tickets (Tickets 11–15) | 6 review rounds | ✅ Complete |
-| Phase 2.5 — HTML viewer + folding | 4–5 tickets | 2–3 sessions | ⏳ Active Next |
-| Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned |
+| Phase 2.5 — HTML viewer + folding | 5 tickets (Tickets 17–21) | 3 review rounds | ✅ Complete |
+| Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | ⏳ Active Next |
 | Phase 4 — C++ + Unreal | 5–6 tickets | 3–4 sessions | Planned |
 | Phase 5 — Project-scale | 4–5 tickets | 2–3 sessions | Planned |
 | **Phases 1–5 Total** | **~26–30 tickets** | **~12–18 sessions** | |
