@@ -474,6 +474,18 @@
             elements.push(formatTransitionElement(t, prefix, parentId));
           });
 
+          function addArc(source, target, edgeId) {
+            elements.push({
+              group: 'edges',
+              data: {
+                id: edgeId,
+                source: source,
+                target: target
+              },
+              classes: 'arc'
+            });
+          }
+
           // Splice callee arcs with boundary place unification (ADR-0002)
           (calleeNet.arcs || []).forEach(function(a, idx) {
             const src = typeof a.source === 'object' ? a.source.id : a.source;
@@ -483,67 +495,27 @@
               // Arc from boundary source place to callee entrance transition tgt.
               // Rewire each caller preset place directly to callee entrance transition.
               presetPlaceIds.forEach(function(pIn) {
-                elements.push({
-                  group: 'edges',
-                  data: {
-                    id: prefix + 'arc_in_' + pIn + '_' + tgt,
-                    source: pIn,
-                    target: prefix + tgt
-                  },
-                  classes: 'arc'
-                });
+                addArc(pIn, prefix + tgt, prefix + 'arc_in_' + pIn + '_' + tgt);
               });
             } else if (tgt === rawSourcePlaceId) {
               // Reverse loop arc to source place
               presetPlaceIds.forEach(function(pIn) {
-                elements.push({
-                  group: 'edges',
-                  data: {
-                    id: prefix + 'arc_in_rev_' + src + '_' + pIn,
-                    source: prefix + src,
-                    target: pIn
-                  },
-                  classes: 'arc'
-                });
+                addArc(prefix + src, pIn, prefix + 'arc_in_rev_' + src + '_' + pIn);
               });
             } else if (tgt === rawSinkPlaceId) {
               // Arc from callee exit transition src to boundary sink place.
               // Rewire callee exit transition directly to each caller postset place.
               postsetPlaceIds.forEach(function(pOut) {
-                elements.push({
-                  group: 'edges',
-                  data: {
-                    id: prefix + 'arc_out_' + src + '_' + pOut,
-                    source: prefix + src,
-                    target: pOut
-                  },
-                  classes: 'arc'
-                });
+                addArc(prefix + src, pOut, prefix + 'arc_out_' + src + '_' + pOut);
               });
             } else if (src === rawSinkPlaceId) {
               // Reverse arc from sink place
               postsetPlaceIds.forEach(function(pOut) {
-                elements.push({
-                  group: 'edges',
-                  data: {
-                    id: prefix + 'arc_out_rev_' + pOut + '_' + tgt,
-                    source: pOut,
-                    target: prefix + tgt
-                  },
-                  classes: 'arc'
-                });
+                addArc(pOut, prefix + tgt, prefix + 'arc_out_rev_' + pOut + '_' + tgt);
               });
             } else {
               // Internal callee arc
-              elements.push({
-                group: 'edges',
-                data: {
-                  id: prefix + 'arc_' + idx + '_' + src + '_' + tgt,
-                  source: prefix + src,
-                  target: prefix + tgt
-                },
-                classes: 'arc'
-              });
+              addArc(prefix + src, prefix + tgt, prefix + 'arc_' + idx + '_' + src + '_' + tgt);
             }
           });
 
@@ -842,7 +814,7 @@
             }
           });
           if (hiddenExpansions.length > 0) {
-            desc += ' (Note: Expanded caller transition ' + hiddenExpansions.map(function(id) { return "'" + id + "'"; }).join(', ') + ' is folded into ' + opaqueId + ' in this step).';
+            desc += ' (Note: Expanded caller transition ' + hiddenExpansions.map(function(id) { return "'" + id + "'"; }).join(', ') + ' is folded away in this step).';
           }
           infoDesc.textContent = desc;
         }
