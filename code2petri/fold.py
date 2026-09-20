@@ -19,6 +19,9 @@ class ComponentType(str, Enum):
     SEQUENCE = "sequence"
     CHOICE = "choice"
     LOOP = "loop"
+    MARKED_GRAPH = "marked_graph"
+    STATE_MACHINE = "state_machine"
+    WELL_STRUCTURED = "well_structured"
     UNSTRUCTURED = "unstructured"
 
 
@@ -26,6 +29,9 @@ PRIORITY_MAP: Dict[ComponentType, int] = {
     ComponentType.SEQUENCE: 1,
     ComponentType.CHOICE: 2,
     ComponentType.LOOP: 3,
+    ComponentType.MARKED_GRAPH: 4,
+    ComponentType.STATE_MACHINE: 5,
+    ComponentType.WELL_STRUCTURED: 6,
     ComponentType.UNSTRUCTURED: 7,
 }
 
@@ -38,14 +44,19 @@ class FoldConfig:
       sequence = 0.0
       choice = 1.0 (scales ProM 1.5x linear markup: tau_new = sum_tau * 1.5, omega = choice * sum_tau * 0.5;
                supersedes Lassen 2008 Definition 22 symmetry difference)
+      loop = 3.0 (scales ProM 2.0x linear markup on loop body: tau_new = tau_src + tau_snk + 2.0 * tau_loop,
+             omega = (loop / 3.0) * tau_loop; supersedes Lassen 2008 Definition 22 loop symmetry difference)
       marked_graph = 2.0
-      loop = 3.0
+      state_machine = 2.0
+      well_structured = 2.0
       unstructured = 7.0
     """
     sequence: float = 0.0
     choice: float = 1.0
-    marked_graph: float = 2.0
     loop: float = 3.0
+    marked_graph: float = 2.0
+    state_machine: float = 2.0
+    well_structured: float = 2.0
     unstructured: float = 7.0
 
     @classmethod
@@ -58,7 +69,15 @@ class FoldConfig:
             data = json.loads(source)
 
         kwargs: Dict[str, float] = {}
-        for f_name in ("sequence", "choice", "marked_graph", "loop", "unstructured"):
+        for f_name in (
+            "sequence",
+            "choice",
+            "loop",
+            "marked_graph",
+            "state_machine",
+            "well_structured",
+            "unstructured",
+        ):
             if f_name in data:
                 kwargs[f_name] = float(data[f_name])
         return cls(**kwargs)
@@ -167,6 +186,8 @@ class NetTopology:
         self.net = net
         self.place_ids: Set[str] = {p.id for p in net.places}
         self.trans_ids: Set[str] = {t.id for t in net.transitions}
+        self.trans_map: Dict[str, Transition] = {t.id: t for t in net.transitions}
+        self.place_map: Dict[str, Place] = {p.id: p for p in net.places}
         self.preset: Dict[str, Set[str]] = defaultdict(set)
         self.postset: Dict[str, Set[str]] = defaultdict(set)
         self.direct_arcs: Set[Tuple[str, str]] = set()
@@ -270,7 +291,6 @@ def detect_sequences(
       - source_transition != sink_transition
       - out_degree(source_transition) == 1 (source only outputs to p)
       - in_degree(sink_transition) == 1 (sink only inputs from p)
-      - presets(source_transition) and postsets(sink_transition) are disjoint (not a 2-transition cycle)
     """
     cfg = config if config is not None else FoldConfig()
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
@@ -291,9 +311,6 @@ def detect_sequences(
         if t_src == t_snk:
             continue
         if topo.out_degree(t_src) != 1 or topo.in_degree(t_snk) != 1:
-            continue
-        # Avoid reducing a 2-transition cycle into a sequence self-loop
-        if bool(topo.presets(t_src) & topo.postsets(t_snk)):
             continue
 
         sequences.append(
@@ -398,6 +415,81 @@ def fold_choice(
     return _fold_first_candidate(net, detect_choices(net, cfg), step_number)
 
 
+def detect_while(
+    net_or_topology: Union[PetriNet, NetTopology],
+    config: Optional[FoldConfig] = None,
+) -> List[Component]:
+    """Detects while loop candidates matching ProM 2-in/2-out place with self-loop transition.
+
+    A candidate is an intermediate place p with:
+      - in_degree(p) == 2 and out_degree(p) == 2
+      - initial_tokens == 0 (preserves marking state)
+      - exactly 1 shared transition t_loop in presets(p) & postsets(p) (self-looping transition)
+      - in_degree(t_loop) == 1 and out_degree(t_loop) == 1
+      - remaining source transition t_src with out_degree(t_src) == 1
+      - remaining sink transition t_snk with in_degree(t_snk) == 1
+    """
+    cfg = config if config is not None else FoldConfig()
+    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
+    while_loops: List[Component] = []
+
+    for place in sorted(topo.net.places, key=lambda p: p.id):
+        if place.initial_tokens > 0:
+            continue
+        if topo.in_degree(place.id) != 2 or topo.out_degree(place.id) != 2:
+            continue
+
+        preds = topo.presets(place.id)
+        succs = topo.postsets(place.id)
+        shared = preds & succs
+        if len(shared) != 1:
+            continue
+
+        t_loop = next(iter(shared))
+        t_src_set = preds - shared
+        t_snk_set = succs - shared
+        if len(t_src_set) != 1 or len(t_snk_set) != 1:
+            continue
+
+        t_src = next(iter(t_src_set))
+        t_snk = next(iter(t_snk_set))
+
+        # Check linearity of the three roles per ProM foldWhile()
+        if topo.in_degree(t_loop) != 1 or topo.out_degree(t_loop) != 1:
+            continue
+        if topo.out_degree(t_src) != 1 or topo.in_degree(t_snk) != 1:
+            continue
+
+        loop_trans = topo.trans_map.get(t_loop)
+        tau_loop = loop_trans.get_tau() if loop_trans is not None else 1.0
+        # ProM formula: tau_new = tau(t_src) + tau(t_snk) + 2.0 * tau(t_loop)
+        # In fold_component: tau_sum = tau(t_src) + tau(t_snk) + tau(t_loop)
+        # Therefore, omega = (cfg.loop / 3.0) * tau_loop (when cfg.loop == 3.0, omega = 1.0 * tau_loop)
+        omega = (cfg.loop / 3.0) * tau_loop
+
+        while_loops.append(
+            Component(
+                component_type=ComponentType.LOOP,
+                internal_node_ids={place.id, t_loop},
+                entrance=t_src,
+                exit=t_snk,
+                omega=omega,
+            )
+        )
+
+    return while_loops
+
+
+def fold_while(
+    net: PetriNet,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Optional[Tuple[PetriNet, FoldStep]]:
+    """Folds a while loop self-looping on a 2-in/2-out place per ProM foldWhile()."""
+    cfg = config if config is not None else FoldConfig()
+    return _fold_first_candidate(net, detect_while(net, cfg), step_number)
+
+
 def _find_elementary_cycles(net: PetriNet, topology: NetTopology) -> List[List[str]]:
     """Finds all elementary directed cycles in the Petri net."""
     nodes = sorted(list(topology.place_ids | topology.trans_ids))
@@ -466,6 +558,14 @@ def detect_loops(
             else:
                 continue
 
+        # If entry_place is a canonical while loop (2-in/2-out sharing a self-loop transition),
+        # detect_while handles it with the precise ProM loop body multiplier.
+        if topo.in_degree(entry_place) == 2 and topo.out_degree(entry_place) == 2:
+            preds = topo.presets(entry_place)
+            succs = topo.postsets(entry_place)
+            if len(preds & succs) == 1:
+                continue
+
         # Condition 2: Single exit arc
         if len(out_arcs) != 1:
             continue
@@ -497,16 +597,406 @@ def fold_loop(
     step_number: int,
     config: Optional[FoldConfig] = None,
 ) -> Optional[Tuple[PetriNet, FoldStep]]:
-    """Folds an elementary loop component."""
+    """Folds an elementary cycle loop component."""
     cfg = config if config is not None else FoldConfig()
     return _fold_first_candidate(net, detect_loops(net, cfg), step_number)
+
+
+def forward_reachability(topo: NetTopology, source_id: str, sink_id: str) -> Set[str]:
+    """Computes the forward reachable set from source_id stopping at sink_id."""
+    queue = [source_id]
+    nodes = {source_id, sink_id}
+    while queue:
+        curr = queue.pop(0)
+        for target in topo.postsets(curr):
+            if target not in nodes:
+                nodes.add(target)
+                queue.append(target)
+    return nodes
+
+
+def backward_reachability(topo: NetTopology, sink_id: str, source_id: str) -> Set[str]:
+    """Computes the backward reachable set from sink_id stopping at source_id."""
+    queue = [sink_id]
+    nodes = {sink_id, source_id}
+    while queue:
+        curr = queue.pop(0)
+        for src in topo.presets(curr):
+            if src not in nodes:
+                nodes.add(src)
+                queue.append(src)
+    return nodes
+
+
+def is_reachable(topo: NetTopology, source_id: str, sink_id: str) -> bool:
+    """Returns True if sink_id is reachable from source_id via a directed path."""
+    if source_id == sink_id:
+        return True
+    queue = [source_id]
+    visited = {source_id}
+    while queue:
+        curr = queue.pop(0)
+        for target in topo.postsets(curr):
+            if target == sink_id:
+                return True
+            if target not in visited:
+                visited.add(target)
+                queue.append(target)
+    return False
+
+
+def find_sese_nodes(topo: NetTopology, source_id: str, sink_id: str) -> Optional[Set[str]]:
+    """Returns the set of nodes in the SESE component bounded by (source_id, sink_id), or None.
+
+    A pair (source, sink) forms a valid SESE component iff:
+      sink is reachable from source,
+      forward(source, sink) == backward(sink, source),
+      and at least 2 transitions are contained within the component.
+    """
+    if not is_reachable(topo, source_id, sink_id):
+        return None
+    fwd = forward_reachability(topo, source_id, sink_id)
+    bwd = backward_reachability(topo, sink_id, source_id)
+    if fwd == bwd:
+        trans_count = sum(1 for nid in fwd if topo.is_transition(nid))
+        if trans_count > 1:
+            return fwd
+    return None
+
+
+def detect_marked_graphs(
+    net_or_topology: Union[PetriNet, NetTopology],
+    config: Optional[FoldConfig] = None,
+) -> List[Component]:
+    """Detects maximal Marked Graph SESE components per ProM / Lassen Def. 17.
+
+    A Marked Graph SESE component is bounded by transition pair (t_source, t_sink)
+    where forward(t_source, t_sink) == backward(t_sink, t_source), contains > 1 transitions,
+    and every place p in the component has in_degree(p) == 1 and out_degree(p) == 1.
+    """
+    cfg = config if config is not None else FoldConfig()
+    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
+    candidates: List[Tuple[int, str, str, Set[str]]] = []
+
+    for t_src in sorted(topo.trans_ids):
+        for t_snk in sorted(topo.trans_ids):
+            if t_src == t_snk:
+                continue
+            sese = find_sese_nodes(topo, t_src, t_snk)
+            if sese is None:
+                continue
+
+            # Invariant: Every place in sese must have |*p| == 1 and |p*| == 1
+            is_mg = True
+            for nid in sese:
+                if topo.is_place(nid):
+                    if topo.in_degree(nid) != 1 or topo.out_degree(nid) != 1:
+                        is_mg = False
+                        break
+            if not is_mg:
+                continue
+
+            candidates.append((len(sese), t_src, t_snk, sese))
+
+    if not candidates:
+        return []
+
+    # ProM selects MAXIMAL marked graph
+    candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
+    _, best_src, best_snk, best_nodes = candidates[0]
+
+    splits = sum(1 for nid in best_nodes if topo.out_degree(nid) > 1)
+    joins = sum(1 for nid in best_nodes if topo.in_degree(nid) > 1)
+    diff = abs(joins - splits) + 1
+
+    comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
+    tau_sum = sum(t.get_tau() for t in comp_trans)
+    tau_new = sum(cfg.marked_graph * t.get_tau() for t in comp_trans) * diff
+    omega = tau_new - tau_sum
+
+    return [
+        Component(
+            component_type=ComponentType.MARKED_GRAPH,
+            internal_node_ids=best_nodes - {best_src, best_snk},
+            entrance=best_src,
+            exit=best_snk,
+            omega=omega,
+        )
+    ]
+
+
+def fold_marked_graph(
+    net: PetriNet,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Optional[Tuple[PetriNet, FoldStep]]:
+    """Folds maximal Marked Graph SESE component per ProM."""
+    cfg = config if config is not None else FoldConfig()
+    return _fold_first_candidate(net, detect_marked_graphs(net, cfg), step_number)
+
+
+def detect_state_machines(
+    net_or_topology: Union[PetriNet, NetTopology],
+    config: Optional[FoldConfig] = None,
+) -> List[Component]:
+    """Detects maximal State Machine SESE components per ProM / Lassen Def. 17.
+
+    A State Machine SESE component is bounded by place pair (p_source, p_sink)
+    where forward(p_source, p_sink) == backward(p_sink, p_source), contains > 1 transitions,
+    and every transition t in the component has in_degree(t) == 1 and out_degree(t) == 1.
+    """
+    cfg = config if config is not None else FoldConfig()
+    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
+    candidates: List[Tuple[int, str, str, Set[str]]] = []
+
+    for p_src in sorted(topo.place_ids):
+        for p_snk in sorted(topo.place_ids):
+            if p_src == p_snk:
+                continue
+            sese = find_sese_nodes(topo, p_src, p_snk)
+            if sese is None:
+                continue
+
+            # Invariant: Every transition in sese must have |*t| == 1 and |t*| == 1
+            is_state_machine = True
+            for nid in sese:
+                if topo.is_transition(nid):
+                    if topo.in_degree(nid) != 1 or topo.out_degree(nid) != 1:
+                        is_state_machine = False
+                        break
+            if not is_state_machine:
+                continue
+
+            candidates.append((len(sese), p_src, p_snk, sese))
+
+    if not candidates:
+        return []
+
+    # ProM selects MAXIMAL state machine
+    candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
+    _, best_src, best_snk, best_nodes = candidates[0]
+
+    splits = sum(1 for nid in best_nodes if topo.out_degree(nid) > 1)
+    joins = sum(1 for nid in best_nodes if topo.in_degree(nid) > 1)
+    diff = abs(joins - splits) + 1
+
+    comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
+    tau_sum = sum(t.get_tau() for t in comp_trans)
+    tau_new = sum(cfg.state_machine * t.get_tau() for t in comp_trans) * diff
+    omega = tau_new - tau_sum
+
+    return [
+        Component(
+            component_type=ComponentType.STATE_MACHINE,
+            internal_node_ids=best_nodes - {best_src, best_snk},
+            entrance=best_src,
+            exit=best_snk,
+            omega=omega,
+        )
+    ]
+
+
+def fold_state_machine(
+    net: PetriNet,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Optional[Tuple[PetriNet, FoldStep]]:
+    """Folds maximal State Machine SESE component per ProM."""
+    cfg = config if config is not None else FoldConfig()
+    return _fold_first_candidate(net, detect_state_machines(net, cfg), step_number)
+
+
+def detect_well_structured(
+    net_or_topology: Union[PetriNet, NetTopology],
+    config: Optional[FoldConfig] = None,
+) -> List[Component]:
+    """Detects maximal Well-Structured SESE components per ProM / Lassen Def. 18.
+
+    A Well-Structured SESE component is bounded by place pair (p_source, p_sink)
+    where forward(p_source, p_sink) == backward(p_sink, p_source), contains > 1 transitions,
+    and exhibits no PT/TP handle confusion or internal cycles.
+    """
+    cfg = config if config is not None else FoldConfig()
+    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
+    candidates: List[Tuple[int, str, str, Set[str]]] = []
+
+    for p_src in sorted(topo.place_ids):
+        for p_snk in sorted(topo.place_ids):
+            if p_src == p_snk:
+                continue
+            sese = find_sese_nodes(topo, p_src, p_snk)
+            if sese is None:
+                continue
+
+            # Invariant: no PT/TP confusion and no internal cycle
+            is_ws = True
+            for nid in sese:
+                if nid != p_snk and topo.is_place(nid):
+                    for tid in topo.postsets(nid):
+                        if topo.out_degree(nid) > 1 and topo.in_degree(tid) > 1:
+                            is_ws = False
+                            break
+                        if topo.in_degree(nid) > 1 and topo.in_degree(tid) > 1:
+                            is_ws = False
+                            break
+                        if nid in forward_reachability(topo, tid, p_snk):
+                            is_ws = False
+                            break
+                    if not is_ws:
+                        break
+            if not is_ws:
+                continue
+
+            candidates.append((len(sese), p_src, p_snk, sese))
+
+    if not candidates:
+        return []
+
+    # ProM selects MAXIMAL well-structured component
+    candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
+    _, best_src, best_snk, best_nodes = candidates[0]
+
+    p_splits = sum(1 for nid in best_nodes if topo.is_place(nid) and topo.out_degree(nid) > 1)
+    p_joins = sum(1 for nid in best_nodes if topo.is_place(nid) and topo.in_degree(nid) > 1)
+    t_splits = sum(1 for nid in best_nodes if topo.is_transition(nid) and topo.out_degree(nid) > 1)
+    t_joins = sum(1 for nid in best_nodes if topo.is_transition(nid) and topo.in_degree(nid) > 1)
+
+    diff_p = abs(p_joins - p_splits) + 1
+    diff_t = abs(t_joins - t_splits) + 1
+
+    comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
+    tau_sum = sum(t.get_tau() for t in comp_trans)
+    tau_new = sum(cfg.well_structured * t.get_tau() for t in comp_trans) * diff_p * diff_t
+    omega = tau_new - tau_sum
+
+    return [
+        Component(
+            component_type=ComponentType.WELL_STRUCTURED,
+            internal_node_ids=best_nodes - {best_src, best_snk},
+            entrance=best_src,
+            exit=best_snk,
+            omega=omega,
+        )
+    ]
+
+
+def fold_well_structured(
+    net: PetriNet,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Optional[Tuple[PetriNet, FoldStep]]:
+    """Folds maximal Well-Structured SESE component per ProM."""
+    cfg = config if config is not None else FoldConfig()
+    return _fold_first_candidate(net, detect_well_structured(net, cfg), step_number)
+
+
+def _calculate_unstructured_omega(
+    topo: NetTopology,
+    p_c: Set[str],
+    t_c: Set[str],
+    f_c: Set[Tuple[str, str]],
+    cfg: FoldConfig,
+) -> float:
+    """Calculates penalty omega for an unstructured subnet per Lassen Definition 22."""
+    weight = 5 * (abs(len(f_c) - (len(p_c) + len(t_c))) + 1)
+    if cfg.unstructured != 7.0:
+        weight = (cfg.unstructured / 7.0) * weight
+
+    p_splits = sum(1 for nid in p_c if topo.out_degree(nid) > 1)
+    p_joins = sum(1 for nid in p_c if topo.in_degree(nid) > 1)
+    t_splits = sum(1 for nid in t_c if topo.out_degree(nid) > 1)
+    t_joins = sum(1 for nid in t_c if topo.in_degree(nid) > 1)
+
+    diff_p = abs(p_joins - p_splits) + 1
+    diff_t = abs(t_joins - t_splits) + 1
+
+    trans_objs = [topo.trans_map[tid] for tid in t_c if tid in topo.trans_map]
+    tau_sum = sum(t.get_tau() for t in trans_objs)
+    tau_new = sum(weight * t.get_tau() for t in trans_objs) * diff_p * diff_t
+    return tau_new - tau_sum
+
+
+def detect_unstructured(net_or_topology: Any, config: Optional[FoldConfig] = None) -> List[Component]:
+    """Detects an unstructured component per Definition 21/22 and ProM's foldUnstructured().
+
+    Strategy:
+    1. Minimal SESE knot isolation: searches for place pairs (p_source, p_sink) that form
+       a valid SESE subnet (forward == backward, >1 transitions) and selects the MINIMAL
+       subnet by node count, ensuring local irregularities (e.g. goto) are isolated.
+    2. Global fallback: if no internal SESE pair exists, folds the entire remaining net
+       bounded by source and sink places.
+    """
+    cfg = config if config is not None else FoldConfig()
+    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
+
+    # 1. Minimal internal SESE knots
+    candidates: List[Tuple[int, str, str, Set[str]]] = []
+    for p_source in topo.net.places:
+        for p_sink in topo.net.places:
+            if p_source.id == p_sink.id:
+                continue
+            sese_nodes = find_sese_nodes(topo, p_source.id, p_sink.id)
+            if sese_nodes is not None:
+                candidates.append((len(sese_nodes), p_source.id, p_sink.id, sese_nodes))
+
+    if candidates:
+        # Select the MINIMAL component (isolates the exact unstructured knot per User Story 3)
+        candidates.sort(key=lambda x: (x[0], x[1], x[2]))
+        _, p_src_id, p_snk_id, comp_nodes = candidates[0]
+
+        p_c = {nid for nid in comp_nodes if topo.is_place(nid)}
+        t_c = {nid for nid in comp_nodes if topo.is_transition(nid)}
+        f_c = {(u, v) for (u, v) in topo.direct_arcs if u in comp_nodes and v in comp_nodes}
+
+        omega = _calculate_unstructured_omega(topo, p_c, t_c, f_c, cfg)
+
+        return [
+            Component(
+                component_type=ComponentType.UNSTRUCTURED,
+                internal_node_ids=comp_nodes - {p_src_id, p_snk_id},
+                entrance=p_src_id,
+                exit=p_snk_id,
+                omega=omega,
+            )
+        ]
+
+    # 2. Global fallback: whole net between source and sink places
+    if len(topo.trans_ids) <= 1:
+        return []
+
+    source_candidates = topo.source_places()
+    sink_candidates = topo.sink_places()
+    p_src = source_candidates[0] if source_candidates else topo.net.places[0]
+    p_snk = sink_candidates[0] if sink_candidates else topo.net.places[-1]
+    if p_src.id == p_snk.id and len(topo.net.places) > 1:
+        other_places = [p for p in topo.net.places if p.id != p_src.id]
+        if other_places:
+            p_snk = other_places[-1]
+
+    p_c = set(topo.place_ids)
+    t_c = set(topo.trans_ids)
+    f_c = set(topo.direct_arcs)
+
+    omega = _calculate_unstructured_omega(topo, p_c, t_c, f_c, cfg)
+
+    internal_nodes = (p_c - {p_src.id, p_snk.id}) | t_c
+    return [
+        Component(
+            component_type=ComponentType.UNSTRUCTURED,
+            internal_node_ids=internal_nodes,
+            entrance=p_src.id,
+            exit=p_snk.id,
+            omega=omega,
+        )
+    ]
 
 
 def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> List[Component]:
     """Detects all single-entry/single-exit structural components in net.
 
     Components are returned sorted per Definition 21:
-    - Sequence (priority 1) -> Choice (priority 2) -> Loop (priority 3)
+    - Sequence (priority 1) -> Choice (priority 2) -> Loop (priority 3) -> Marked Graph (4)
+      -> State Machine (5) -> Well Structured (6) -> Unstructured (7)
     - Ties broken by smallest internal node count (greedy, bottom-up reduction)
     - Fully deterministic secondary tie-breaking
     """
@@ -517,7 +1007,18 @@ def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> Lis
     components: List[Component] = []
     components.extend(detect_sequences(topo, config))
     components.extend(detect_choices(topo, config))
+    components.extend(detect_while(topo, config))
     components.extend(detect_loops(topo, config))
+
+    # Macro-components are evaluated only if no elementary components are present per Definition 21
+    if not components:
+        components.extend(detect_marked_graphs(topo, config))
+        components.extend(detect_state_machines(topo, config))
+        components.extend(detect_well_structured(topo, config))
+
+    # Unstructured components are evaluated as fallback per Definition 21 Priority 7
+    if not components:
+        components.extend(detect_unstructured(topo, config))
 
     # Definition 21 sorting:
     # 1. priority rank (lowest integer = highest priority)
@@ -636,69 +1137,10 @@ def fold_unstructured(
     net: PetriNet,
     step_number: int,
     config: Optional[FoldConfig] = None,
-) -> Tuple[PetriNet, FoldStep]:
-    """Folds all remaining irreducible internal nodes as a single Unstructured component (rho = 7).
-
-    Args:
-        net: The irreducible PetriNet.
-        step_number: 1-indexed reduction step number.
-        config: Optional fold configuration.
-
-    Returns:
-        A tuple of (folded_petri_net, fold_step_record).
-    """
+) -> Optional[Tuple[PetriNet, FoldStep]]:
+    """Folds the minimal SESE knot or remaining irreducible net as an Unstructured component per ProM."""
     cfg = config if config is not None else FoldConfig()
-    folded_net = net.clone()
-    topo = NetTopology(folded_net)
-
-    # Identify net entrance and exit places
-    source_candidates = topo.source_places()
-    sink_candidates = topo.sink_places()
-
-    p_src = source_candidates[0] if source_candidates else folded_net.places[0]
-    p_snk = sink_candidates[0] if sink_candidates else folded_net.places[-1]
-
-    # If source and sink resolve to the same place but other places exist, pick a distinct sink
-    if p_src.id == p_snk.id and len(folded_net.places) > 1:
-        other_places = [p for p in folded_net.places if p.id != p_src.id]
-        if other_places:
-            p_snk = other_places[-1]
-
-    # Consumed nodes: all transitions, and all places except p_src and p_snk
-    consumed_places = {p.id for p in folded_net.places if p.id not in (p_src.id, p_snk.id)}
-    consumed_transitions = {t.id for t in folded_net.transitions}
-    consumed_node_ids = consumed_places | consumed_transitions
-
-    tau_sum = sum(t.get_tau() for t in folded_net.transitions)
-    omega = float(cfg.unstructured)
-    accumulated_tau = omega + tau_sum
-
-    opaque_id, opaque_t = _add_opaque_transition(
-        folded_net, step_number, ComponentType.UNSTRUCTURED.value, accumulated_tau
-    )
-
-    # Retain only boundary places and the new opaque transition
-    folded_net.remove_nodes(consumed_node_ids)
-    folded_net.arcs = []
-
-    node_map = folded_net.get_node_map()
-    folded_net.add_arc(node_map[p_src.id], opaque_t)
-    folded_net.add_arc(opaque_t, node_map[p_snk.id])
-
-    running_sm = accumulated_tau
-
-    step = FoldStep(
-        step_number=step_number,
-        component_type=ComponentType.UNSTRUCTURED,
-        consumed_node_ids=consumed_node_ids,
-        opaque_transition_id=opaque_id,
-        omega=omega,
-        tau=accumulated_tau,
-        running_sm=running_sm,
-        snapshot=folded_net.clone(),
-    )
-
-    return folded_net, step
+    return _fold_first_candidate(net, detect_unstructured(net, cfg), step_number)
 
 
 def _is_trivial_workflow_net(net: PetriNet) -> bool:
@@ -732,7 +1174,7 @@ def fold_net(
 
     Iteratively detects the simplest/smallest remaining component, folds it into an opaque
     transition, and accumulates the penalty omega onto the transition weight tau.
-    If the net is irreducible, terminates with the unstructured penalty.
+    Prioritizes fine-grained reductions, resolving unstructured knots via minimal SESE isolation.
 
     Args:
         net: The target PetriNet to reduce.
@@ -748,23 +1190,31 @@ def fold_net(
     step_number = 1
     fully_reducible = True
 
-    while not _is_trivial_workflow_net(current_net):
-        # Prioritize Sequence (Single-Place Contraction) -> Choice -> Loop per ProM priority
+    while not _is_trivial_workflow_net(current_net) and len(current_net.transitions) > 1:
+        # Prioritize Sequence (Single-Place Contraction) -> Choice -> While (Loop)
+        # -> Marked Graph -> State Machine -> Well Structured -> Elementary Loop
+        # -> Unstructured (minimal SESE knot fallback) per ProM priority
         reduction_result = (
             fold_sequence(current_net, step_number, cfg)
             or fold_choice(current_net, step_number, cfg)
+            or fold_while(current_net, step_number, cfg)
+            or fold_marked_graph(current_net, step_number, cfg)
+            or fold_state_machine(current_net, step_number, cfg)
+            or fold_well_structured(current_net, step_number, cfg)
             or fold_loop(current_net, step_number, cfg)
+            or fold_unstructured(current_net, step_number, cfg)
         )
         if reduction_result is not None:
             current_net, step = reduction_result
             steps.append(step)
             step_number += 1
+            if step.component_type == ComponentType.UNSTRUCTURED:
+                fully_reducible = False
+                if len(current_net.transitions) <= 1 or len(current_net.places) <= 1:
+                    break
             continue
 
-        # Irreducible net: fallback to unstructured penalty
-        current_net, step = fold_unstructured(current_net, step_number, cfg)
-        steps.append(step)
-        fully_reducible = False
+        # Irreducible net with no further reduction possible
         break
 
     final_sm = current_net.transitions[0].get_tau() if current_net.transitions else 0.0

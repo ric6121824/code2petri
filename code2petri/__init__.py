@@ -16,7 +16,12 @@ from code2petri.fold import (
     fold_sequence,
     fold_single_place_contraction,
     fold_choice,
+    fold_while,
+    fold_marked_graph,
+    fold_state_machine,
+    fold_well_structured,
     fold_loop,
+    fold_unstructured,
     fold_net,
 )
 
@@ -49,7 +54,12 @@ __all__ = [
     "fold_sequence",
     "fold_single_place_contraction",
     "fold_choice",
+    "fold_while",
+    "fold_marked_graph",
+    "fold_state_machine",
+    "fold_well_structured",
     "fold_loop",
+    "fold_unstructured",
     "fold_net",
     "inline_expand",
 ]

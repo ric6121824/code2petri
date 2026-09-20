@@ -17,6 +17,11 @@ from code2petri.fold import (
     ComponentType,
     calculate_symmetry_multiplier,
     detect_components,
+    detect_while,
+    detect_marked_graphs,
+    detect_state_machines,
+    detect_well_structured,
+    detect_unstructured,
 )
 
 
@@ -426,7 +431,7 @@ class TestPrioritySortingAndTieBreaking(unittest.TestCase):
 
 
 class TestUnstructuredNet(unittest.TestCase):
-    def test_unstructured_sync_split_net_returns_empty(self):
+    def test_sync_split_net_detects_well_structured(self):
         net = PetriNet()
         p1 = net.add_place("p1")
         p2 = net.add_place("p2")
@@ -450,9 +455,37 @@ class TestUnstructuredNet(unittest.TestCase):
         net.add_arc(t4, p5)
 
         components = detect_components(net)
-        self.assertEqual(components, [])
+        self.assertEqual(len(components), 1)
+        self.assertEqual(components[0].component_type, ComponentType.WELL_STRUCTURED)
+        self.assertEqual(components[0].entrance, "p1")
+        self.assertEqual(components[0].exit, "p5")
 
-    def test_unstructured_multi_entry_cycle_returns_empty(self):
+    def test_unstructured_irreducible_net_detects_unstructured(self):
+        # Entangled cross-connections (milestone pattern)
+        net = PetriNet()
+        pin = net.add_place("p_in")
+        p1 = net.add_place("p1")
+        p2 = net.add_place("p2")
+        pout = net.add_place("p_out")
+        t1 = net.add_transition("t1")
+        t2 = net.add_transition("t2")
+        t3 = net.add_transition("t3")
+        t4 = net.add_transition("t4")
+        net.add_arc(pin, t1)
+        net.add_arc(pin, t2)
+        net.add_arc(t1, p1)
+        net.add_arc(t2, p2)
+        net.add_arc(p1, t3)
+        net.add_arc(p2, t3)
+        net.add_arc(p1, t4)
+        net.add_arc(t3, pout)
+        net.add_arc(t4, p2)
+
+        components = detect_components(net)
+        self.assertEqual(len(components), 1)
+        self.assertEqual(components[0].component_type, ComponentType.UNSTRUCTURED)
+
+    def test_unstructured_multi_entry_cycle_detects_unstructured(self):
         net = PetriNet()
         pa = net.add_place("pa")
         pb = net.add_place("pb")
@@ -474,7 +507,155 @@ class TestUnstructuredNet(unittest.TestCase):
         net.add_arc(t_exit, p_exit)
 
         components = detect_components(net)
-        self.assertEqual(components, [])
+        self.assertEqual(len(components), 1)
+        self.assertEqual(components[0].component_type, ComponentType.UNSTRUCTURED)
+
+
+class TestDetectWhile(unittest.TestCase):
+    def test_detect_while_loop(self):
+        net = PetriNet()
+        p_in = net.add_place("p_in", initial_tokens=1)
+        p_head = net.add_place("p_head")
+        p_out = net.add_place("p_out")
+        t_src = net.add_transition("t_src")
+        t_snk = net.add_transition("t_snk")
+        t_loop = net.add_transition("t_loop")
+
+        net.add_arc(p_in, t_src)
+        net.add_arc(t_src, p_head)
+        net.add_arc(p_head, t_loop)
+        net.add_arc(t_loop, p_head)
+        net.add_arc(p_head, t_snk)
+        net.add_arc(t_snk, p_out)
+
+        components = detect_while(net)
+        self.assertEqual(len(components), 1)
+        c = components[0]
+        self.assertEqual(c.component_type, ComponentType.LOOP)
+        self.assertEqual(c.entrance, "t_src")
+        self.assertEqual(c.exit, "t_snk")
+        self.assertEqual(c.internal_node_ids, {"p_head", "t_loop"})
+        self.assertEqual(c.omega, 1.0)
+
+
+class TestDetectMacroComponents(unittest.TestCase):
+    def test_detect_marked_graph(self):
+        net = PetriNet()
+        p_in = net.add_place("p_in", initial_tokens=1)
+        p1 = net.add_place("p1")
+        p2 = net.add_place("p2")
+        p_out = net.add_place("p_out")
+        t_src = net.add_transition("t_src")
+        t_snk = net.add_transition("t_snk")
+
+        net.add_arc(p_in, t_src)
+        net.add_arc(t_src, p1)
+        net.add_arc(t_src, p2)
+        net.add_arc(p1, t_snk)
+        net.add_arc(p2, t_snk)
+        net.add_arc(t_snk, p_out)
+
+        mg_comps = detect_marked_graphs(net)
+        self.assertEqual(len(mg_comps), 1)
+        self.assertEqual(mg_comps[0].component_type, ComponentType.MARKED_GRAPH)
+        self.assertEqual(mg_comps[0].entrance, "t_src")
+        self.assertEqual(mg_comps[0].exit, "t_snk")
+        self.assertEqual(mg_comps[0].internal_node_ids, {"p1", "p2"})
+
+    def test_detect_state_machine(self):
+        net = PetriNet()
+        p_src = net.add_place("p_src", initial_tokens=1)
+        p_mid1 = net.add_place("p_mid1")
+        p_mid2 = net.add_place("p_mid2")
+        p_snk = net.add_place("p_snk")
+        t1 = net.add_transition("t1")
+        t2 = net.add_transition("t2")
+        t3 = net.add_transition("t3")
+        t4 = net.add_transition("t4")
+        t5 = net.add_transition("t5")
+
+        net.add_arc(p_src, t1)
+        net.add_arc(p_src, t3)
+        net.add_arc(t1, p_mid1)
+        net.add_arc(t3, p_mid2)
+        net.add_arc(p_mid1, t2)
+        net.add_arc(p_mid1, t5)
+        net.add_arc(t5, p_mid2)
+        net.add_arc(p_mid2, t4)
+        net.add_arc(t2, p_snk)
+        net.add_arc(t4, p_snk)
+
+        sm_comps = detect_state_machines(net)
+        self.assertEqual(len(sm_comps), 1)
+        self.assertEqual(sm_comps[0].component_type, ComponentType.STATE_MACHINE)
+        self.assertEqual(sm_comps[0].entrance, "p_src")
+        self.assertEqual(sm_comps[0].exit, "p_snk")
+
+    def test_detect_well_structured(self):
+        net = PetriNet()
+        pw1 = net.add_place("pw1", initial_tokens=1)
+        pw2 = net.add_place("pw2")
+        pw3 = net.add_place("pw3")
+        pw4 = net.add_place("pw4")
+        pw5 = net.add_place("pw5")
+        tw1 = net.add_transition("tw1")
+        tw2 = net.add_transition("tw2")
+        tw3 = net.add_transition("tw3")
+        tw4 = net.add_transition("tw4")
+        net.add_arc(pw1, tw1)
+        net.add_arc(tw1, pw2)
+        net.add_arc(pw2, tw2)
+        net.add_arc(pw2, tw3)
+        net.add_arc(tw2, pw3)
+        net.add_arc(tw3, pw4)
+        net.add_arc(pw3, tw4)
+        net.add_arc(pw4, tw4)
+        net.add_arc(tw4, pw5)
+
+        ws_comps = detect_well_structured(net)
+        self.assertEqual(len(ws_comps), 1)
+        self.assertEqual(ws_comps[0].component_type, ComponentType.WELL_STRUCTURED)
+        self.assertEqual(ws_comps[0].entrance, "pw1")
+        self.assertEqual(ws_comps[0].exit, "pw5")
+
+
+class TestDetectUnstructuredKnot(unittest.TestCase):
+    def test_detect_unstructured_isolates_minimal_knot(self):
+        net = PetriNet()
+        p_start = net.add_place("p_start", initial_tokens=1)
+        p_knot_in = net.add_place("p_knot_in")
+        p_k1 = net.add_place("p_k1")
+        p_k2 = net.add_place("p_k2")
+        p_knot_out = net.add_place("p_knot_out")
+        p_end = net.add_place("p_end")
+
+        t_head = net.add_transition("t_head")
+        t1 = net.add_transition("t1")
+        t2 = net.add_transition("t2")
+        t3 = net.add_transition("t3")
+        t4 = net.add_transition("t4")
+        t_tail = net.add_transition("t_tail")
+
+        net.add_arc(p_start, t_head)
+        net.add_arc(t_head, p_knot_in)
+        net.add_arc(p_knot_in, t1)
+        net.add_arc(p_knot_in, t2)
+        net.add_arc(t1, p_k1)
+        net.add_arc(t2, p_k2)
+        net.add_arc(p_k1, t3)
+        net.add_arc(p_k2, t3)
+        net.add_arc(p_k1, t4)
+        net.add_arc(t3, p_knot_out)
+        net.add_arc(t4, p_k2)
+        net.add_arc(p_knot_out, t_tail)
+        net.add_arc(t_tail, p_end)
+
+        unstructured_comps = detect_unstructured(net)
+        self.assertEqual(len(unstructured_comps), 1)
+        self.assertEqual(unstructured_comps[0].component_type, ComponentType.UNSTRUCTURED)
+        # SESE knot entrance and exit are exactly the knot boundary places
+        self.assertEqual(unstructured_comps[0].entrance, "p_knot_in")
+        self.assertEqual(unstructured_comps[0].exit, "p_knot_out")
 
 
 class TestFoldConfigOverrides(unittest.TestCase):

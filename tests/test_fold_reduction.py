@@ -21,7 +21,12 @@ from code2petri.fold import (
     fold_sequence,
     fold_single_place_contraction,
     fold_choice,
+    fold_while,
+    fold_marked_graph,
+    fold_state_machine,
+    fold_well_structured,
     fold_loop,
+    fold_unstructured,
     _is_trivial_workflow_net,
 )
 from tests.test_fold_detection import (
@@ -143,22 +148,22 @@ class TestFoldLoop(unittest.TestCase):
         result = fold_net(net)
 
         self.assertTrue(result.fully_reducible)
-        # Step 1: Loop component folded (omega = 3.0, tau = 3.0 + 3 = 6.0)
-        # Step 2: Linear sequence (t0 -> p_head -> t_C1) folded (omega = 0.0, tau = 1.0 + 6.0 = 7.0)
+        # Step 1: Linear sequence intra-loop place p_body contracted (t_while -> p_body -> t_back -> t_C1, omega=0.0, tau=2.0)
+        # Step 2: While loop folded on p_head (t0, t_exit with self-loop t_C1 -> t_C2, omega=2.0, tau=1.0+1.0+2*2.0=6.0)
         self.assertEqual(len(result.steps), 2)
 
         step1 = result.steps[0]
-        self.assertEqual(step1.component_type, ComponentType.LOOP)
-        self.assertEqual(step1.omega, 3.0)
-        self.assertEqual(step1.tau, 6.0)
+        self.assertEqual(step1.component_type, ComponentType.SEQUENCE)
+        self.assertEqual(step1.omega, 0.0)
+        self.assertEqual(step1.tau, 2.0)
         self.assertEqual(step1.opaque_transition_id, "t_C1")
 
         step2 = result.steps[1]
-        self.assertEqual(step2.component_type, ComponentType.SEQUENCE)
-        self.assertEqual(step2.omega, 0.0)
-        self.assertEqual(step2.tau, 7.0)
+        self.assertEqual(step2.component_type, ComponentType.LOOP)
+        self.assertEqual(step2.omega, 2.0)
+        self.assertEqual(step2.tau, 6.0)
         self.assertEqual(step2.opaque_transition_id, "t_C2")
-        self.assertEqual(result.final_sm, 7.0)
+        self.assertEqual(result.final_sm, 6.0)
 
     def test_prom_loop_fold_direct(self):
         """Validates that fold_loop directly folds an elementary loop component."""
@@ -173,6 +178,79 @@ class TestFoldLoop(unittest.TestCase):
         self.assertEqual(step.opaque_transition_id, "t_C1")
         self.assertEqual(step.omega, 3.0)
         self.assertEqual(step.tau, 6.0)
+
+
+class TestFoldWhile(unittest.TestCase):
+    def test_prom_while_fold_direct(self):
+        """Validates that fold_while directly folds a 2-in/2-out place with a self-loop transition."""
+        net = PetriNet()
+        p_in = net.add_place("p_in", initial_tokens=1)
+        p_head = net.add_place("p_head")
+        p_out = net.add_place("p_out")
+        t_src = net.add_transition("t_src")
+        t_snk = net.add_transition("t_snk")
+        t_loop = net.add_transition("t_loop")
+
+        net.add_arc(p_in, t_src)
+        net.add_arc(t_src, p_head)
+        net.add_arc(p_head, t_loop)
+        net.add_arc(t_loop, p_head)
+        net.add_arc(p_head, t_snk)
+        net.add_arc(t_snk, p_out)
+
+        res = fold_while(net, step_number=1, config=FoldConfig())
+        self.assertIsNotNone(res, "fold_while should reduce canonical while pattern")
+        folded_net, step = res
+
+        self.assertEqual(step.step_number, 1)
+        self.assertEqual(step.component_type, ComponentType.LOOP)
+        self.assertEqual(step.opaque_transition_id, "t_C1")
+        # omega = (3.0 / 3.0) * tau(t_loop) = 1.0, tau = tau(t_src) + tau(t_snk) + 2 * tau(t_loop) = 4.0
+        self.assertEqual(step.omega, 1.0)
+        self.assertEqual(step.tau, 4.0)
+        self.assertEqual(len(folded_net.transitions), 1)
+        self.assertEqual({p.id for p in folded_net.places}, {"p_in", "p_out"})
+        self.assertTrue(_is_trivial_workflow_net(folded_net))
+
+    def test_ast_while_loop_reduction(self):
+        """Validates that a realistic AST while-loop topology reduces cleanly without unstructured fallback."""
+        net = PetriNet()
+        p_entry = net.add_place("p_entry", initial_tokens=1)
+        p_head = net.add_place("p_head")
+        p_body = net.add_place("p_body")
+        p_back = net.add_place("p_back")
+        p_exit = net.add_place("p_exit")
+        p_end = net.add_place("p_end")
+
+        t_init = net.add_transition("t_init")
+        t_cond_true = net.add_transition("t_cond_true")
+        t_body = net.add_transition("t_body")
+        t_back = net.add_transition("t_back")
+        t_cond_false = net.add_transition("t_cond_false")
+        t_after = net.add_transition("t_after")
+
+        net.add_arc(p_entry, t_init)
+        net.add_arc(t_init, p_head)
+
+        net.add_arc(p_head, t_cond_true)
+        net.add_arc(t_cond_true, p_body)
+        net.add_arc(p_body, t_body)
+        net.add_arc(t_body, p_back)
+        net.add_arc(p_back, t_back)
+        net.add_arc(t_back, p_head)
+
+        net.add_arc(p_head, t_cond_false)
+        net.add_arc(t_cond_false, p_exit)
+        net.add_arc(p_exit, t_after)
+        net.add_arc(t_after, p_end)
+
+        result = fold_net(net)
+        self.assertTrue(result.fully_reducible)
+        for s in result.steps:
+            self.assertNotEqual(s.component_type, ComponentType.UNSTRUCTURED)
+        final_net = result.steps[-1].snapshot
+        self.assertEqual(len(final_net.transitions), 1)
+        self.assertTrue(_is_trivial_workflow_net(final_net))
 
 
 class TestFoldMixedAndPriority(unittest.TestCase):
@@ -245,8 +323,9 @@ class TestFoldIrreducible(unittest.TestCase):
 
         last_step = result.steps[-1]
         self.assertEqual(last_step.component_type, ComponentType.UNSTRUCTURED)
-        self.assertEqual(last_step.omega, 7.0)
-        self.assertGreater(result.final_sm, 7.0)
+        self.assertEqual(last_step.omega, 156.0)
+        self.assertEqual(last_step.tau, 160.0)
+        self.assertEqual(result.final_sm, 160.0)
 
     def test_unstructured_fold_on_single_place_net(self):
         # Build an irreducible net with a single place and multiple transitions
@@ -286,6 +365,271 @@ class TestFoldIrreducible(unittest.TestCase):
         net.add_arc(p0, t0)
         net.add_arc(t0, p0)
         self.assertFalse(_is_trivial_workflow_net(net))
+
+
+class TestFoldMacroComponents(unittest.TestCase):
+    def test_fold_marked_graph(self):
+        """Validates that fold_marked_graph folds concurrent fork/join structures."""
+        net = PetriNet()
+        p_in = net.add_place("p_in", initial_tokens=1)
+        p1 = net.add_place("p1")
+        p2 = net.add_place("p2")
+        p_out = net.add_place("p_out")
+        t_src = net.add_transition("t_src")
+        t_snk = net.add_transition("t_snk")
+
+        net.add_arc(p_in, t_src)
+        net.add_arc(t_src, p1)
+        net.add_arc(t_src, p2)
+        net.add_arc(p1, t_snk)
+        net.add_arc(p2, t_snk)
+        net.add_arc(t_snk, p_out)
+
+        res = fold_marked_graph(net, step_number=1, config=FoldConfig())
+        self.assertIsNotNone(res, "fold_marked_graph should reduce valid marked graph")
+        folded_net, step = res
+
+        self.assertEqual(step.step_number, 1)
+        self.assertEqual(step.component_type, ComponentType.MARKED_GRAPH)
+        self.assertEqual(step.opaque_transition_id, "t_C1")
+        # diff = 1, tau_new = sum(2.0 * 1.0) * 1 = 4.0, omega = 4.0 - 2.0 = 2.0
+        self.assertEqual(step.omega, 2.0)
+        self.assertEqual(step.tau, 4.0)
+        self.assertEqual(len(folded_net.transitions), 1)
+        self.assertEqual({p.id for p in folded_net.places}, {"p_in", "p_out"})
+
+    def test_fold_state_machine(self):
+        """Validates that fold_state_machine folds state machine subnets where transitions have degree 1."""
+        net = PetriNet()
+        p_src = net.add_place("p_src", initial_tokens=1)
+        p_mid1 = net.add_place("p_mid1")
+        p_mid2 = net.add_place("p_mid2")
+        p_snk = net.add_place("p_snk")
+        t1 = net.add_transition("t1")
+        t2 = net.add_transition("t2")
+        t3 = net.add_transition("t3")
+        t4 = net.add_transition("t4")
+        t5 = net.add_transition("t5")
+
+        net.add_arc(p_src, t1)
+        net.add_arc(p_src, t3)
+        net.add_arc(t1, p_mid1)
+        net.add_arc(t3, p_mid2)
+        net.add_arc(p_mid1, t2)
+        net.add_arc(p_mid1, t5)
+        net.add_arc(t5, p_mid2)
+        net.add_arc(p_mid2, t4)
+        net.add_arc(t2, p_snk)
+        net.add_arc(t4, p_snk)
+
+        res = fold_state_machine(net, step_number=1, config=FoldConfig())
+        self.assertIsNotNone(res, "fold_state_machine should reduce valid state machine")
+        folded_net, step = res
+
+        self.assertEqual(step.step_number, 1)
+        self.assertEqual(step.component_type, ComponentType.STATE_MACHINE)
+        self.assertEqual(step.opaque_transition_id, "t_C1")
+        self.assertEqual(step.tau, 10.0)
+        self.assertEqual(len(folded_net.transitions), 1)
+        self.assertEqual({p.id for p in folded_net.places}, {"p_src", "p_snk"})
+
+    def test_fold_well_structured(self):
+        """Validates that fold_well_structured folds well-structured subnets matching ProM."""
+        net = PetriNet()
+        pw1 = net.add_place("pw1", initial_tokens=1)
+        pw2 = net.add_place("pw2")
+        pw3 = net.add_place("pw3")
+        pw4 = net.add_place("pw4")
+        pw5 = net.add_place("pw5")
+        tw1 = net.add_transition("tw1")
+        tw2 = net.add_transition("tw2")
+        tw3 = net.add_transition("tw3")
+        tw4 = net.add_transition("tw4")
+        net.add_arc(pw1, tw1)
+        net.add_arc(tw1, pw2)
+        net.add_arc(pw2, tw2)
+        net.add_arc(pw2, tw3)
+        net.add_arc(tw2, pw3)
+        net.add_arc(tw3, pw4)
+        net.add_arc(pw3, tw4)
+        net.add_arc(pw4, tw4)
+        net.add_arc(tw4, pw5)
+
+        res = fold_well_structured(net, step_number=1, config=FoldConfig())
+        self.assertIsNotNone(res, "fold_well_structured should reduce valid well-structured net")
+        folded_net, step = res
+
+        self.assertEqual(step.step_number, 1)
+        self.assertEqual(step.component_type, ComponentType.WELL_STRUCTURED)
+        self.assertEqual(step.opaque_transition_id, "t_C1")
+        self.assertEqual(step.tau, 32.0)
+        self.assertEqual(len(folded_net.transitions), 1)
+        self.assertEqual({p.id for p in folded_net.places}, {"pw1", "pw5"})
+
+    def test_fold_net_end_to_end_marked_graph(self):
+        """Validates that a workflow net containing a marked graph reduces fully via fold_net."""
+        net = PetriNet()
+        p_start = net.add_place("p_start", initial_tokens=1)
+        p_in = net.add_place("p_in")
+        p1 = net.add_place("p1")
+        p2 = net.add_place("p2")
+        p_out = net.add_place("p_out")
+        p_end = net.add_place("p_end")
+
+        t_head = net.add_transition("t_head")
+        t_src = net.add_transition("t_src")
+        t_snk = net.add_transition("t_snk")
+        t_tail = net.add_transition("t_tail")
+
+        net.add_arc(p_start, t_head)
+        net.add_arc(t_head, p_in)
+        net.add_arc(p_in, t_src)
+        net.add_arc(t_src, p1)
+        net.add_arc(t_src, p2)
+        net.add_arc(p1, t_snk)
+        net.add_arc(p2, t_snk)
+        net.add_arc(t_snk, p_out)
+        net.add_arc(p_out, t_tail)
+        net.add_arc(t_tail, p_end)
+
+        result = fold_net(net)
+        self.assertTrue(result.fully_reducible)
+        step_types = [s.component_type for s in result.steps]
+        self.assertIn(ComponentType.MARKED_GRAPH, step_types)
+        final_net = result.steps[-1].snapshot
+        self.assertEqual(len(final_net.transitions), 1)
+        self.assertTrue(_is_trivial_workflow_net(final_net))
+
+    def test_fold_net_end_to_end_state_machine(self):
+        """Validates that a workflow net containing a state machine reduces fully via fold_net."""
+        net = PetriNet()
+        p_start = net.add_place("p_start", initial_tokens=1)
+        p_src = net.add_place("p_src")
+        p_mid1 = net.add_place("p_mid1")
+        p_mid2 = net.add_place("p_mid2")
+        p_snk = net.add_place("p_snk")
+        p_end = net.add_place("p_end")
+
+        t_head = net.add_transition("t_head")
+        t1 = net.add_transition("t1")
+        t2 = net.add_transition("t2")
+        t3 = net.add_transition("t3")
+        t4 = net.add_transition("t4")
+        t5 = net.add_transition("t5")
+        t_tail = net.add_transition("t_tail")
+
+        net.add_arc(p_start, t_head)
+        net.add_arc(t_head, p_src)
+        net.add_arc(p_src, t1)
+        net.add_arc(p_src, t3)
+        net.add_arc(t1, p_mid1)
+        net.add_arc(t3, p_mid2)
+        net.add_arc(p_mid1, t2)
+        net.add_arc(p_mid1, t5)
+        net.add_arc(t5, p_mid2)
+        net.add_arc(p_mid2, t4)
+        net.add_arc(t2, p_snk)
+        net.add_arc(t4, p_snk)
+        net.add_arc(p_snk, t_tail)
+        net.add_arc(t_tail, p_end)
+
+        result = fold_net(net)
+        self.assertTrue(result.fully_reducible)
+        step_types = [s.component_type for s in result.steps]
+        self.assertIn(ComponentType.STATE_MACHINE, step_types)
+        final_net = result.steps[-1].snapshot
+        self.assertEqual(len(final_net.transitions), 1)
+        self.assertTrue(_is_trivial_workflow_net(final_net))
+
+    def test_fold_net_end_to_end_well_structured(self):
+        """Validates that a workflow net containing a well-structured subnet reduces fully via fold_net."""
+        net = PetriNet()
+        p_start = net.add_place("p_start", initial_tokens=1)
+        pw1 = net.add_place("pw1")
+        pw2 = net.add_place("pw2")
+        pw3 = net.add_place("pw3")
+        pw4 = net.add_place("pw4")
+        pw5 = net.add_place("pw5")
+        p_end = net.add_place("p_end")
+
+        t_head = net.add_transition("t_head")
+        tw1 = net.add_transition("tw1")
+        tw2 = net.add_transition("tw2")
+        tw3 = net.add_transition("tw3")
+        tw4 = net.add_transition("tw4")
+        t_tail = net.add_transition("t_tail")
+
+        net.add_arc(p_start, t_head)
+        net.add_arc(t_head, pw1)
+        net.add_arc(pw1, tw1)
+        net.add_arc(tw1, pw2)
+        net.add_arc(pw2, tw2)
+        net.add_arc(pw2, tw3)
+        net.add_arc(tw2, pw3)
+        net.add_arc(tw3, pw4)
+        net.add_arc(pw3, tw4)
+        net.add_arc(pw4, tw4)
+        net.add_arc(tw4, pw5)
+        net.add_arc(pw5, t_tail)
+        net.add_arc(t_tail, p_end)
+
+        result = fold_net(net)
+        self.assertTrue(result.fully_reducible)
+        step_types = [s.component_type for s in result.steps]
+        self.assertIn(ComponentType.WELL_STRUCTURED, step_types)
+        final_net = result.steps[-1].snapshot
+        self.assertEqual(len(final_net.transitions), 1)
+        self.assertTrue(_is_trivial_workflow_net(final_net))
+
+
+class TestFoldUnstructuredKnotIsolation(unittest.TestCase):
+    def test_unstructured_minimal_sese_knot_isolation(self):
+        """Validates User Story 3: minimal SESE knot is isolated so outer workflow structure can reduce."""
+        net = PetriNet()
+        p_start = net.add_place("p_start", initial_tokens=1)
+        p_knot_in = net.add_place("p_knot_in")
+        p_k1 = net.add_place("p_k1")
+        p_k2 = net.add_place("p_k2")
+        p_knot_out = net.add_place("p_knot_out")
+        p_end = net.add_place("p_end")
+
+        t_head = net.add_transition("t_head")
+        t1 = net.add_transition("t1")
+        t2 = net.add_transition("t2")
+        t3 = net.add_transition("t3")
+        t4 = net.add_transition("t4")
+        t_tail = net.add_transition("t_tail")
+
+        # Outer head
+        net.add_arc(p_start, t_head)
+        net.add_arc(t_head, p_knot_in)
+
+        # Knot
+        net.add_arc(p_knot_in, t1)
+        net.add_arc(p_knot_in, t2)
+        net.add_arc(t1, p_k1)
+        net.add_arc(t2, p_k2)
+        net.add_arc(p_k1, t3)
+        net.add_arc(p_k2, t3)
+        net.add_arc(p_k1, t4)
+        net.add_arc(t3, p_knot_out)
+        net.add_arc(t4, p_k2)
+
+        # Outer tail
+        net.add_arc(p_knot_out, t_tail)
+        net.add_arc(t_tail, p_end)
+
+        result = fold_net(net)
+        # Knot causes fully_reducible to be False
+        self.assertFalse(result.fully_reducible)
+        # The reduction completes to a single transition
+        self.assertTrue(_is_trivial_workflow_net(result.steps[-1].snapshot))
+        self.assertEqual(len(result.steps[-1].snapshot.transitions), 1)
+
+        # An UNSTRUCTURED step occurred, followed by outer SEQUENCE steps
+        step_types = [s.component_type for s in result.steps]
+        self.assertIn(ComponentType.UNSTRUCTURED, step_types)
+        self.assertIn(ComponentType.SEQUENCE, step_types)
 
 
 class TestFoldConfigOverrides(unittest.TestCase):
