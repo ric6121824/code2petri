@@ -13,16 +13,16 @@
 
 ## Answer
 
-1. **Single-Place Contraction (`fold_sequence` / `foldSequence`)**:
+1. **Single-Place Contraction (`fold_sequence`)**:
    - Implemented in `code2petri/fold.py` following ProM's reference $1 \to 1 \to 1$ topology (`PNAnalysis.jar`).
    - Identifies an intermediate place $p$ with $|*p| = 1$, $|p*| = 1$, $t_{src} \ne t_{snk}$, $|t_{src}*| = 1$, and $|*t_{snk}| = 1$.
    - Includes safety guards: does not contract marked places (`initial_tokens > 0`), and avoids collapsing 2-transition cycles into self-loops (`presets(t_src) & postsets(t_snk) == empty`).
    - Merges adjacent transitions into a single opaque transition $t_C$, accumulating $\tau = \tau(t_{src}) + \tau(t_{snk})$ with $\omega = 0.0$.
 
-2. **Atomic Choice Fold (`fold_choice` / `foldChoice`)**:
-   - Implemented in `code2petri/fold.py` grouping outgoing transitions from each place by common single output place.
+2. **Atomic Choice Fold (`fold_choice`)**:
+   - Implemented in `code2petri/fold.py` grouping outgoing transitions from each place by common single output place (generalizing Murata parallel transition reduction).
    - Matches any bundle of $\ge 2$ parallel transitions between shared entrance $p_{source}$ and shared exit $p_{sink}$.
-   - Applies ProM's 1.5x complexity markup: $\tau_{new} = \sum \tau \times 1.5$, setting $\omega = \text{cfg.choice} \times (\sum \tau \times 0.5)$.
+   - Applies ProM's 1.5x complexity markup (per Phase 2.6 User Story 1): $\tau_{new} = \sum \tau \times 1.5$, setting $\omega = \text{cfg.choice} \times (\sum \tau \times 0.5)$.
 
 3. **Greedy Prioritized Reduction Loop (`fold_net`)**:
    - Updated `fold_net` to prioritize Sequence first, then Choice, then Loop, then Unstructured fallback.

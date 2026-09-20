@@ -19,9 +19,9 @@ from code2petri.fold import (
     fold_component,
     detect_components,
     fold_sequence,
-    foldSequence,
+    fold_single_place_contraction,
     fold_choice,
-    foldChoice,
+    fold_loop,
     _is_trivial_workflow_net,
 )
 from tests.test_fold_detection import (
@@ -89,6 +89,10 @@ class TestFoldSequence(unittest.TestCase):
         self.assertEqual(len(folded_net.arcs), 2)
         self.assertTrue(_is_trivial_workflow_net(folded_net))
 
+    def test_fold_single_place_contraction_alias(self):
+        """Verifies fold_single_place_contraction is an identical alias for fold_sequence."""
+        self.assertIs(fold_single_place_contraction, fold_sequence)
+
 
 class TestFoldChoice(unittest.TestCase):
     def test_symmetric_choice_fold(self):
@@ -155,6 +159,20 @@ class TestFoldLoop(unittest.TestCase):
         self.assertEqual(step2.tau, 7.0)
         self.assertEqual(step2.opaque_transition_id, "t_C2")
         self.assertEqual(result.final_sm, 7.0)
+
+    def test_prom_loop_fold_direct(self):
+        """Validates that fold_loop directly folds an elementary loop component."""
+        net, entrance, exit_node, internal = build_loop_net()
+        res = fold_loop(net, step_number=1, config=FoldConfig())
+
+        self.assertIsNotNone(res, "fold_loop should return a result for a valid loop")
+        folded_net, step = res
+
+        self.assertEqual(step.step_number, 1)
+        self.assertEqual(step.component_type, ComponentType.LOOP)
+        self.assertEqual(step.opaque_transition_id, "t_C1")
+        self.assertEqual(step.omega, 3.0)
+        self.assertEqual(step.tau, 6.0)
 
 
 class TestFoldMixedAndPriority(unittest.TestCase):

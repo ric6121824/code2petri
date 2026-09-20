@@ -14,9 +14,9 @@ from code2petri.fold import (
     detect_components,
     fold_component,
     fold_sequence,
-    foldSequence,
+    fold_single_place_contraction,
     fold_choice,
-    foldChoice,
+    fold_loop,
     fold_net,
 )
 
@@ -47,9 +47,9 @@ __all__ = [
     "detect_components",
     "fold_component",
     "fold_sequence",
-    "foldSequence",
+    "fold_single_place_contraction",
     "fold_choice",
-    "foldChoice",
+    "fold_loop",
     "fold_net",
     "inline_expand",
 ]

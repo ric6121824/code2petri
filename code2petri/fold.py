@@ -36,7 +36,8 @@ class FoldConfig:
 
     Default base penalty weights per Definition 21:
       sequence = 0.0
-      choice = 1.0
+      choice = 1.0 (scales ProM 1.5x linear markup: tau_new = sum_tau * 1.5, omega = choice * sum_tau * 0.5;
+               supersedes Lassen 2008 Definition 22 symmetry difference)
       marked_graph = 2.0
       loop = 3.0
       unstructured = 7.0
@@ -308,20 +309,28 @@ def detect_sequences(
     return sequences
 
 
-def fold_sequence(
+def _fold_first_candidate(
     net: PetriNet,
+    candidates: List[Component],
     step_number: int,
-    config: Optional[FoldConfig] = None,
 ) -> Optional[Tuple[PetriNet, FoldStep]]:
-    """Contracts exactly one intermediate place and merges its adjacent transitions per ProM (1 -> 1 -> 1)."""
-    cfg = config if config is not None else FoldConfig()
-    candidates = detect_sequences(net, cfg)
+    """Helper to fold the first candidate component if any are detected."""
     if not candidates:
         return None
     return fold_component(net, candidates[0], step_number)
 
 
-foldSequence = fold_sequence
+def fold_sequence(
+    net: PetriNet,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Optional[Tuple[PetriNet, FoldStep]]:
+    """Performs Single-Place Contraction on an intermediate place connecting adjacent transitions per ProM (1 -> 1 -> 1)."""
+    cfg = config if config is not None else FoldConfig()
+    return _fold_first_candidate(net, detect_sequences(net, cfg), step_number)
+
+
+fold_single_place_contraction = fold_sequence
 
 
 def detect_choices(
@@ -331,7 +340,11 @@ def detect_choices(
     """Detects atomic parallel Choice components per ProM / Definition 18.
 
     Searches for sets of >= 2 transitions strictly connecting a single shared input place
-    and a single shared output place.
+    and a single shared output place. Note: Unlike strict ProM isolation which requires
+    that p_source has no other outgoing transitions and p_sink has no other incoming
+    transitions, this implementation generalizes Murata parallel transition reduction
+    by grouping transitions by common target place. This allows folding parallel branches
+    even in complex ASTs with fallthrough or multi-way branch routing.
     """
     cfg = config if config is not None else FoldConfig()
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
@@ -380,15 +393,9 @@ def fold_choice(
     step_number: int,
     config: Optional[FoldConfig] = None,
 ) -> Optional[Tuple[PetriNet, FoldStep]]:
-    """Folds parallel transitions between a shared input place and output place per ProM."""
+    """Folds atomic parallel choice transitions between a shared input place and output place per ProM."""
     cfg = config if config is not None else FoldConfig()
-    candidates = detect_choices(net, cfg)
-    if not candidates:
-        return None
-    return fold_component(net, candidates[0], step_number)
-
-
-foldChoice = fold_choice
+    return _fold_first_candidate(net, detect_choices(net, cfg), step_number)
 
 
 def _find_elementary_cycles(net: PetriNet, topology: NetTopology) -> List[List[str]]:
@@ -422,9 +429,10 @@ def _find_elementary_cycles(net: PetriNet, topology: NetTopology) -> List[List[s
 
 def detect_loops(
     net_or_topology: Union[PetriNet, NetTopology],
-    config: FoldConfig,
+    config: Optional[FoldConfig] = None,
 ) -> List[Component]:
     """Detects simple directed cycles with a single entry place and a single exit arc."""
+    cfg = config if config is not None else FoldConfig()
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
     cycles = _find_elementary_cycles(topo.net, topo)
     loops: List[Component] = []
@@ -477,11 +485,21 @@ def detect_loops(
                 internal_node_ids=internal_nodes,
                 entrance=entry_place,
                 exit=exit_target_id,
-                omega=config.loop,
+                omega=cfg.loop,
             )
         )
 
     return loops
+
+
+def fold_loop(
+    net: PetriNet,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Optional[Tuple[PetriNet, FoldStep]]:
+    """Folds an elementary loop component."""
+    cfg = config if config is not None else FoldConfig()
+    return _fold_first_candidate(net, detect_loops(net, cfg), step_number)
 
 
 def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> List[Component]:
@@ -731,31 +749,19 @@ def fold_net(
     fully_reducible = True
 
     while not _is_trivial_workflow_net(current_net):
-        # 1. Prioritize Sequence (Single-Place Contraction)
-        res_seq = fold_sequence(current_net, step_number, cfg)
-        if res_seq is not None:
-            current_net, step = res_seq
+        # Prioritize Sequence (Single-Place Contraction) -> Choice -> Loop per ProM priority
+        reduction_result = (
+            fold_sequence(current_net, step_number, cfg)
+            or fold_choice(current_net, step_number, cfg)
+            or fold_loop(current_net, step_number, cfg)
+        )
+        if reduction_result is not None:
+            current_net, step = reduction_result
             steps.append(step)
             step_number += 1
             continue
 
-        # 2. Prioritize Choice (Atomic Parallel Transitions Collapse)
-        res_choice = fold_choice(current_net, step_number, cfg)
-        if res_choice is not None:
-            current_net, step = res_choice
-            steps.append(step)
-            step_number += 1
-            continue
-
-        # 3. Fallback to Loop component fold
-        loop_comps = detect_loops(current_net, cfg)
-        if loop_comps:
-            current_net, step = fold_component(current_net, loop_comps[0], step_number)
-            steps.append(step)
-            step_number += 1
-            continue
-
-        # 4. Irreducible net: fallback to unstructured penalty
+        # Irreducible net: fallback to unstructured penalty
         current_net, step = fold_unstructured(current_net, step_number, cfg)
         steps.append(step)
         fully_reducible = False
