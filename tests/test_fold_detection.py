@@ -247,6 +247,20 @@ class TestSymmetryMultiplierCalculation(unittest.TestCase):
         multiplier = calculate_symmetry_multiplier(net, comp_nodes, ["p1", "p2", "p3"])
         self.assertEqual(multiplier, 2)
 
+    def test_diff_full_topology_degrees(self):
+        net, p_in, p_out, trans_ids = build_choice_net(2)
+        p0 = net.add_place("p0")
+        t0 = net.add_transition("t0")
+        net.add_arc(p0, t0)
+        net.add_arc(t0, net.places[0])  # External incoming arc to p_split
+
+        comp_nodes = {p_in, p_out} | set(trans_ids)
+        # With use_subnet_degrees=False, external incoming arc counts toward in-degree of p_split
+        multiplier = calculate_symmetry_multiplier(
+            net, comp_nodes, [p_in, p_out], use_subnet_degrees=False
+        )
+        self.assertEqual(multiplier, 1)
+
 
 class TestDetectPureSequence(unittest.TestCase):
     def test_detect_3_transition_sequence(self):

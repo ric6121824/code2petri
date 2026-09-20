@@ -261,20 +261,24 @@ def calculate_symmetry_multiplier(
     net_or_topology: Union[PetriNet, NetTopology],
     component_node_ids: Iterable[str],
     target_node_ids: Optional[Iterable[str]] = None,
+    use_subnet_degrees: bool = True,
 ) -> int:
-    """Calculates the symmetry multiplier diff(X) per Definition 22 in subnet PN|C.
+    """Calculates the symmetry multiplier diff(X) per Definition 22 in subnet PN|C or net topology.
 
     diff(X) = ||{x in X | |x*| > 1}| - |{x in X | |*x| > 1}|| + 1
-    where degrees are computed in the subnet projection PN|C.
+    where degrees are computed in the subnet projection PN|C (default) or full topology.
     """
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
     comp_set = set(component_node_ids)
     target_set = set(target_node_ids) if target_node_ids is not None else comp_set
 
-    subnet_out, subnet_in = topo.subnet_degrees(comp_set)
-
-    splits = sum(1 for nid in target_set if subnet_out[nid] > 1)
-    joins = sum(1 for nid in target_set if subnet_in[nid] > 1)
+    if use_subnet_degrees:
+        subnet_out, subnet_in = topo.subnet_degrees(comp_set)
+        splits = sum(1 for nid in target_set if subnet_out[nid] > 1)
+        joins = sum(1 for nid in target_set if subnet_in[nid] > 1)
+    else:
+        splits = sum(1 for nid in target_set if topo.out_degree(nid) > 1)
+        joins = sum(1 for nid in target_set if topo.in_degree(nid) > 1)
 
     return abs(splits - joins) + 1
 
@@ -705,9 +709,7 @@ def detect_marked_graphs(
     candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
     _, best_src, best_snk, best_nodes = candidates[0]
 
-    splits = sum(1 for nid in best_nodes if topo.out_degree(nid) > 1)
-    joins = sum(1 for nid in best_nodes if topo.in_degree(nid) > 1)
-    diff = abs(joins - splits) + 1
+    diff = calculate_symmetry_multiplier(topo, best_nodes, use_subnet_degrees=False)
 
     comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
     tau_sum = sum(t.get_tau() for t in comp_trans)
@@ -776,9 +778,7 @@ def detect_state_machines(
     candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
     _, best_src, best_snk, best_nodes = candidates[0]
 
-    splits = sum(1 for nid in best_nodes if topo.out_degree(nid) > 1)
-    joins = sum(1 for nid in best_nodes if topo.in_degree(nid) > 1)
-    diff = abs(joins - splits) + 1
+    diff = calculate_symmetry_multiplier(topo, best_nodes, use_subnet_degrees=False)
 
     comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
     tau_sum = sum(t.get_tau() for t in comp_trans)
@@ -856,13 +856,12 @@ def detect_well_structured(
     candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
     _, best_src, best_snk, best_nodes = candidates[0]
 
-    p_splits = sum(1 for nid in best_nodes if topo.is_place(nid) and topo.out_degree(nid) > 1)
-    p_joins = sum(1 for nid in best_nodes if topo.is_place(nid) and topo.in_degree(nid) > 1)
-    t_splits = sum(1 for nid in best_nodes if topo.is_transition(nid) and topo.out_degree(nid) > 1)
-    t_joins = sum(1 for nid in best_nodes if topo.is_transition(nid) and topo.in_degree(nid) > 1)
-
-    diff_p = abs(p_joins - p_splits) + 1
-    diff_t = abs(t_joins - t_splits) + 1
+    diff_p = calculate_symmetry_multiplier(
+        topo, best_nodes, [nid for nid in best_nodes if topo.is_place(nid)], use_subnet_degrees=False
+    )
+    diff_t = calculate_symmetry_multiplier(
+        topo, best_nodes, [nid for nid in best_nodes if topo.is_transition(nid)], use_subnet_degrees=False
+    )
 
     comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
     tau_sum = sum(t.get_tau() for t in comp_trans)
@@ -902,13 +901,8 @@ def _calculate_unstructured_omega(
     if cfg.unstructured != 7.0:
         weight = (cfg.unstructured / 7.0) * weight
 
-    p_splits = sum(1 for nid in p_c if topo.out_degree(nid) > 1)
-    p_joins = sum(1 for nid in p_c if topo.in_degree(nid) > 1)
-    t_splits = sum(1 for nid in t_c if topo.out_degree(nid) > 1)
-    t_joins = sum(1 for nid in t_c if topo.in_degree(nid) > 1)
-
-    diff_p = abs(p_joins - p_splits) + 1
-    diff_t = abs(t_joins - t_splits) + 1
+    diff_p = calculate_symmetry_multiplier(topo, p_c, p_c, use_subnet_degrees=False)
+    diff_t = calculate_symmetry_multiplier(topo, t_c, t_c, use_subnet_degrees=False)
 
     trans_objs = [topo.trans_map[tid] for tid in t_c if tid in topo.trans_map]
     tau_sum = sum(t.get_tau() for t in trans_objs)
