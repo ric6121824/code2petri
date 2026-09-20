@@ -176,6 +176,10 @@
       background: #f8f9fa;
       border: 2px dashed #111;
     }
+    .legend-swatch.compound {
+      background: #e8f5e9;
+      border: 2px solid #2e7d32;
+    }
   </style>
 </head>
 <body>
@@ -216,6 +220,7 @@
         <div class="legend-item"><div class="legend-swatch opaque"></div>Opaque ($t_C$)</div>
         <div class="legend-item"><div class="legend-swatch resolved"></div>Resolved</div>
         <div class="legend-item"><div class="legend-swatch unresolved"></div>Unresolved</div>
+        <div class="legend-item"><div class="legend-swatch compound"></div>Expanded Callee</div>
       </div>
     </div>
   </div>
@@ -226,6 +231,11 @@
   <!-- INLINED PETRI NET & FOLD DATA -->
   <script id="code2petri-data" type="application/json">
 {{DATA_JSON}}
+  </script>
+
+  <!-- CALLEE NETS LOOKUP TABLE -->
+  <script>
+    window.CALLEE_NETS_JSON = {{CALLEE_NETS_JSON}};
   </script>
 
   <!-- CLIENT-SIDE APPLICATION LOGIC -->
@@ -263,7 +273,40 @@
         stepNets.push(foldSteps[i].net || initialNet);
       }
 
-      // Convert PetriNet dict to Cytoscape elements
+      // Callee nets lookup table
+      const calleeNetsMap = (window.CALLEE_NETS_JSON && typeof window.CALLEE_NETS_JSON === 'object')
+        ? window.CALLEE_NETS_JSON
+        : {};
+      window.CALLEE_NETS_JSON = calleeNetsMap;
+
+      // Active interactive expansions: parentId -> { calleeName: string }
+      const expandedNodes = new Map();
+
+      function findBoundaryPlaces(calleeNet) {
+        const places = calleeNet.places || [];
+        if (places.length === 0) return { sourcePlaceId: null, sinkPlaceId: null };
+
+        let sourcePlace = places.find(function(p) {
+          return (p.initial_tokens > 0 || p.label === 'start' || p.id === 'p0');
+        });
+        if (!sourcePlace) sourcePlace = places[0];
+
+        let sinkPlace = null;
+        for (let i = places.length - 1; i >= 0; i--) {
+          if (places[i].label === 'end' || (places[i].id && places[i].id.endsWith('_end'))) {
+            sinkPlace = places[i];
+            break;
+          }
+        }
+        if (!sinkPlace) sinkPlace = places[places.length - 1];
+
+        return {
+          sourcePlaceId: sourcePlace ? sourcePlace.id : null,
+          sinkPlaceId: sinkPlace ? sinkPlace.id : null
+        };
+      }
+
+      // Convert PetriNet dict to Cytoscape elements (incorporating active expansions)
       function netToElements(net) {
         const elements = [];
         const places = net.places || [];
@@ -357,6 +400,198 @@
             },
             classes: 'arc'
           });
+        });
+
+        // Apply active interactive expansions
+        function applyExpansion(parentId, calleeName) {
+          const parentNode = elements.find(function(el) {
+            return el.group === 'nodes' && el.data.id === parentId;
+          });
+          if (!parentNode) return;
+
+          const calleeNet = calleeNetsMap[calleeName];
+          if (!calleeNet) return;
+
+          if (!parentNode.classes.includes('compound')) {
+            parentNode.classes += ' compound';
+          }
+          parentNode.data.is_compound = true;
+          parentNode.data.type = 'Compound Node (Expanded Callee)';
+
+          const prefix = parentId + '__';
+          const boundaries = findBoundaryPlaces(calleeNet);
+          const rawSourcePlaceId = boundaries.sourcePlaceId;
+          const rawSinkPlaceId = boundaries.sinkPlaceId;
+
+          // Discover caller preset and postset places connected to parentId
+          const presetArcs = elements.filter(function(el) {
+            return el.group === 'edges' && el.data.target === parentId;
+          });
+          const presetPlaceIds = presetArcs.map(function(el) { return el.data.source; });
+
+          const postsetArcs = elements.filter(function(el) {
+            return el.group === 'edges' && el.data.source === parentId;
+          });
+          const postsetPlaceIds = postsetArcs.map(function(el) { return el.data.target; });
+
+          // Remove direct caller edges into/out of parentId while expanded
+          const edgesToRemove = new Set();
+          presetArcs.forEach(function(el) { edgesToRemove.add(el.data.id); });
+          postsetArcs.forEach(function(el) { edgesToRemove.add(el.data.id); });
+          for (let i = elements.length - 1; i >= 0; i--) {
+            if (elements[i].group === 'edges' && edgesToRemove.has(elements[i].data.id)) {
+              elements.splice(i, 1);
+            }
+          }
+
+          // Splice callee places inside compound node (unifying away boundary places to maintain bipartite net validity)
+          (calleeNet.places || []).forEach(function(p) {
+            if (p.id === rawSourcePlaceId || p.id === rawSinkPlaceId) {
+              return;
+            }
+            const tokens = p.initial_tokens || 0;
+            const label = (p.label || p.id) + (tokens > 0 ? ' (' + tokens + ')' : '');
+            elements.push({
+              group: 'nodes',
+              data: {
+                id: prefix + p.id,
+                parent: parentId,
+                label: label,
+                type: 'Place',
+                tokens: tokens,
+                raw_label: p.label || p.id
+              },
+              classes: 'place' + (tokens > 0 ? ' has-tokens' : '')
+            });
+          });
+
+          // Splice callee transitions inside compound node
+          (calleeNet.transitions || []).forEach(function(t) {
+            let displayLabel = t.label || t.id;
+            if (t.line_number !== null && t.line_number !== undefined) {
+              displayLabel += ' (line ' + t.line_number + ')';
+            }
+
+            let fillcolor = '#ffffff';
+            let statusClass = '';
+            if (t.resolved === true) {
+              fillcolor = '#2e7d32';
+              statusClass = 'resolved';
+            } else if (t.resolved === false) {
+              fillcolor = '#e65100';
+              statusClass = 'unresolved';
+            }
+
+            const classes = ['transition'];
+            if (statusClass) classes.push(statusClass);
+
+            elements.push({
+              group: 'nodes',
+              data: {
+                id: prefix + t.id,
+                parent: parentId,
+                label: displayLabel,
+                raw_label: t.label || t.id,
+                type: 'Transition',
+                line_number: t.line_number,
+                fillcolor: fillcolor,
+                resolved: t.resolved,
+                resolved_to: t.resolved_to,
+                target_file: t.target_file
+              },
+              classes: classes.join(' ')
+            });
+          });
+
+          // Splice callee arcs with boundary place unification (ADR-0002)
+          (calleeNet.arcs || []).forEach(function(a, idx) {
+            const src = typeof a.source === 'object' ? a.source.id : a.source;
+            const tgt = typeof a.target === 'object' ? a.target.id : a.target;
+
+            if (src === rawSourcePlaceId) {
+              // Arc from boundary source place to callee entrance transition tgt.
+              // Rewire each caller preset place directly to callee entrance transition.
+              presetPlaceIds.forEach(function(pIn) {
+                elements.push({
+                  group: 'edges',
+                  data: {
+                    id: prefix + 'arc_in_' + pIn + '_' + tgt,
+                    source: pIn,
+                    target: prefix + tgt
+                  },
+                  classes: 'arc'
+                });
+              });
+            } else if (tgt === rawSourcePlaceId) {
+              // Reverse loop arc to source place
+              presetPlaceIds.forEach(function(pIn) {
+                elements.push({
+                  group: 'edges',
+                  data: {
+                    id: prefix + 'arc_in_rev_' + src + '_' + pIn,
+                    source: prefix + src,
+                    target: pIn
+                  },
+                  classes: 'arc'
+                });
+              });
+            } else if (tgt === rawSinkPlaceId) {
+              // Arc from callee exit transition src to boundary sink place.
+              // Rewire callee exit transition directly to each caller postset place.
+              postsetPlaceIds.forEach(function(pOut) {
+                elements.push({
+                  group: 'edges',
+                  data: {
+                    id: prefix + 'arc_out_' + src + '_' + pOut,
+                    source: prefix + src,
+                    target: pOut
+                  },
+                  classes: 'arc'
+                });
+              });
+            } else if (src === rawSinkPlaceId) {
+              // Reverse arc from sink place
+              postsetPlaceIds.forEach(function(pOut) {
+                elements.push({
+                  group: 'edges',
+                  data: {
+                    id: prefix + 'arc_out_rev_' + pOut + '_' + tgt,
+                    source: pOut,
+                    target: prefix + tgt
+                  },
+                  classes: 'arc'
+                });
+              });
+            } else {
+              // Internal callee arc
+              elements.push({
+                group: 'edges',
+                data: {
+                  id: prefix + 'arc_' + idx + '_' + src + '_' + tgt,
+                  source: prefix + src,
+                  target: prefix + tgt
+                },
+                classes: 'arc'
+              });
+            }
+          });
+
+          // Recursively expand any child transitions that are in expandedNodes
+          (calleeNet.transitions || []).forEach(function(t) {
+            const childId = prefix + t.id;
+            if (expandedNodes.has(childId)) {
+              applyExpansion(childId, expandedNodes.get(childId).calleeName);
+            }
+          });
+        }
+
+        Array.from(expandedNodes.keys()).forEach(function(nodeId) {
+          const matching = elements.some(function(el) {
+            return el.group === 'nodes' && el.data.id === nodeId;
+          });
+          if (matching) {
+            applyExpansion(nodeId, expandedNodes.get(nodeId).calleeName);
+          }
         });
 
         return elements;
@@ -454,6 +689,35 @@
             }
           },
           {
+            selector: 'node.compound, node:parent',
+            style: {
+              'shape': 'roundrectangle',
+              'background-color': '#e8f5e9',
+              'border-width': 2,
+              'border-color': '#2e7d32',
+              'border-style': 'solid',
+              'padding': '16px',
+              'label': 'data(label)',
+              'text-valign': 'top',
+              'text-halign': 'center',
+              'text-margin-y': 6,
+              'font-size': '12px',
+              'font-weight': 'bold',
+              'font-family': 'ui-monospace, monospace',
+              'color': '#1b5e20',
+              'text-background-opacity': 0.85,
+              'text-background-color': '#e8f5e9',
+              'text-background-padding': '2px',
+              'text-background-shape': 'roundrectangle'
+            }
+          },
+          {
+            selector: 'node.transition.resolved, node.compound',
+            style: {
+              'cursor': 'pointer'
+            }
+          },
+          {
             selector: 'node:selected',
             style: {
               'border-color': '#0366d6',
@@ -500,6 +764,59 @@
       }
 
       applyLayout(false);
+
+      // Cursor feedback on hover
+      cy.on('mouseover', 'node', function(evt) {
+        const n = evt.target;
+        if (n.data('resolved') === true || expandedNodes.has(n.id()) || n.hasClass('compound')) {
+          const cyContainer = document.getElementById('cy');
+          if (cyContainer) cyContainer.style.cursor = 'pointer';
+        }
+      });
+      cy.on('mouseout', 'node', function() {
+        const cyContainer = document.getElementById('cy');
+        if (cyContainer) cyContainer.style.cursor = 'default';
+      });
+
+      // Interactive compound expansion / collapse on tap
+      cy.on('tap', 'node', function(evt) {
+        const targetNode = evt.target;
+        const targetId = targetNode.id();
+
+        // 1. If clicked node is an expanded compound node, collapse it
+        if (expandedNodes.has(targetId) || targetNode.hasClass('compound')) {
+          const prefix = targetId + '__';
+          Array.from(expandedNodes.keys()).forEach(function(id) {
+            if (id.startsWith(prefix)) {
+              expandedNodes.delete(id);
+            }
+          });
+          expandedNodes.delete(targetId);
+          renderStep(currentStep, true);
+          return;
+        }
+
+        // 2. If clicked node is a resolved call transition, expand it
+        if (targetNode.data('resolved') === true) {
+          const resolvedTo = targetNode.data('resolved_to');
+          const rawLabel = targetNode.data('raw_label');
+          let calleeName = null;
+          if (resolvedTo && calleeNetsMap[resolvedTo]) {
+            calleeName = resolvedTo;
+          } else if (rawLabel && calleeNetsMap[rawLabel]) {
+            calleeName = rawLabel;
+          } else if (resolvedTo) {
+            const bare = resolvedTo.split('.').pop();
+            if (calleeNetsMap[bare]) calleeName = bare;
+          }
+
+          if (calleeName && calleeNetsMap[calleeName]) {
+            expandedNodes.set(targetId, { calleeName: calleeName });
+            renderStep(currentStep, true);
+            return;
+          }
+        }
+      });
 
       // Compute initial SM score from initial net transitions
       const initialTransitions = initialNet.transitions || [];

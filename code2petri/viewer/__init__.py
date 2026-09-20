@@ -54,16 +54,19 @@ def _load_template() -> str:
 def generate_html(
     net_or_fold: Union[PetriNet, FoldResult, Any],
     title: Optional[str] = None,
+    callee_nets: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Generates a 100% self-contained offline HTML viewer for a PetriNet or FoldResult.
 
     :param net_or_fold: A PetriNet instance (for static --no-fold view) or a FoldResult
                         instance (for interactive fold playback).
     :param title: Optional title to display in the header.
+    :param callee_nets: Optional dictionary of pre-computed raw callee nets keyed by symbol name.
     :return: Complete HTML document string with inlined Cytoscape, Dagre, and graph data.
     """
     template = _load_template()
     vendor_scripts = _load_vendor_scripts()
+    callee_dict = callee_nets if callee_nets is not None else {}
 
     if isinstance(net_or_fold, FoldResult):
         fold_dict = net_or_fold.to_dict()
@@ -87,9 +90,12 @@ def generate_html(
 
     escaped_title = html.escape(display_title)
     json_data = json.dumps(payload, indent=2)
+    callee_nets_json = json.dumps(callee_dict, indent=2)
 
     rendered = template.replace("{{TITLE}}", escaped_title)
     rendered = rendered.replace("{{VENDOR_SCRIPTS}}", vendor_scripts)
     rendered = rendered.replace("{{DATA_JSON}}", json_data)
+    rendered = rendered.replace("{{CALLEE_NETS_JSON}}", callee_nets_json)
+    rendered = rendered.replace("{{callee_nets_json}}", callee_nets_json)
 
     return rendered

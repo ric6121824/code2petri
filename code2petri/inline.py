@@ -206,19 +206,27 @@ def _is_self_referencing_loop(
     return False
 
 
+def _get_callee_frames(cs: CallSite, sym: Symbol) -> List[CallFrame]:
+    """Builds CallFrame variants for a resolved callee symbol."""
+    callee_file = sym.filepath or (os.path.abspath(cs.caller_file) if cs.caller_file else "")
+    return CallFrame(filepath=callee_file, name=sym.name).variants()
+
+
 def _inline_expand_recursive(
     net: PetriNet,
     call_sites: List[CallSite],
     symbol_table: SymbolTable,
     max_depth: int,
     call_stack: Optional[Set[CallFrame]] = None,
+    used_prefixes: Optional[Set[str]] = None,
 ) -> PetriNet:
     """Internal recursive worker for inline expansion."""
     composite_net = net.clone()
     if max_depth <= 0:
         return composite_net
 
-    used_prefixes: Set[str] = set()
+    if used_prefixes is None:
+        used_prefixes = set()
     processed_trans_ids: Set[str] = set()
 
     for cs in call_sites:
@@ -257,10 +265,7 @@ def _inline_expand_recursive(
                 active_stack.update(caller_frame.variants())
 
         # Recursion Guard: check matching call frames in the active vertical expansion call stack
-        callee_file = sym.filepath or (os.path.abspath(cs.caller_file) if cs.caller_file else "")
-        callee_frame = CallFrame(filepath=callee_file, name=sym.name)
-        callee_frames = callee_frame.variants()
-
+        callee_frames = _get_callee_frames(cs, sym)
         if any(f in active_stack for f in callee_frames):
             trans.mark_recursive_cycle()
             continue
@@ -279,6 +284,7 @@ def _inline_expand_recursive(
                 symbol_table=symbol_table,
                 max_depth=max_depth - 1,
                 call_stack=new_stack,
+                used_prefixes=used_prefixes,
             )
 
         _splice_callee_net(
@@ -316,5 +322,65 @@ def inline_expand(
         max_depth=max_depth,
         call_stack=None,
     )
+
+
+def precompute_callee_nets(
+    call_sites: List[CallSite],
+    symbol_table: SymbolTable,
+    max_depth: int = 1,
+) -> Dict[str, Dict[str, Any]]:
+    """Discovers and pre-computes raw Petri net dicts for resolved callees up to max_depth.
+
+    Args:
+        call_sites: List of CallSite records extracted from the caller net.
+        symbol_table: Multi-file symbol table used for cross-file call resolution.
+        max_depth: Maximum recursion depth for exploring nested callee calls (default 1).
+
+    Returns:
+        A dictionary mapping callee identifiers (fully qualified symbol names, bare names,
+        and call site callee names) to their raw serialized Petri net dictionaries.
+    """
+    callee_nets: Dict[str, Dict[str, Any]] = {}
+    if max_depth <= 0 or not call_sites:
+        return callee_nets
+
+    def _collect(cs_list: List[CallSite], current_depth: int, active_stack: Set[CallFrame]) -> None:
+        if current_depth > max_depth or not cs_list:
+            return
+
+        for cs in cs_list:
+            sym = symbol_table.resolve_call(cs)
+            if sym is None:
+                continue
+
+            # Recursion guard against cycles in active expansion stack
+            callee_frames = _get_callee_frames(cs, sym)
+            if any(f in active_stack for f in callee_frames):
+                continue
+
+            sym_key = sym.name
+            if sym_key not in callee_nets:
+                callee_net, nested_call_sites = _get_callee_net(sym, symbol_table=symbol_table)
+                if callee_net is not None:
+                    net_dict = callee_net.to_dict()
+                    callee_nets[sym_key] = net_dict
+                    if sym.bare_name and sym.bare_name not in callee_nets:
+                        callee_nets[sym.bare_name] = net_dict
+                    if cs.callee_name and cs.callee_name not in callee_nets:
+                        callee_nets[cs.callee_name] = net_dict
+
+                    if current_depth < max_depth and nested_call_sites:
+                        new_stack = set(active_stack)
+                        new_stack.update(callee_frames)
+                        _collect(nested_call_sites, current_depth + 1, new_stack)
+
+    caller_stack: Set[CallFrame] = set()
+    for cs in call_sites:
+        cf = CallFrame.from_caller(cs)
+        if cf:
+            caller_stack.update(cf.variants())
+
+    _collect(call_sites, 1, caller_stack)
+    return callee_nets
 
 

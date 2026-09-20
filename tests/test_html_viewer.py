@@ -22,6 +22,18 @@ def _extract_embedded_data(html_content: str) -> dict:
     return json.loads(match.group(1))
 
 
+def _extract_callee_nets_data(html_content: str) -> dict:
+    """Helper to extract and parse the embedded CALLEE_NETS_JSON script block."""
+    match = re.search(
+        r'window\.CALLEE_NETS_JSON\s*=\s*(\{.*?\});',
+        html_content,
+        re.DOTALL,
+    )
+    if not match:
+        raise ValueError("Could not find window.CALLEE_NETS_JSON in HTML content")
+    return json.loads(match.group(1))
+
+
 class TestHTMLViewerGenerator(unittest.TestCase):
     def setUp(self):
         self.net = PetriNet()
@@ -114,6 +126,40 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         # Verify that tau is NOT appended as raw label text
         self.assertNotIn("(τ=", html_content)
 
+    def test_generate_html_embeds_callee_nets(self):
+        """Validates that passing callee_nets embeds window.CALLEE_NETS_JSON without payload duplication."""
+        dummy_callee = {
+            "places": [{"id": "cp0", "label": "start"}],
+            "transitions": [{"id": "ct0", "label": "helper()"}],
+            "arcs": [],
+        }
+        callee_dict = {"helper": dummy_callee}
+        html_content = generate_html(self.net, callee_nets=callee_dict)
+
+        self.assertIn("window.CALLEE_NETS_JSON", html_content)
+        callee_data = _extract_callee_nets_data(html_content)
+        self.assertEqual(callee_data, callee_dict)
+
+        embedded_data = _extract_embedded_data(html_content)
+        self.assertNotIn("callee_nets", embedded_data)
+
+    def test_generate_html_default_empty_callee_nets(self):
+        """Validates that omitting callee_nets defaults to an empty dictionary in window.CALLEE_NETS_JSON."""
+        html_content = generate_html(self.net)
+        callee_data = _extract_callee_nets_data(html_content)
+        self.assertEqual(callee_data, {})
+
+        embedded_data = _extract_embedded_data(html_content)
+        self.assertNotIn("callee_nets", embedded_data)
+
+    def test_html_compound_node_styles_and_events(self):
+        """Validates that the template includes compound node CSS, Cytoscape styles, and tap handlers."""
+        html_content = generate_html(self.net)
+        self.assertIn(".legend-swatch.compound", html_content)
+        self.assertIn("node.compound, node:parent", html_content)
+        self.assertIn("#e8f5e9", html_content)
+        self.assertIn("cy.on('tap', 'node'", html_content)
+
 
 class TestCLIEngineHTMLIntegration(unittest.TestCase):
     def setUp(self):
@@ -181,6 +227,27 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
             content = f.read()
         data = _extract_embedded_data(content)
         self.assertEqual(data["mode"], "fold")
+
+    def test_cli_engine_precomputes_callee_nets_for_html(self):
+        """Validates that code2petri with HTML output and --context precomputes callee subnets."""
+        out_html = os.path.join(self.temp_dir.name, "loop_interactive.html")
+        code2petri(
+            source_path=self.app_js,
+            target_function="loop",
+            context=[self.webgl_js],
+            output_file=out_html,
+        )
+        self.assertTrue(os.path.exists(out_html))
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        callee_data = _extract_callee_nets_data(content)
+        # Verify resolved callees are pre-computed in the HTML payload
+        self.assertIn("WebGLEngine.step", callee_data)
+        self.assertIn("places", callee_data["WebGLEngine.step"])
+        self.assertIn("transitions", callee_data["WebGLEngine.step"])
+        self.assertIn("arcs", callee_data["WebGLEngine.step"])
+        self.assertIn("stepCpu", callee_data)
 
 
 if __name__ == "__main__":
