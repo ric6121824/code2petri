@@ -16,6 +16,7 @@ from code2petri.fold import (
     Component,
     ComponentType,
     NetTopology,
+    Subnet,
     _reachability,
     _detect_macro,
     forward_reachability,
@@ -719,6 +720,26 @@ class TestReachabilityAndMacroHelpers(unittest.TestCase):
         self.assertEqual(mg_via_macro[0].entrance, mg_via_direct[0].entrance)
         self.assertEqual(mg_via_macro[0].exit, mg_via_direct[0].exit)
         self.assertEqual(mg_via_macro[0].omega, mg_via_direct[0].omega)
+
+
+class TestSubnetDataclassAndTopologyMultiplier(unittest.TestCase):
+    def test_subnet_dataclass_properties(self):
+        subnet = Subnet(
+            places={"p0", "p1"},
+            transitions={"t1"},
+            arcs={("p0", "t1"), ("t1", "p1")},
+        )
+        self.assertEqual(subnet.node_count, 3)
+        self.assertEqual(subnet.arc_count, 2)
+        self.assertEqual(subnet.places, {"p0", "p1"})
+        self.assertEqual(subnet.transitions, {"t1"})
+
+    def test_net_topology_calculate_symmetry_multiplier(self):
+        net, p_in, p_out, trans_ids = build_choice_net(2)
+        topo = NetTopology(net)
+        comp_nodes = {p_in, p_out} | set(trans_ids)
+        multiplier = topo.calculate_symmetry_multiplier(comp_nodes, [p_in, p_out])
+        self.assertEqual(multiplier, 1)
 
 
 if __name__ == '__main__':

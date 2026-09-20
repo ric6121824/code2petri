@@ -256,6 +256,52 @@ class NetTopology:
                     subnet_in[target_id] += 1
         return subnet_out, subnet_in
 
+    def calculate_symmetry_multiplier(
+        self,
+        component_node_ids: Iterable[str],
+        target_node_ids: Optional[Iterable[str]] = None,
+        use_subnet_degrees: bool = True,
+    ) -> int:
+        """Calculates the symmetry multiplier diff(X) per Definition 22 in subnet PN|C or net topology.
+
+        diff(X) = ||{x in X | |x*| > 1}| - |{x in X | |*x| > 1}|| + 1
+        where degrees are computed in the subnet projection PN|C (default) or full topology.
+        """
+        comp_set = set(component_node_ids)
+        target_set = set(target_node_ids) if target_node_ids is not None else comp_set
+
+        if use_subnet_degrees:
+            subnet_out, subnet_in = self.subnet_degrees(comp_set)
+            splits = sum(1 for nid in target_set if subnet_out[nid] > 1)
+            joins = sum(1 for nid in target_set if subnet_in[nid] > 1)
+        else:
+            splits = sum(1 for nid in target_set if self.out_degree(nid) > 1)
+            joins = sum(1 for nid in target_set if self.in_degree(nid) > 1)
+
+        return abs(splits - joins) + 1
+
+
+@dataclass(frozen=True)
+class Subnet:
+    """A structural subnet or SESE component within a Petri net.
+
+    Encapsulates places, transitions, and internal arcs that travel together
+    during structural reduction analysis and knot penalty calculation.
+    """
+    places: Set[str]
+    transitions: Set[str]
+    arcs: Set[Tuple[str, str]]
+
+    @property
+    def node_count(self) -> int:
+        """Total number of nodes (places + transitions) in this subnet."""
+        return len(self.places) + len(self.transitions)
+
+    @property
+    def arc_count(self) -> int:
+        """Total number of internal directed arcs in this subnet."""
+        return len(self.arcs)
+
 
 def calculate_symmetry_multiplier(
     net_or_topology: Union[PetriNet, NetTopology],
@@ -269,18 +315,11 @@ def calculate_symmetry_multiplier(
     where degrees are computed in the subnet projection PN|C (default) or full topology.
     """
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
-    comp_set = set(component_node_ids)
-    target_set = set(target_node_ids) if target_node_ids is not None else comp_set
-
-    if use_subnet_degrees:
-        subnet_out, subnet_in = topo.subnet_degrees(comp_set)
-        splits = sum(1 for nid in target_set if subnet_out[nid] > 1)
-        joins = sum(1 for nid in target_set if subnet_in[nid] > 1)
-    else:
-        splits = sum(1 for nid in target_set if topo.out_degree(nid) > 1)
-        joins = sum(1 for nid in target_set if topo.in_degree(nid) > 1)
-
-    return abs(splits - joins) + 1
+    return topo.calculate_symmetry_multiplier(
+        component_node_ids=component_node_ids,
+        target_node_ids=target_node_ids,
+        use_subnet_degrees=use_subnet_degrees,
+    )
 
 
 def detect_sequences(
@@ -712,7 +751,7 @@ def _detect_macro(
     candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
     _, best_src, best_snk, best_nodes = candidates[0]
 
-    diff = calculate_symmetry_multiplier(topo, best_nodes, use_subnet_degrees=False)
+    diff = topo.calculate_symmetry_multiplier(best_nodes, use_subnet_degrees=False)
 
     comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
     tau_sum = sum(t.get_tau() for t in comp_trans)
@@ -829,11 +868,11 @@ def detect_well_structured(
     candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
     _, best_src, best_snk, best_nodes = candidates[0]
 
-    diff_p = calculate_symmetry_multiplier(
-        topo, best_nodes, [nid for nid in best_nodes if topo.is_place(nid)], use_subnet_degrees=False
+    diff_p = topo.calculate_symmetry_multiplier(
+        best_nodes, [nid for nid in best_nodes if topo.is_place(nid)], use_subnet_degrees=False
     )
-    diff_t = calculate_symmetry_multiplier(
-        topo, best_nodes, [nid for nid in best_nodes if topo.is_transition(nid)], use_subnet_degrees=False
+    diff_t = topo.calculate_symmetry_multiplier(
+        best_nodes, [nid for nid in best_nodes if topo.is_transition(nid)], use_subnet_degrees=False
     )
 
     comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
@@ -864,20 +903,18 @@ def fold_well_structured(
 
 def _calculate_unstructured_omega(
     topo: NetTopology,
-    p_c: Set[str],
-    t_c: Set[str],
-    f_c: Set[Tuple[str, str]],
+    subnet: Subnet,
     cfg: FoldConfig,
 ) -> float:
     """Calculates penalty omega for an unstructured subnet per Lassen Definition 22."""
-    weight = 5 * (abs(len(f_c) - (len(p_c) + len(t_c))) + 1)
+    weight = 5 * (abs(subnet.arc_count - subnet.node_count) + 1)
     if cfg.unstructured != 7.0:
         weight = (cfg.unstructured / 7.0) * weight
 
-    diff_p = calculate_symmetry_multiplier(topo, p_c, p_c, use_subnet_degrees=False)
-    diff_t = calculate_symmetry_multiplier(topo, t_c, t_c, use_subnet_degrees=False)
+    diff_p = topo.calculate_symmetry_multiplier(subnet.places, subnet.places, use_subnet_degrees=False)
+    diff_t = topo.calculate_symmetry_multiplier(subnet.transitions, subnet.transitions, use_subnet_degrees=False)
 
-    trans_objs = [topo.trans_map[tid] for tid in t_c if tid in topo.trans_map]
+    trans_objs = [topo.trans_map[tid] for tid in subnet.transitions if tid in topo.trans_map]
     tau_sum = sum(t.get_tau() for t in trans_objs)
     tau_new = sum(weight * t.get_tau() for t in trans_objs) * diff_p * diff_t
     return tau_new - tau_sum
@@ -911,11 +948,13 @@ def detect_unstructured(net_or_topology: Any, config: Optional[FoldConfig] = Non
         candidates.sort(key=lambda x: (x[0], x[1], x[2]))
         _, p_src_id, p_snk_id, comp_nodes = candidates[0]
 
-        p_c = {nid for nid in comp_nodes if topo.is_place(nid)}
-        t_c = {nid for nid in comp_nodes if topo.is_transition(nid)}
-        f_c = {(u, v) for (u, v) in topo.direct_arcs if u in comp_nodes and v in comp_nodes}
+        knot_subnet = Subnet(
+            places={nid for nid in comp_nodes if topo.is_place(nid)},
+            transitions={nid for nid in comp_nodes if topo.is_transition(nid)},
+            arcs={(u, v) for (u, v) in topo.direct_arcs if u in comp_nodes and v in comp_nodes},
+        )
 
-        omega = _calculate_unstructured_omega(topo, p_c, t_c, f_c, cfg)
+        omega = _calculate_unstructured_omega(topo, knot_subnet, cfg)
 
         return [
             Component(
@@ -940,13 +979,15 @@ def detect_unstructured(net_or_topology: Any, config: Optional[FoldConfig] = Non
         if other_places:
             p_snk = other_places[-1]
 
-    p_c = set(topo.place_ids)
-    t_c = set(topo.trans_ids)
-    f_c = set(topo.direct_arcs)
+    global_subnet = Subnet(
+        places=set(topo.place_ids),
+        transitions=set(topo.trans_ids),
+        arcs=set(topo.direct_arcs),
+    )
 
-    omega = _calculate_unstructured_omega(topo, p_c, t_c, f_c, cfg)
+    omega = _calculate_unstructured_omega(topo, global_subnet, cfg)
 
-    internal_nodes = (p_c - {p_src.id, p_snk.id}) | t_c
+    internal_nodes = (global_subnet.places - {p_src.id, p_snk.id}) | global_subnet.transitions
     return [
         Component(
             component_type=ComponentType.UNSTRUCTURED,
