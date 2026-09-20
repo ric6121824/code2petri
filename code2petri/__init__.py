@@ -13,6 +13,10 @@ from code2petri.fold import (
     calculate_symmetry_multiplier,
     detect_components,
     fold_component,
+    fold_sequence,
+    foldSequence,
+    fold_choice,
+    foldChoice,
     fold_net,
 )
 
@@ -42,6 +46,10 @@ __all__ = [
     "calculate_symmetry_multiplier",
     "detect_components",
     "fold_component",
+    "fold_sequence",
+    "foldSequence",
+    "fold_choice",
+    "foldChoice",
     "fold_net",
     "inline_expand",
 ]

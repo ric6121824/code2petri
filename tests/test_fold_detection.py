@@ -247,13 +247,20 @@ class TestDetectPureSequence(unittest.TestCase):
     def test_detect_3_transition_sequence(self):
         net, entrance, exit_node, internal = build_sequence_net(3)
         components = detect_components(net)
-        self.assertEqual(len(components), 1)
-        c = components[0]
-        self.assertEqual(c.component_type, ComponentType.SEQUENCE)
-        self.assertEqual(c.entrance, entrance)
-        self.assertEqual(c.exit, exit_node)
-        self.assertEqual(c.internal_node_ids, set(internal))
-        self.assertEqual(c.omega, 0.0)
+        # In p0 -> t1 -> p1 -> t2 -> p2 -> t3 -> p3, there are two intermediate place candidates: p1 and p2
+        self.assertEqual(len(components), 2)
+        c1, c2 = components[0], components[1]
+        self.assertEqual(c1.component_type, ComponentType.SEQUENCE)
+        self.assertEqual(c1.entrance, "t1")
+        self.assertEqual(c1.exit, "t2")
+        self.assertEqual(c1.internal_node_ids, {"p1"})
+        self.assertEqual(c1.omega, 0.0)
+
+        self.assertEqual(c2.component_type, ComponentType.SEQUENCE)
+        self.assertEqual(c2.entrance, "t2")
+        self.assertEqual(c2.exit, "t3")
+        self.assertEqual(c2.internal_node_ids, {"p2"})
+        self.assertEqual(c2.omega, 0.0)
 
     def test_detect_2_transition_sequence(self):
         net, entrance, exit_node, internal = build_sequence_net(2)
@@ -261,9 +268,9 @@ class TestDetectPureSequence(unittest.TestCase):
         self.assertEqual(len(components), 1)
         c = components[0]
         self.assertEqual(c.component_type, ComponentType.SEQUENCE)
-        self.assertEqual(c.entrance, entrance)
-        self.assertEqual(c.exit, exit_node)
-        self.assertEqual(c.internal_node_ids, set(internal))
+        self.assertEqual(c.entrance, "t1")
+        self.assertEqual(c.exit, "t2")
+        self.assertEqual(c.internal_node_ids, {"p1"})
         self.assertEqual(c.omega, 0.0)
 
     def test_single_transition_not_detected_as_sequence(self):
@@ -298,10 +305,13 @@ class TestDetectPureSequence(unittest.TestCase):
 
         components = detect_components(net)
         seq_comps = [c for c in components if c.component_type == ComponentType.SEQUENCE]
-        self.assertEqual(len(seq_comps), 1)
-        self.assertEqual(seq_comps[0].entrance, "p1")
-        self.assertEqual(seq_comps[0].exit, "p3")
-        self.assertEqual(seq_comps[0].internal_node_ids, {"t2", "p2", "t3"})
+        self.assertEqual(len(seq_comps), 2)
+        self.assertEqual(seq_comps[0].entrance, "t1")
+        self.assertEqual(seq_comps[0].exit, "t2")
+        self.assertEqual(seq_comps[0].internal_node_ids, {"p1"})
+        self.assertEqual(seq_comps[1].entrance, "t2")
+        self.assertEqual(seq_comps[1].exit, "t3")
+        self.assertEqual(seq_comps[1].internal_node_ids, {"p2"})
 
     def test_sequence_terminating_at_join_place(self):
         # p0 -> t1 -> p1 -> t2 -> p_join
@@ -327,9 +337,9 @@ class TestDetectPureSequence(unittest.TestCase):
         components = detect_components(net)
         seq_comps = [c for c in components if c.component_type == ComponentType.SEQUENCE]
         self.assertEqual(len(seq_comps), 1)
-        self.assertEqual(seq_comps[0].entrance, "p0")
-        self.assertEqual(seq_comps[0].exit, "p_join")
-        self.assertEqual(seq_comps[0].internal_node_ids, {"t1", "p1", "t2"})
+        self.assertEqual(seq_comps[0].entrance, "t1")
+        self.assertEqual(seq_comps[0].exit, "t2")
+        self.assertEqual(seq_comps[0].internal_node_ids, {"p1"})
 
 
 class TestDetectChoice(unittest.TestCase):
@@ -353,7 +363,8 @@ class TestDetectChoice(unittest.TestCase):
         self.assertEqual(c.entrance, entrance)
         self.assertEqual(c.exit, exit_node)
         self.assertEqual(c.internal_node_ids, set(internal))
-        self.assertEqual(c.omega, 1.0)
+        # ProM 1.5x markup: sum_tau = 3.0, omega = 1.0 * (3.0 * 0.5) = 1.5
+        self.assertEqual(c.omega, 1.5)
 
 
 class TestDetectLoop(unittest.TestCase):
@@ -398,20 +409,20 @@ class TestPrioritySortingAndTieBreaking(unittest.TestCase):
     def test_tie_breaking_smallest_internal_nodes(self):
         net = PetriNet()
 
-        # Sequence 1 (shorter, 2 transitions -> internal nodes len 3)
-        seq1_net, _, _, _ = build_sequence_net(2, prefix="a_")
-        # Sequence 2 (longer, 3 transitions -> internal nodes len 5)
-        seq2_net, _, _, _ = build_sequence_net(3, prefix="b_")
+        # Choice 1 (2 branches -> 2 internal transition nodes)
+        choice1_net, _, _, _ = build_choice_net(2, prefix="a_")
+        # Choice 2 (3 branches -> 3 internal transition nodes)
+        choice2_net, _, _, _ = build_choice_net(3, prefix="b_")
 
-        combine_into_composite_net(net, seq1_net)
-        combine_into_composite_net(net, seq2_net)
+        combine_into_composite_net(net, choice1_net)
+        combine_into_composite_net(net, choice2_net)
 
         components = detect_components(net)
         self.assertEqual(len(components), 2)
         # Smallest internal node count first
         self.assertLess(len(components[0].internal_node_ids), len(components[1].internal_node_ids))
-        self.assertEqual(components[0].entrance, "a_p0")
-        self.assertEqual(components[1].entrance, "b_p0")
+        self.assertEqual(components[0].entrance, "a_p_split")
+        self.assertEqual(components[1].entrance, "b_p_split")
 
 
 class TestUnstructuredNet(unittest.TestCase):

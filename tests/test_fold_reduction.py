@@ -18,6 +18,10 @@ from code2petri.fold import (
     fold_net,
     fold_component,
     detect_components,
+    fold_sequence,
+    foldSequence,
+    fold_choice,
+    foldChoice,
     _is_trivial_workflow_net,
 )
 from tests.test_fold_detection import (
@@ -34,22 +38,29 @@ class TestFoldSequence(unittest.TestCase):
         result = fold_net(net)
 
         self.assertTrue(result.fully_reducible)
-        self.assertEqual(len(result.steps), 1)
+        # Under fine-grained Single-Place Contraction, 3 transitions reduce across 2 contractions
+        self.assertEqual(len(result.steps), 2)
 
         step1 = result.steps[0]
         self.assertEqual(step1.step_number, 1)
         self.assertEqual(step1.component_type, ComponentType.SEQUENCE)
         self.assertEqual(step1.opaque_transition_id, "t_C1")
         self.assertEqual(step1.omega, 0.0)
-        # 3 transitions initially with tau=1.0 -> 0.0 + 1 + 1 + 1 = 3.0
-        self.assertEqual(step1.tau, 3.0)
-        self.assertEqual(step1.running_sm, 3.0)
+        self.assertEqual(step1.tau, 2.0)
+
+        step2 = result.steps[1]
+        self.assertEqual(step2.step_number, 2)
+        self.assertEqual(step2.component_type, ComponentType.SEQUENCE)
+        self.assertEqual(step2.opaque_transition_id, "t_C2")
+        self.assertEqual(step2.omega, 0.0)
+        self.assertEqual(step2.tau, 3.0)
+        self.assertEqual(step2.running_sm, 3.0)
         self.assertEqual(result.final_sm, 3.0)
 
-        # Folded net at step 1 should have exactly 1 transition (t_C1) between p0 and p3
-        folded_net = step1.snapshot
+        # Folded net at step 2 should have exactly 1 transition (t_C2) between p0 and p3
+        folded_net = step2.snapshot
         self.assertEqual(len(folded_net.transitions), 1)
-        self.assertEqual(folded_net.transitions[0].id, "t_C1")
+        self.assertEqual(folded_net.transitions[0].id, "t_C2")
         self.assertTrue(folded_net.transitions[0].metadata.get("opaque"))
         self.assertEqual(folded_net.transitions[0].metadata.get("tau"), 3.0)
         self.assertEqual(len(folded_net.places), 2)
@@ -57,15 +68,26 @@ class TestFoldSequence(unittest.TestCase):
         self.assertEqual(place_ids, {"p0", "p3"})
         self.assertEqual(len(folded_net.arcs), 2)
 
-    def test_pure_2_transition_sequence_fold(self):
+    def test_prom_single_place_contraction_direct(self):
+        """Validates that fold_sequence directly contracts one intermediate place (1 -> 1 -> 1)."""
         net, entrance, exit_node, internal = build_sequence_net(2)
-        result = fold_net(net)
+        res = fold_sequence(net, step_number=1, config=FoldConfig())
 
-        self.assertTrue(result.fully_reducible)
-        self.assertEqual(len(result.steps), 1)
-        self.assertEqual(result.steps[0].omega, 0.0)
-        self.assertEqual(result.steps[0].tau, 2.0)
-        self.assertEqual(result.final_sm, 2.0)
+        self.assertIsNotNone(res, "fold_sequence should return a result for a valid sequence")
+        folded_net, step = res
+
+        self.assertEqual(step.step_number, 1)
+        self.assertEqual(step.component_type, ComponentType.SEQUENCE)
+        self.assertEqual(step.opaque_transition_id, "t_C1")
+        self.assertEqual(step.consumed_node_ids, {"t1", "p1", "t2"})
+        self.assertEqual(step.omega, 0.0)
+        self.assertEqual(step.tau, 2.0)
+
+        # The folded net must have p0, p2, and t_C1
+        self.assertEqual({p.id for p in folded_net.places}, {"p0", "p2"})
+        self.assertEqual({t.id for t in folded_net.transitions}, {"t_C1"})
+        self.assertEqual(len(folded_net.arcs), 2)
+        self.assertTrue(_is_trivial_workflow_net(folded_net))
 
 
 class TestFoldChoice(unittest.TestCase):
@@ -89,6 +111,26 @@ class TestFoldChoice(unittest.TestCase):
         self.assertEqual(folded_net.transitions[0].id, "t_C1")
         self.assertEqual(folded_net.transitions[0].metadata.get("tau"), 3.0)
         self.assertEqual(len(folded_net.places), 2)
+
+    def test_prom_choice_fold_direct(self):
+        """Validates that fold_choice directly folds parallel transitions between shared places."""
+        net, entrance, exit_node, internal = build_choice_net(2)
+        res = fold_choice(net, step_number=1, config=FoldConfig())
+
+        self.assertIsNotNone(res, "fold_choice should return a result for a valid choice")
+        folded_net, step = res
+
+        self.assertEqual(step.step_number, 1)
+        self.assertEqual(step.component_type, ComponentType.CHOICE)
+        self.assertEqual(step.opaque_transition_id, "t_C1")
+        self.assertEqual(step.consumed_node_ids, {"t1", "t2"})
+        self.assertEqual(step.omega, 1.0)
+        self.assertEqual(step.tau, 3.0)
+
+        self.assertEqual({p.id for p in folded_net.places}, {"p_split", "p_merge"})
+        self.assertEqual({t.id for t in folded_net.transitions}, {"t_C1"})
+        self.assertEqual(len(folded_net.arcs), 2)
+        self.assertTrue(_is_trivial_workflow_net(folded_net))
 
 
 class TestFoldLoop(unittest.TestCase):
@@ -299,6 +341,133 @@ class TestFoldResultPropertiesAndSerialization(unittest.TestCase):
         self.assertTrue(result.fully_reducible)
         self.assertEqual(len(result.steps), 0)
         self.assertEqual(result.final_sm, 1.0)
+
+
+class TestASTTopologyReduction(unittest.TestCase):
+    def test_ast_if_else_reduction(self):
+        """Validates that a synthetic AST if/else topology (matching wire_if_split) folds cleanly."""
+        net = PetriNet()
+        p_split = net.add_place("p_split", initial_tokens=1)
+        p_true = net.add_place("p_true")
+        p_false = net.add_place("p_false")
+        p_merge = net.add_place("p_merge")
+
+        t_if = net.add_transition("t_if")
+        t_else = net.add_transition("t_else")
+        t_stmt1 = net.add_transition("t_stmt1")
+        t_stmt2 = net.add_transition("t_stmt2")
+
+        # True branch: p_split -> t_if -> p_true -> t_stmt1 -> p_merge
+        net.add_arc(p_split, t_if)
+        net.add_arc(t_if, p_true)
+        net.add_arc(p_true, t_stmt1)
+        net.add_arc(t_stmt1, p_merge)
+
+        # False branch: p_split -> t_else -> p_false -> t_stmt2 -> p_merge
+        net.add_arc(p_split, t_else)
+        net.add_arc(t_else, p_false)
+        net.add_arc(p_false, t_stmt2)
+        net.add_arc(t_stmt2, p_merge)
+
+        result = fold_net(net)
+        self.assertTrue(result.fully_reducible)
+        # Sequence step 1 & 2 fold the two branches, Choice step 3 collapses the parallel branches
+        self.assertEqual(len(result.steps), 3)
+        self.assertEqual(result.steps[0].component_type, ComponentType.SEQUENCE)
+        self.assertEqual(result.steps[1].component_type, ComponentType.SEQUENCE)
+        self.assertEqual(result.steps[2].component_type, ComponentType.CHOICE)
+
+        # Check no unstructured step occurred
+        for s in result.steps:
+            self.assertNotEqual(s.component_type, ComponentType.UNSTRUCTURED)
+
+        final_net = result.steps[-1].snapshot
+        self.assertEqual(len(final_net.transitions), 1)
+        self.assertEqual(len(final_net.places), 2)
+
+    def test_ast_if_without_else_reduction(self):
+        """Validates an AST if statement with empty else (fallthrough branch)."""
+        net = PetriNet()
+        p_split = net.add_place("p_split", initial_tokens=1)
+        p_true = net.add_place("p_true")
+        p_merge = net.add_place("p_merge")
+
+        t_if = net.add_transition("t_if")
+        t_stmt = net.add_transition("t_stmt")
+        t_fallthrough = net.add_transition("t_fallthrough")
+
+        # True branch: p_split -> t_if -> p_true -> t_stmt -> p_merge
+        net.add_arc(p_split, t_if)
+        net.add_arc(t_if, p_true)
+        net.add_arc(p_true, t_stmt)
+        net.add_arc(t_stmt, p_merge)
+
+        # Fallthrough branch: p_split -> t_fallthrough -> p_merge
+        net.add_arc(p_split, t_fallthrough)
+        net.add_arc(t_fallthrough, p_merge)
+
+        result = fold_net(net)
+        self.assertTrue(result.fully_reducible)
+        # Step 1: Sequence folds p_true (t_if, t_stmt)
+        # Step 2: Choice folds parallel branches between p_split and p_merge
+        self.assertEqual(len(result.steps), 2)
+        self.assertEqual(result.steps[0].component_type, ComponentType.SEQUENCE)
+        self.assertEqual(result.steps[1].component_type, ComponentType.CHOICE)
+
+        for s in result.steps:
+            self.assertNotEqual(s.component_type, ComponentType.UNSTRUCTURED)
+
+    def test_ast_nested_if_else_reduction(self):
+        """Validates nested if/else AST structures reduce completely without unstructured fallback."""
+        net = PetriNet()
+        p_split = net.add_place("p_split", initial_tokens=1)
+        p_outer_false = net.add_place("p_outer_false")
+        p_merge = net.add_place("p_merge")
+
+        # Outer false branch
+        t_outer_else = net.add_transition("t_outer_else")
+        t_stmt_outer_else = net.add_transition("t_stmt_outer_else")
+        net.add_arc(p_split, t_outer_else)
+        net.add_arc(t_outer_else, p_outer_false)
+        net.add_arc(p_outer_false, t_stmt_outer_else)
+        net.add_arc(t_stmt_outer_else, p_merge)
+
+        # Outer true branch leads to nested split
+        t_outer_if = net.add_transition("t_outer_if")
+        p_inner_split = net.add_place("p_inner_split")
+        net.add_arc(p_split, t_outer_if)
+        net.add_arc(t_outer_if, p_inner_split)
+
+        # Nested true branch
+        p_inner_true = net.add_place("p_inner_true")
+        p_inner_merge = net.add_place("p_inner_merge")
+        t_inner_if = net.add_transition("t_inner_if")
+        t_stmt_inner1 = net.add_transition("t_stmt_inner1")
+        net.add_arc(p_inner_split, t_inner_if)
+        net.add_arc(t_inner_if, p_inner_true)
+        net.add_arc(p_inner_true, t_stmt_inner1)
+        net.add_arc(t_stmt_inner1, p_inner_merge)
+
+        # Nested false branch
+        p_inner_false = net.add_place("p_inner_false")
+        t_inner_else = net.add_transition("t_inner_else")
+        t_stmt_inner2 = net.add_transition("t_stmt_inner2")
+        net.add_arc(p_inner_split, t_inner_else)
+        net.add_arc(t_inner_else, p_inner_false)
+        net.add_arc(p_inner_false, t_stmt_inner2)
+        net.add_arc(t_stmt_inner2, p_inner_merge)
+
+        # From nested merge to outer merge
+        t_after_nested = net.add_transition("t_after_nested")
+        net.add_arc(p_inner_merge, t_after_nested)
+        net.add_arc(t_after_nested, p_merge)
+
+        result = fold_net(net)
+        self.assertTrue(result.fully_reducible)
+        for s in result.steps:
+            self.assertNotEqual(s.component_type, ComponentType.UNSTRUCTURED)
+        final_net = result.steps[-1].snapshot
+        self.assertEqual(len(final_net.transitions), 1)
 
 
 if __name__ == '__main__':

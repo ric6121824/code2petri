@@ -259,150 +259,136 @@ def calculate_symmetry_multiplier(
 
 def detect_sequences(
     net_or_topology: Union[PetriNet, NetTopology],
-    config: FoldConfig,
+    config: Optional[FoldConfig] = None,
 ) -> List[Component]:
-    """Detects linear chains of place -> transition -> place with no branching.
+    """Detects single-place contraction candidates matching ProM 1 -> 1 -> 1 topology.
 
-    Per Definition 17 & 18:
-    A sequence component is a maximal linear chain starting and ending with a place,
-    containing >= 2 transitions with no internal branching.
+    A candidate is an intermediate place p with:
+      - in_degree(p) == 1 and out_degree(p) == 1
+      - initial_tokens == 0 (preserves marking state)
+      - source_transition != sink_transition
+      - out_degree(source_transition) == 1 (source only outputs to p)
+      - in_degree(sink_transition) == 1 (sink only inputs from p)
+      - presets(source_transition) and postsets(sink_transition) are disjoint (not a 2-transition cycle)
     """
+    cfg = config if config is not None else FoldConfig()
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
-
-    def can_extend_backwards(place_id: str) -> bool:
-        if topo.in_degree(place_id) != 1:
-            return False
-        preds = topo.presets(place_id)
-        if len(preds) != 1:
-            return False
-        pred_trans = next(iter(preds))
-        if topo.out_degree(pred_trans) != 1 or topo.in_degree(pred_trans) != 1:
-            return False
-        pred_places = topo.presets(pred_trans)
-        if len(pred_places) != 1:
-            return False
-        pred_place = next(iter(pred_places))
-        return topo.out_degree(pred_place) == 1
-
-    # Place-started candidate start nodes
-    start_places = [
-        p_id for p_id in topo.place_ids
-        if topo.out_degree(p_id) == 1 and not can_extend_backwards(p_id)
-    ]
-
     sequences: List[Component] = []
-    seen_transition_sets: Set[Tuple[str, ...]] = set()
 
-    for start_p in start_places:
-        chain = [start_p]
-        visited = {start_p}
-        curr = start_p
+    for place in sorted(topo.net.places, key=lambda p: p.id):
+        # Do not contract marked places (preserves initial token state)
+        if place.initial_tokens > 0:
+            continue
+        if topo.in_degree(place.id) != 1 or topo.out_degree(place.id) != 1:
+            continue
 
-        while True:
-            succs = topo.postsets(curr)
-            if len(succs) != 1:
-                break
-            nxt = next(iter(succs))
-            if nxt in visited:
-                break  # Cycle encountered
+        preds = topo.presets(place.id)
+        succs = topo.postsets(place.id)
+        t_src = next(iter(preds))
+        t_snk = next(iter(succs))
 
-            if topo.is_place(nxt):
-                chain.append(nxt)
-                visited.add(nxt)
-                curr = nxt
-                if topo.in_degree(nxt) != 1 or topo.out_degree(nxt) != 1:
-                    break  # Split place, join place, or sink: cannot be internal, ends sequence here as exit
-            else:  # nxt is a transition
-                if topo.in_degree(nxt) != 1 or topo.out_degree(nxt) != 1:
-                    break
-                chain.append(nxt)
-                visited.add(nxt)
-                curr = nxt
+        if t_src == t_snk:
+            continue
+        if topo.out_degree(t_src) != 1 or topo.in_degree(t_snk) != 1:
+            continue
+        # Avoid reducing a 2-transition cycle into a sequence self-loop
+        if bool(topo.presets(t_src) & topo.postsets(t_snk)):
+            continue
 
-        # Sequence must end at a place
-        if not topo.is_place(chain[-1]):
-            chain.pop()
-
-        chain_transitions = [nid for nid in chain if topo.is_transition(nid)]
-        if len(chain_transitions) >= 2 and len(chain) >= 3:
-            trans_key = tuple(sorted(chain_transitions))
-            if trans_key not in seen_transition_sets:
-                seen_transition_sets.add(trans_key)
-                entrance = chain[0]
-                exit_node = chain[-1]
-                # Internal nodes are strictly intermediate nodes between entrance and exit
-                internal_nodes = set(chain[1:-1])
-
-                sequences.append(
-                    Component(
-                        component_type=ComponentType.SEQUENCE,
-                        internal_node_ids=internal_nodes,
-                        entrance=entrance,
-                        exit=exit_node,
-                        omega=config.sequence,
-                    )
-                )
+        sequences.append(
+            Component(
+                component_type=ComponentType.SEQUENCE,
+                internal_node_ids={place.id},
+                entrance=t_src,
+                exit=t_snk,
+                omega=cfg.sequence,
+            )
+        )
 
     return sequences
 
 
+def fold_sequence(
+    net: PetriNet,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Optional[Tuple[PetriNet, FoldStep]]:
+    """Contracts exactly one intermediate place and merges its adjacent transitions per ProM (1 -> 1 -> 1)."""
+    cfg = config if config is not None else FoldConfig()
+    candidates = detect_sequences(net, cfg)
+    if not candidates:
+        return None
+    return fold_component(net, candidates[0], step_number)
+
+
+foldSequence = fold_sequence
+
+
 def detect_choices(
     net_or_topology: Union[PetriNet, NetTopology],
-    config: FoldConfig,
+    config: Optional[FoldConfig] = None,
 ) -> List[Component]:
-    """Detects XOR-split/join Choice components per Definition 18.
+    """Detects atomic parallel Choice components per ProM / Definition 18.
 
-    A Choice component has P_C = {p_i, p_o} and T_C = p_i* = *p_o with |T_C| >= 2.
+    Searches for sets of >= 2 transitions strictly connecting a single shared input place
+    and a single shared output place.
     """
+    cfg = config if config is not None else FoldConfig()
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
     choices: List[Component] = []
+    seen_bundles: Set[Tuple[str, str]] = set()
 
-    for place in topo.net.places:
-        p_split = place.id
-        choice_transitions = topo.postsets(p_split)
-        if len(choice_transitions) < 2:
-            continue
+    for p_source in sorted(topo.place_ids):
+        # Group outgoing transitions by their unique target place
+        target_groups: Dict[str, List[str]] = {}
+        for tid in topo.postsets(p_source):
+            if topo.in_degree(tid) == 1 and topo.out_degree(tid) == 1:
+                target_place = next(iter(topo.postsets(tid)))
+                if target_place != p_source:
+                    target_groups.setdefault(target_place, []).append(tid)
 
-        # Each transition must have only p_split as input and exactly one output
-        valid_transitions = True
-        target_places: Set[str] = set()
+        for p_sink, tids in sorted(target_groups.items()):
+            if len(tids) < 2:
+                continue
 
-        for tid in choice_transitions:
-            if topo.presets(tid) != {p_split} or topo.out_degree(tid) != 1:
-                valid_transitions = False
-                break
-            target_places.add(next(iter(topo.postsets(tid))))
+            bundle_key = (p_source, p_sink)
+            if bundle_key in seen_bundles:
+                continue
+            seen_bundles.add(bundle_key)
 
-        if not valid_transitions or len(target_places) != 1:
-            continue
+            choice_trans = [t for t in topo.net.transitions if t.id in tids]
+            sum_tau = sum(t.get_tau() for t in choice_trans)
+            # ProM formula: 1.5x multiplier on the sum of weights: tau = sum_tau * 1.5
+            # omega = config.choice * (sum_tau * 0.5)
+            omega = cfg.choice * (sum_tau * 0.5)
 
-        p_merge = next(iter(target_places))
-        if p_merge == p_split:
-            continue
-
-        # p_merge must receive inputs exclusively from choice_transitions
-        if topo.presets(p_merge) != choice_transitions:
-            continue
-
-        # No direct arc from p_merge to p_split (Definition 16: (o_C, i_C) not in F)
-        if topo.has_arc(p_merge, p_split):
-            continue
-
-        component_nodes = {p_split, p_merge} | choice_transitions
-        diff_val = calculate_symmetry_multiplier(topo, component_nodes, [p_split, p_merge])
-        omega = config.choice * diff_val
-
-        choices.append(
-            Component(
-                component_type=ComponentType.CHOICE,
-                internal_node_ids=set(choice_transitions),
-                entrance=p_split,
-                exit=p_merge,
-                omega=omega,
+            choices.append(
+                Component(
+                    component_type=ComponentType.CHOICE,
+                    internal_node_ids=set(tids),
+                    entrance=p_source,
+                    exit=p_sink,
+                    omega=omega,
+                )
             )
-        )
 
     return choices
+
+
+def fold_choice(
+    net: PetriNet,
+    step_number: int,
+    config: Optional[FoldConfig] = None,
+) -> Optional[Tuple[PetriNet, FoldStep]]:
+    """Folds parallel transitions between a shared input place and output place per ProM."""
+    cfg = config if config is not None else FoldConfig()
+    candidates = detect_choices(net, cfg)
+    if not candidates:
+        return None
+    return fold_component(net, candidates[0], step_number)
+
+
+foldChoice = fold_choice
 
 
 def _find_elementary_cycles(net: PetriNet, topology: NetTopology) -> List[List[str]]:
@@ -745,19 +731,35 @@ def fold_net(
     fully_reducible = True
 
     while not _is_trivial_workflow_net(current_net):
-        components = detect_components(current_net, cfg)
-        if components:
-            # Pick highest priority / smallest component per Definition 21
-            best_comp = components[0]
-            current_net, step = fold_component(current_net, best_comp, step_number)
+        # 1. Prioritize Sequence (Single-Place Contraction)
+        res_seq = fold_sequence(current_net, step_number, cfg)
+        if res_seq is not None:
+            current_net, step = res_seq
             steps.append(step)
             step_number += 1
-        else:
-            # Irreducible net with multiple unreduced nodes remaining
-            current_net, step = fold_unstructured(current_net, step_number, cfg)
+            continue
+
+        # 2. Prioritize Choice (Atomic Parallel Transitions Collapse)
+        res_choice = fold_choice(current_net, step_number, cfg)
+        if res_choice is not None:
+            current_net, step = res_choice
             steps.append(step)
-            fully_reducible = False
-            break
+            step_number += 1
+            continue
+
+        # 3. Fallback to Loop component fold
+        loop_comps = detect_loops(current_net, cfg)
+        if loop_comps:
+            current_net, step = fold_component(current_net, loop_comps[0], step_number)
+            steps.append(step)
+            step_number += 1
+            continue
+
+        # 4. Irreducible net: fallback to unstructured penalty
+        current_net, step = fold_unstructured(current_net, step_number, cfg)
+        steps.append(step)
+        fully_reducible = False
+        break
 
     final_sm = current_net.transitions[0].get_tau() if current_net.transitions else 0.0
 

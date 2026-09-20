@@ -67,3 +67,8 @@ _Avoid_: Weight options, reduction settings
 **Fold Step**:
 A serializable snapshot recording a single reduction operation: detected component type, consumed node IDs, created opaque transition ID, $\\omega$, $\\tau$, running SM score, and resulting net state.
 _Avoid_: Intermediate net, reduction snapshot
+
+**Single-Place Contraction**:
+The fine-grained reduction operation that removes exactly one intermediate place and merges its adjacent transitions, replacing maximal chain matching to gracefully collapse AST branch anomalies.
+_Avoid_: Sequence collapsing, chain reduction
+
