@@ -250,5 +250,28 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
         self.assertIn("stepCpu", callee_data)
 
 
+    def test_cli_engine_precomputes_callee_nets_for_html_without_context(self):
+        """Validates that code2petri with HTML output and context=None precomputes same-file callees."""
+        out_html = os.path.join(self.temp_dir.name, "loop_no_context.html")
+        code2petri(
+            source_path=self.app_js,
+            target_function="loop",
+            context=None,
+            output_file=out_html,
+        )
+        self.assertTrue(os.path.exists(out_html))
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        callee_data = _extract_callee_nets_data(content)
+        # Same-file internal callee stepCpu should be pre-computed
+        self.assertIn("stepCpu", callee_data)
+        self.assertIn("places", callee_data["stepCpu"])
+        self.assertIn("transitions", callee_data["stepCpu"])
+        self.assertIn("arcs", callee_data["stepCpu"])
+        # Cross-file callee WebGLEngine.step should NOT be present without context
+        self.assertNotIn("WebGLEngine.step", callee_data)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -313,23 +313,29 @@
         const transitions = net.transitions || [];
         const arcs = net.arcs || [];
 
-        places.forEach(function(p) {
+        function formatPlaceElement(p, prefix, parentId) {
+          prefix = prefix || '';
           const tokens = p.initial_tokens || 0;
           const label = (p.label || p.id) + (tokens > 0 ? ' (' + tokens + ')' : '');
-          elements.push({
+          const data = {
+            id: prefix + p.id,
+            label: label,
+            type: 'Place',
+            tokens: tokens,
+            raw_label: p.label || p.id
+          };
+          if (parentId) {
+            data.parent = parentId;
+          }
+          return {
             group: 'nodes',
-            data: {
-              id: p.id,
-              label: label,
-              type: 'Place',
-              tokens: tokens,
-              raw_label: p.label || p.id
-            },
+            data: data,
             classes: 'place' + (tokens > 0 ? ' has-tokens' : '')
-          });
-        });
+          };
+        }
 
-        transitions.forEach(function(t) {
+        function formatTransitionElement(t, prefix, parentId) {
+          prefix = prefix || '';
           const meta = t.metadata || {};
           const isOpaque = Boolean(meta.opaque || (t.id && t.id.startsWith('t_C')));
           const tau = meta.tau !== undefined ? Number(meta.tau) : (t.tau !== undefined ? Number(t.tau) : 1.0);
@@ -364,7 +370,7 @@
           if (statusClass) classes.push(statusClass);
 
           const nodeData = {
-            id: t.id,
+            id: prefix + t.id,
             label: displayLabel,
             raw_label: t.label || t.id,
             type: isOpaque ? 'Opaque Transition' : 'Transition',
@@ -377,15 +383,26 @@
             target_file: t.target_file,
             component_type: meta.component_type
           };
+          if (parentId) {
+            nodeData.parent = parentId;
+          }
           if (badgeSvg) {
             nodeData.badge_svg = badgeSvg;
           }
 
-          elements.push({
+          return {
             group: 'nodes',
             data: nodeData,
             classes: classes.join(' ')
-          });
+          };
+        }
+
+        places.forEach(function(p) {
+          elements.push(formatPlaceElement(p));
+        });
+
+        transitions.forEach(function(t) {
+          elements.push(formatTransitionElement(t));
         });
 
         arcs.forEach(function(a, idx) {
@@ -449,58 +466,12 @@
             if (p.id === rawSourcePlaceId || p.id === rawSinkPlaceId) {
               return;
             }
-            const tokens = p.initial_tokens || 0;
-            const label = (p.label || p.id) + (tokens > 0 ? ' (' + tokens + ')' : '');
-            elements.push({
-              group: 'nodes',
-              data: {
-                id: prefix + p.id,
-                parent: parentId,
-                label: label,
-                type: 'Place',
-                tokens: tokens,
-                raw_label: p.label || p.id
-              },
-              classes: 'place' + (tokens > 0 ? ' has-tokens' : '')
-            });
+            elements.push(formatPlaceElement(p, prefix, parentId));
           });
 
           // Splice callee transitions inside compound node
           (calleeNet.transitions || []).forEach(function(t) {
-            let displayLabel = t.label || t.id;
-            if (t.line_number !== null && t.line_number !== undefined) {
-              displayLabel += ' (line ' + t.line_number + ')';
-            }
-
-            let fillcolor = '#ffffff';
-            let statusClass = '';
-            if (t.resolved === true) {
-              fillcolor = '#2e7d32';
-              statusClass = 'resolved';
-            } else if (t.resolved === false) {
-              fillcolor = '#e65100';
-              statusClass = 'unresolved';
-            }
-
-            const classes = ['transition'];
-            if (statusClass) classes.push(statusClass);
-
-            elements.push({
-              group: 'nodes',
-              data: {
-                id: prefix + t.id,
-                parent: parentId,
-                label: displayLabel,
-                raw_label: t.label || t.id,
-                type: 'Transition',
-                line_number: t.line_number,
-                fillcolor: fillcolor,
-                resolved: t.resolved,
-                resolved_to: t.resolved_to,
-                target_file: t.target_file
-              },
-              classes: classes.join(' ')
-            });
+            elements.push(formatTransitionElement(t, prefix, parentId));
           });
 
           // Splice callee arcs with boundary place unification (ADR-0002)
@@ -861,7 +832,19 @@
           const omegaVal = stepInfo.omega !== undefined ? stepInfo.omega : 0;
           const tauVal = stepInfo.tau !== undefined ? stepInfo.tau : 0;
           infoTitle.textContent = 'Step ' + currentStep + ': Folded ' + compType;
-          infoDesc.textContent = 'Collapsed into opaque transition ' + opaqueId + ' (penalty ω=' + omegaVal + ', accumulated weight τ=' + tauVal + ').';
+          let desc = 'Collapsed into opaque transition ' + opaqueId + ' (penalty ω=' + omegaVal + ', accumulated weight τ=' + tauVal + ').';
+
+          // Check if any actively expanded caller transition has been folded away in current step
+          const hiddenExpansions = [];
+          Array.from(expandedNodes.keys()).forEach(function(nodeId) {
+            if (cy.getElementById(nodeId).length === 0) {
+              hiddenExpansions.push(nodeId);
+            }
+          });
+          if (hiddenExpansions.length > 0) {
+            desc += ' (Note: Expanded caller transition ' + hiddenExpansions.map(function(id) { return "'" + id + "'"; }).join(', ') + ' is folded into ' + opaqueId + ' in this step).';
+          }
+          infoDesc.textContent = desc;
         }
       }
 

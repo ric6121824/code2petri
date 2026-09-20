@@ -320,6 +320,28 @@ if (cy1.$('#t1').children().length !== 1) throw new Error('t1 should have 1 raw 
 if (cy1.$('#t_C1').length === 0) throw new Error('Outer fold transition t_C1 should exist at step 1');
 if (cy1.edges('[source = "p1"]').target().id() !== 't1__ct0') throw new Error('p1 should target t1__ct0 at step 1');
 
+// Check at Step 2: Caller transition t1 itself is collapsed into opaque transition t_C2
+const step2 = {{
+  places: [{{ id: 'p1', label: 'mid' }}, {{ id: 'p2', label: 'end' }}],
+  transitions: [
+    {{ id: 't_C2', label: 'folded_t1', metadata: {{ opaque: true, tau: 2.0 }} }}
+  ],
+  arcs: [
+    {{ source: 'p1', target: 't_C2' }},
+    {{ source: 't_C2', target: 'p2' }}
+  ]
+}};
+
+const cy2 = cytoscape({{ headless: true, elements: netToElements(step2) }});
+if (cy2.$('#t_C2').length === 0) throw new Error('t_C2 should exist at step 2');
+if (cy2.$('#t1').length !== 0) throw new Error('t1 should be absent at step 2');
+if (cy2.$('#t1__ct0').length !== 0) throw new Error('t1__ct0 should be absent when parent is folded away');
+
+// Step back to Step 1: t1 exists again and is immediately re-expanded from expandedNodes!
+const cy1_back = cytoscape({{ headless: true, elements: netToElements(step1) }});
+if (!cy1_back.$('#t1').isParent()) throw new Error('t1 should be parent again when stepping back');
+if (cy1_back.$('#t1').children().length !== 1) throw new Error('t1 should have 1 child when stepping back');
+
 console.log('PASS');
 """
         proc = subprocess.run(

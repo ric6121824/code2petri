@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 import json
 import os
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from code2petri.model import PetriNet, Place, Transition
 
@@ -606,30 +606,31 @@ def fold_loop(
     return _fold_first_candidate(net, detect_loops(net, cfg), step_number)
 
 
-def forward_reachability(topo: NetTopology, source_id: str, sink_id: str) -> Set[str]:
-    """Computes the forward reachable set from source_id stopping at sink_id."""
-    queue = [source_id]
-    nodes = {source_id, sink_id}
+def _reachability(
+    start_node: str,
+    boundary_node: str,
+    get_neighbors: Callable[[str], Iterable[str]],
+) -> Set[str]:
+    """Computes reachable set from start_node stopping at boundary_node."""
+    queue = [start_node]
+    nodes = {start_node, boundary_node}
     while queue:
         curr = queue.pop(0)
-        for target in topo.postsets(curr):
-            if target not in nodes:
-                nodes.add(target)
-                queue.append(target)
+        for neighbor in get_neighbors(curr):
+            if neighbor not in nodes:
+                nodes.add(neighbor)
+                queue.append(neighbor)
     return nodes
+
+
+def forward_reachability(topo: NetTopology, source_id: str, sink_id: str) -> Set[str]:
+    """Computes the forward reachable set from source_id stopping at sink_id."""
+    return _reachability(source_id, sink_id, topo.postsets)
 
 
 def backward_reachability(topo: NetTopology, sink_id: str, source_id: str) -> Set[str]:
     """Computes the backward reachable set from sink_id stopping at source_id."""
-    queue = [sink_id]
-    nodes = {sink_id, source_id}
-    while queue:
-        curr = queue.pop(0)
-        for src in topo.presets(curr):
-            if src not in nodes:
-                nodes.add(src)
-                queue.append(src)
-    return nodes
+    return _reachability(sink_id, source_id, topo.presets)
 
 
 def is_reachable(topo: NetTopology, source_id: str, sink_id: str) -> bool:
@@ -668,44 +669,46 @@ def find_sese_nodes(topo: NetTopology, source_id: str, sink_id: str) -> Optional
     return None
 
 
-def detect_marked_graphs(
+def _detect_macro(
     net_or_topology: Union[PetriNet, NetTopology],
+    is_marked_graph: bool,
     config: Optional[FoldConfig] = None,
 ) -> List[Component]:
-    """Detects maximal Marked Graph SESE components per ProM / Lassen Def. 17.
+    """Helper to detect maximal Marked Graph or State Machine SESE components.
 
-    A Marked Graph SESE component is bounded by transition pair (t_source, t_sink)
-    where forward(t_source, t_sink) == backward(t_sink, t_source), contains > 1 transitions,
-    and every place p in the component has in_degree(p) == 1 and out_degree(p) == 1.
+    - Marked Graph: bounded by transition pair, all internal places have in_degree == out_degree == 1.
+    - State Machine: bounded by place pair, all internal transitions have in_degree == out_degree == 1.
     """
     cfg = config if config is not None else FoldConfig()
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
     candidates: List[Tuple[int, str, str, Set[str]]] = []
 
-    for t_src in sorted(topo.trans_ids):
-        for t_snk in sorted(topo.trans_ids):
-            if t_src == t_snk:
+    boundary_ids = sorted(topo.trans_ids) if is_marked_graph else sorted(topo.place_ids)
+
+    for src in boundary_ids:
+        for snk in boundary_ids:
+            if src == snk:
                 continue
-            sese = find_sese_nodes(topo, t_src, t_snk)
+            sese = find_sese_nodes(topo, src, snk)
             if sese is None:
                 continue
 
-            # Invariant: Every place in sese must have |*p| == 1 and |p*| == 1
-            is_mg = True
+            valid = True
             for nid in sese:
-                if topo.is_place(nid):
+                should_check = topo.is_place(nid) if is_marked_graph else topo.is_transition(nid)
+                if should_check:
                     if topo.in_degree(nid) != 1 or topo.out_degree(nid) != 1:
-                        is_mg = False
+                        valid = False
                         break
-            if not is_mg:
+            if not valid:
                 continue
 
-            candidates.append((len(sese), t_src, t_snk, sese))
+            candidates.append((len(sese), src, snk, sese))
 
     if not candidates:
         return []
 
-    # ProM selects MAXIMAL marked graph
+    # ProM selects MAXIMAL component
     candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
     _, best_src, best_snk, best_nodes = candidates[0]
 
@@ -713,18 +716,34 @@ def detect_marked_graphs(
 
     comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
     tau_sum = sum(t.get_tau() for t in comp_trans)
-    tau_new = sum(cfg.marked_graph * t.get_tau() for t in comp_trans) * diff
+    multiplier = cfg.marked_graph if is_marked_graph else cfg.state_machine
+    tau_new = sum(multiplier * t.get_tau() for t in comp_trans) * diff
     omega = tau_new - tau_sum
+
+    comp_type = ComponentType.MARKED_GRAPH if is_marked_graph else ComponentType.STATE_MACHINE
 
     return [
         Component(
-            component_type=ComponentType.MARKED_GRAPH,
+            component_type=comp_type,
             internal_node_ids=best_nodes - {best_src, best_snk},
             entrance=best_src,
             exit=best_snk,
             omega=omega,
         )
     ]
+
+
+def detect_marked_graphs(
+    net_or_topology: Union[PetriNet, NetTopology],
+    config: Optional[FoldConfig] = None,
+) -> List[Component]:
+    """Detects maximal Marked Graph SESE components per ProM / Lassen Def. 16.
+
+    A Marked Graph SESE component is bounded by transition pair (t_source, t_sink)
+    where forward(t_source, t_sink) == backward(t_sink, t_source), contains > 1 transitions,
+    and every place p in the component has in_degree(p) == 1 and out_degree(p) == 1.
+    """
+    return _detect_macro(net_or_topology, is_marked_graph=True, config=config)
 
 
 def fold_marked_graph(
@@ -747,53 +766,7 @@ def detect_state_machines(
     where forward(p_source, p_sink) == backward(p_sink, p_source), contains > 1 transitions,
     and every transition t in the component has in_degree(t) == 1 and out_degree(t) == 1.
     """
-    cfg = config if config is not None else FoldConfig()
-    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
-    candidates: List[Tuple[int, str, str, Set[str]]] = []
-
-    for p_src in sorted(topo.place_ids):
-        for p_snk in sorted(topo.place_ids):
-            if p_src == p_snk:
-                continue
-            sese = find_sese_nodes(topo, p_src, p_snk)
-            if sese is None:
-                continue
-
-            # Invariant: Every transition in sese must have |*t| == 1 and |t*| == 1
-            is_state_machine = True
-            for nid in sese:
-                if topo.is_transition(nid):
-                    if topo.in_degree(nid) != 1 or topo.out_degree(nid) != 1:
-                        is_state_machine = False
-                        break
-            if not is_state_machine:
-                continue
-
-            candidates.append((len(sese), p_src, p_snk, sese))
-
-    if not candidates:
-        return []
-
-    # ProM selects MAXIMAL state machine
-    candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
-    _, best_src, best_snk, best_nodes = candidates[0]
-
-    diff = calculate_symmetry_multiplier(topo, best_nodes, use_subnet_degrees=False)
-
-    comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
-    tau_sum = sum(t.get_tau() for t in comp_trans)
-    tau_new = sum(cfg.state_machine * t.get_tau() for t in comp_trans) * diff
-    omega = tau_new - tau_sum
-
-    return [
-        Component(
-            component_type=ComponentType.STATE_MACHINE,
-            internal_node_ids=best_nodes - {best_src, best_snk},
-            entrance=best_src,
-            exit=best_snk,
-            omega=omega,
-        )
-    ]
+    return _detect_macro(net_or_topology, is_marked_graph=False, config=config)
 
 
 def fold_state_machine(

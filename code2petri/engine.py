@@ -153,6 +153,10 @@ def code2petri(
         symbol_table.index_file(source_path)
         for cf in context_files:
             symbol_table.index_file(cf)
+    elif ext == "html":
+        logger.debug("Initializing local symbol table for HTML callee precomputation...")
+        symbol_table = SymbolTable()
+        symbol_table.index_file(source_path)
 
     walker = WALKERS[src_ext]()
 

@@ -15,6 +15,11 @@ from code2petri.fold import (
     FoldConfig,
     Component,
     ComponentType,
+    NetTopology,
+    _reachability,
+    _detect_macro,
+    forward_reachability,
+    backward_reachability,
     calculate_symmetry_multiplier,
     detect_components,
     detect_while,
@@ -679,6 +684,41 @@ class TestFoldConfigOverrides(unittest.TestCase):
         components = detect_components(net, config=config)
         self.assertEqual(len(components), 1)
         self.assertEqual(components[0].omega, 5.0)
+
+
+class TestReachabilityAndMacroHelpers(unittest.TestCase):
+    def test_reachability_forward_and_backward(self):
+        # p0 -> t1 -> p1 -> t2 -> p2
+        net, _, _, _ = build_sequence_net(2)
+        topo = NetTopology(net)
+        fwd = forward_reachability(topo, "p0", "p2")
+        self.assertEqual(fwd, {"p0", "t1", "p1", "t2", "p2"})
+        bwd = backward_reachability(topo, "p2", "p0")
+        self.assertEqual(bwd, {"p0", "t1", "p1", "t2", "p2"})
+
+        # Boundary stop
+        fwd_stop = _reachability("p0", "p1", topo.postsets)
+        self.assertEqual(fwd_stop, {"p0", "t1", "p1"})
+
+    def test_detect_macro_unified_helper(self):
+        # Marked graph
+        net = PetriNet()
+        t_src = net.add_transition("t_src")
+        t_snk = net.add_transition("t_snk")
+        p1 = net.add_place("p1")
+        p2 = net.add_place("p2")
+        net.add_arc(t_src, p1)
+        net.add_arc(t_src, p2)
+        net.add_arc(p1, t_snk)
+        net.add_arc(p2, t_snk)
+
+        mg_via_macro = _detect_macro(net, is_marked_graph=True)
+        mg_via_direct = detect_marked_graphs(net)
+        self.assertEqual(len(mg_via_macro), 1)
+        self.assertEqual(mg_via_macro[0].component_type, ComponentType.MARKED_GRAPH)
+        self.assertEqual(mg_via_macro[0].entrance, mg_via_direct[0].entrance)
+        self.assertEqual(mg_via_macro[0].exit, mg_via_direct[0].exit)
+        self.assertEqual(mg_via_macro[0].omega, mg_via_direct[0].omega)
 
 
 if __name__ == '__main__':
