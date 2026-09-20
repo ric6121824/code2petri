@@ -446,6 +446,181 @@ class TestInlineExpansionEngine(unittest.TestCase):
         cycle_trans = [t for t in composite_net.transitions if t.metadata and t.metadata.get("recursive_cycle")]
         self.assertEqual(len(cycle_trans), 0, "False positive recursion cycle detected for distinct class method")
 
+    def test_nested_call_resolution_resolved(self):
+        """Validates that inner function call sites within an inlined callee are resolved against SymbolTable."""
+        code = (
+            "def leaf_func():\n"
+            "    val = 100\n"
+            "\n"
+            "def worker_func():\n"
+            "    leaf_func()\n"
+            "\n"
+            "def main_func():\n"
+            "    worker_func()\n"
+        )
+        fp = self._write_temp_file("nested_call_test.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        main_node = self.py_walker.find_function(tree, "main_func")
+        main_res = self.py_walker.walk_function(main_node, "main_func", filepath=fp)
+
+        # Inline main_func with depth 1 -> worker_func is inlined, leaf_func call remains an opaque transition
+        composite_net = inline_expand(main_res.net, main_res.call_sites, symbol_table, max_depth=1)
+        assert_valid_petri_net(self, composite_net)
+
+        # Find the opaque transition for the nested leaf_func call site inside the expanded worker_func
+        nested_call_transitions = [
+            trans for trans in composite_net.transitions
+            if "inline_worker_func__" in trans.id and "leaf_func" in trans.label
+        ]
+        self.assertEqual(len(nested_call_transitions), 1, "Expected exactly 1 leaf_func opaque transition")
+        call_trans = nested_call_transitions[0]
+
+        # Assert resolution metadata is populated
+        self.assertIsNotNone(call_trans.resolution, "Nested call transition has no resolution")
+        self.assertTrue(call_trans.resolution.resolved, "Nested call transition was not marked resolved")
+        self.assertEqual(call_trans.resolution.resolved_to, "leaf_func")
+        self.assertIsNotNone(call_trans.metadata)
+        self.assertTrue(call_trans.metadata.get("resolved"))
+
+    def test_nested_call_resolution_unresolved(self):
+        """Validates that unresolved inner function call sites within an inlined callee receive unresolved resolution metadata."""
+        code = (
+            "def worker_func():\n"
+            "    undefined_helper()\n"
+            "\n"
+            "def main_func():\n"
+            "    worker_func()\n"
+        )
+        fp = self._write_temp_file("nested_unresolved_test.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        main_node = self.py_walker.find_function(tree, "main_func")
+        main_res = self.py_walker.walk_function(main_node, "main_func", filepath=fp)
+
+        composite_net = inline_expand(main_res.net, main_res.call_sites, symbol_table, max_depth=1)
+        assert_valid_petri_net(self, composite_net)
+
+        nested_call_transitions = [
+            trans for trans in composite_net.transitions
+            if "inline_worker_func__" in trans.id and "undefined_helper" in trans.label
+        ]
+        self.assertEqual(len(nested_call_transitions), 1)
+        call_trans = nested_call_transitions[0]
+
+        self.assertIsNotNone(call_trans.resolution, "Nested unresolved call transition has no resolution")
+        self.assertFalse(call_trans.resolution.resolved, "Expected resolved to be False")
+        self.assertIsNotNone(call_trans.metadata)
+        self.assertFalse(call_trans.metadata.get("resolved"))
+        self.assertEqual(call_trans.metadata.get("status"), "[unresolved]")
+
+    def test_nested_call_resolution_multi_depth(self):
+        """Validates nested call resolution at --inline-depth=2 where call transitions originating from depth 1 are populated."""
+        code = (
+            "def level_3():\n"
+            "    val = 42\n"
+            "\n"
+            "def level_2():\n"
+            "    level_3()\n"
+            "\n"
+            "def level_1():\n"
+            "    level_2()\n"
+            "\n"
+            "def main_func():\n"
+            "    level_1()\n"
+        )
+        fp = self._write_temp_file("multi_depth_resolution.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        main_node = self.py_walker.find_function(tree, "main_func")
+        main_res = self.py_walker.walk_function(main_node, "main_func", filepath=fp)
+
+        # Inline with max_depth=2: main_func inlines level_1, which inlines level_2.
+        # level_3 remains an opaque call transition inside level_2.
+        composite_net = inline_expand(main_res.net, main_res.call_sites, symbol_table, max_depth=2)
+        assert_valid_petri_net(self, composite_net)
+
+        # level_3 call inside level_2 must be present as an opaque transition and resolved
+        level_3_trans = next(
+            (trans for trans in composite_net.transitions if "level_3" in trans.label),
+            None,
+        )
+        self.assertIsNotNone(level_3_trans, "level_3 opaque transition not found at depth 2")
+        self.assertIsNotNone(level_3_trans.resolution, "level_3 transition has no resolution")
+        self.assertTrue(level_3_trans.resolution.resolved, "level_3 transition was not marked resolved")
+        self.assertEqual(level_3_trans.resolution.resolved_to, "level_3")
+        self.assertTrue(level_3_trans.metadata.get("resolved"))
+
+    def test_nested_call_visualizer_rendering(self):
+        """Validates that opaque call transitions within an expanded callee receive green (#2e7d32) styling in DOT and HTML."""
+        from code2petri.model import RenderingConfig
+        from code2petri.viewer import generate_html
+
+        code = (
+            "def leaf_func():\n"
+            "    val = 100\n"
+            "\n"
+            "def worker_func():\n"
+            "    leaf_func()\n"
+            "    missing_func()\n"
+            "\n"
+            "def main_func():\n"
+            "    worker_func()\n"
+        )
+        fp = self._write_temp_file("nested_visualizer_test.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        main_node = self.py_walker.find_function(tree, "main_func")
+        main_res = self.py_walker.walk_function(main_node, "main_func", filepath=fp)
+
+        composite_net = inline_expand(main_res.net, main_res.call_sites, symbol_table, max_depth=1)
+
+        # Find resolved leaf_func opaque transition
+        resolved_trans = next(
+            trans for trans in composite_net.transitions
+            if "inline_worker_func__" in trans.id and "leaf_func" in trans.label
+        )
+        # Find unresolved missing_func opaque transition
+        unresolved_trans = next(
+            trans for trans in composite_net.transitions
+            if "inline_worker_func__" in trans.id and "missing_func" in trans.label
+        )
+
+        # 1. Check DOT attributes
+        resolved_dot_attrs = resolved_trans.get_dot_attributes()
+        unresolved_dot_attrs = unresolved_trans.get_dot_attributes()
+
+        self.assertEqual(resolved_dot_attrs.get("fillcolor"), RenderingConfig.RESOLVED_COLOR)
+        self.assertEqual(RenderingConfig.RESOLVED_COLOR, "#2e7d32")
+        self.assertIn("leaf_func", resolved_dot_attrs.get("tooltip", ""))
+
+        self.assertEqual(unresolved_dot_attrs.get("fillcolor"), RenderingConfig.UNRESOLVED_COLOR)
+        self.assertEqual(RenderingConfig.UNRESOLVED_COLOR, "#e65100")
+
+        # 2. Check complete DOT string contains green fillcolor for resolved call
+        dot_str = composite_net.to_dot()
+        self.assertIn(f'"{resolved_trans.id}" [', dot_str)
+        self.assertIn(f'fillcolor="{RenderingConfig.RESOLVED_COLOR}"', dot_str)
+        self.assertIn(f'fillcolor="{RenderingConfig.UNRESOLVED_COLOR}"', dot_str)
+
+        # 3. Check HTML viewer generation embeds resolution metadata and styles
+        html_str = generate_html(composite_net, title="Nested Resolution Test")
+        self.assertIn('"resolved": true', html_str)
+        self.assertIn('"resolved_to": "leaf_func"', html_str)
+        self.assertIn('"resolved": false', html_str)
+        # Verify HTML template contains styling for resolved transitions
+        self.assertIn('.legend-swatch.resolved', html_str)
+        self.assertIn('node.transition.resolved', html_str)
+        self.assertIn('#2e7d32', html_str)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,6 +46,7 @@ class CallFrame:
 
 def _get_callee_net(
     symbol: Symbol,
+    symbol_table: Optional[SymbolTable] = None,
 ) -> Tuple[Optional[PetriNet], List[CallSite]]:
     """Walks the callee symbol's AST node to produce its PetriNet and CallSite records."""
     ext = os.path.splitext(symbol.filepath)[1].lower() if symbol.filepath else ""
@@ -71,7 +72,11 @@ def _get_callee_net(
 
     try:
         walk_res = walker.walk_function(ast_node, symbol.name, filepath=symbol.filepath)
-        return walk_res.net, walk_res.call_sites
+        callee_net = walk_res.net
+        callee_call_sites = walk_res.call_sites
+        if symbol_table is not None and callee_net is not None and callee_call_sites:
+            symbol_table.resolve_call_sites(callee_net, callee_call_sites)
+        return callee_net, callee_call_sites
     except Exception:
         return None, []
 
@@ -260,7 +265,7 @@ def _inline_expand_recursive(
             trans.mark_recursive_cycle()
             continue
 
-        callee_net, callee_call_sites = _get_callee_net(sym)
+        callee_net, callee_call_sites = _get_callee_net(sym, symbol_table=symbol_table)
         if callee_net is None:
             continue
 
