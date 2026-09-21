@@ -91,3 +91,7 @@ _Avoid_: Local undo, node expansion
 **Component Node Renaming**:
 The ability for a user to assign a semantic, domain-specific label to an opaque transition (created via Live Fold Reduction) via a dedicated UI panel or modal, overriding the default generated `c_XX` identifier.
 _Avoid_: Node relabeling, text edit
+
+**Client-Side Export**:
+The process of serializing the current interactive graph state (including any Live Fold Reductions) directly from the browser's in-memory model to a downloadable format (like PNML or DOT) without requiring a backend server.
+_Avoid_: Browser download, frontend save
