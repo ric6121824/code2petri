@@ -87,3 +87,7 @@ _Avoid_: Folder node, closed sub-graph
 **Component-Local Unfold**:
 The non-linear undo mechanism where a user directly interacts with a specific opaque transition or collapsed compound to restore the exact sub-graph it consumed, without affecting folds made elsewhere on the canvas.
 _Avoid_: Local undo, node expansion
+
+**Component Node Renaming**:
+The ability for a user to assign a semantic, domain-specific label to an opaque transition (created via Live Fold Reduction) via a dedicated UI panel or modal, overriding the default generated `c_XX` identifier.
+_Avoid_: Node relabeling, text edit
