@@ -303,24 +303,6 @@ class Subnet:
         return len(self.arcs)
 
 
-def calculate_symmetry_multiplier(
-    net_or_topology: Union[PetriNet, NetTopology],
-    component_node_ids: Iterable[str],
-    target_node_ids: Optional[Iterable[str]] = None,
-    use_subnet_degrees: bool = True,
-) -> int:
-    """Calculates the symmetry multiplier diff(X) per Definition 22 in subnet PN|C or net topology.
-
-    diff(X) = ||{x in X | |x*| > 1}| - |{x in X | |*x| > 1}|| + 1
-    where degrees are computed in the subnet projection PN|C (default) or full topology.
-    """
-    topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
-    return topo.calculate_symmetry_multiplier(
-        component_node_ids=component_node_ids,
-        target_node_ids=target_node_ids,
-        use_subnet_degrees=use_subnet_degrees,
-    )
-
 
 def detect_sequences(
     net_or_topology: Union[PetriNet, NetTopology],
@@ -708,6 +690,24 @@ def find_sese_nodes(topo: NetTopology, source_id: str, sink_id: str) -> Optional
     return None
 
 
+def _find_sese_candidates(
+    topo: NetTopology,
+    boundary_ids: Optional[Iterable[str]] = None,
+) -> Iterable[Tuple[str, str, Set[str]]]:
+    """Yields (src, snk, sese_nodes) for all valid SESE pairs in boundary_ids.
+
+    If boundary_ids is not provided, defaults to sorted topo.place_ids.
+    """
+    candidates = sorted(boundary_ids) if boundary_ids is not None else sorted(topo.place_ids)
+    for src in candidates:
+        for snk in candidates:
+            if src == snk:
+                continue
+            sese = find_sese_nodes(topo, src, snk)
+            if sese is not None:
+                yield (src, snk, sese)
+
+
 def _detect_macro(
     net_or_topology: Union[PetriNet, NetTopology],
     is_marked_graph: bool,
@@ -722,27 +722,20 @@ def _detect_macro(
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
     candidates: List[Tuple[int, str, str, Set[str]]] = []
 
-    boundary_ids = sorted(topo.trans_ids) if is_marked_graph else sorted(topo.place_ids)
+    boundary_ids = topo.trans_ids if is_marked_graph else topo.place_ids
 
-    for src in boundary_ids:
-        for snk in boundary_ids:
-            if src == snk:
-                continue
-            sese = find_sese_nodes(topo, src, snk)
-            if sese is None:
-                continue
+    for src, snk, sese in _find_sese_candidates(topo, boundary_ids):
+        valid = True
+        for nid in sese:
+            should_check = topo.is_place(nid) if is_marked_graph else topo.is_transition(nid)
+            if should_check:
+                if topo.in_degree(nid) != 1 or topo.out_degree(nid) != 1:
+                    valid = False
+                    break
+        if not valid:
+            continue
 
-            valid = True
-            for nid in sese:
-                should_check = topo.is_place(nid) if is_marked_graph else topo.is_transition(nid)
-                if should_check:
-                    if topo.in_degree(nid) != 1 or topo.out_degree(nid) != 1:
-                        valid = False
-                        break
-            if not valid:
-                continue
-
-            candidates.append((len(sese), src, snk, sese))
+        candidates.append((len(sese), src, snk, sese))
 
     if not candidates:
         return []
@@ -832,34 +825,27 @@ def detect_well_structured(
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
     candidates: List[Tuple[int, str, str, Set[str]]] = []
 
-    for p_src in sorted(topo.place_ids):
-        for p_snk in sorted(topo.place_ids):
-            if p_src == p_snk:
-                continue
-            sese = find_sese_nodes(topo, p_src, p_snk)
-            if sese is None:
-                continue
-
-            # Invariant: no PT/TP confusion and no internal cycle
-            is_ws = True
-            for nid in sese:
-                if nid != p_snk and topo.is_place(nid):
-                    for tid in topo.postsets(nid):
-                        if topo.out_degree(nid) > 1 and topo.in_degree(tid) > 1:
-                            is_ws = False
-                            break
-                        if topo.in_degree(nid) > 1 and topo.in_degree(tid) > 1:
-                            is_ws = False
-                            break
-                        if nid in forward_reachability(topo, tid, p_snk):
-                            is_ws = False
-                            break
-                    if not is_ws:
+    for p_src, p_snk, sese in _find_sese_candidates(topo, topo.place_ids):
+        # Invariant: no PT/TP confusion and no internal cycle
+        is_ws = True
+        for nid in sese:
+            if nid != p_snk and topo.is_place(nid):
+                for tid in topo.postsets(nid):
+                    if topo.out_degree(nid) > 1 and topo.in_degree(tid) > 1:
+                        is_ws = False
                         break
-            if not is_ws:
-                continue
+                    if topo.in_degree(nid) > 1 and topo.in_degree(tid) > 1:
+                        is_ws = False
+                        break
+                    if nid in forward_reachability(topo, tid, p_snk):
+                        is_ws = False
+                        break
+                if not is_ws:
+                    break
+        if not is_ws:
+            continue
 
-            candidates.append((len(sese), p_src, p_snk, sese))
+        candidates.append((len(sese), p_src, p_snk, sese))
 
     if not candidates:
         return []
@@ -935,13 +921,8 @@ def detect_unstructured(net_or_topology: Any, config: Optional[FoldConfig] = Non
 
     # 1. Minimal internal SESE knots
     candidates: List[Tuple[int, str, str, Set[str]]] = []
-    for p_source in topo.net.places:
-        for p_sink in topo.net.places:
-            if p_source.id == p_sink.id:
-                continue
-            sese_nodes = find_sese_nodes(topo, p_source.id, p_sink.id)
-            if sese_nodes is not None:
-                candidates.append((len(sese_nodes), p_source.id, p_sink.id, sese_nodes))
+    for p_src_id, p_snk_id, sese_nodes in _find_sese_candidates(topo, topo.place_ids):
+        candidates.append((len(sese_nodes), p_src_id, p_snk_id, sese_nodes))
 
     if candidates:
         # Select the MINIMAL component (isolates the exact unstructured knot per User Story 3)

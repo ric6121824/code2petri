@@ -19,9 +19,9 @@ from code2petri.fold import (
     Subnet,
     _reachability,
     _detect_macro,
+    _find_sese_candidates,
     forward_reachability,
     backward_reachability,
-    calculate_symmetry_multiplier,
     detect_components,
     detect_while,
     detect_marked_graphs,
@@ -215,7 +215,7 @@ class TestSymmetryMultiplierCalculation(unittest.TestCase):
     def test_diff_symmetric_choice(self):
         net, p_in, p_out, trans_ids = build_choice_net(2)
         comp_nodes = {p_in, p_out} | set(trans_ids)
-        multiplier = calculate_symmetry_multiplier(net, comp_nodes, [p_in, p_out])
+        multiplier = NetTopology(net).calculate_symmetry_multiplier(comp_nodes, [p_in, p_out])
         self.assertEqual(multiplier, 1)
 
     def test_diff_ignores_external_arcs_to_split_place(self):
@@ -226,7 +226,7 @@ class TestSymmetryMultiplierCalculation(unittest.TestCase):
         net.add_arc(t0, net.places[0])  # External incoming arc to p_split
 
         comp_nodes = {p_in, p_out} | set(trans_ids)
-        multiplier = calculate_symmetry_multiplier(net, comp_nodes, [p_in, p_out])
+        multiplier = NetTopology(net).calculate_symmetry_multiplier(comp_nodes, [p_in, p_out])
         self.assertEqual(multiplier, 1)
 
     def test_diff_asymmetric(self):
@@ -250,7 +250,7 @@ class TestSymmetryMultiplierCalculation(unittest.TestCase):
         net.add_arc(t2, p3)
 
         comp_nodes = {"p1", "p2", "p3", "t1", "t2", "t3", "t4"}
-        multiplier = calculate_symmetry_multiplier(net, comp_nodes, ["p1", "p2", "p3"])
+        multiplier = NetTopology(net).calculate_symmetry_multiplier(comp_nodes, ["p1", "p2", "p3"])
         self.assertEqual(multiplier, 2)
 
     def test_diff_full_topology_degrees(self):
@@ -262,8 +262,8 @@ class TestSymmetryMultiplierCalculation(unittest.TestCase):
 
         comp_nodes = {p_in, p_out} | set(trans_ids)
         # With use_subnet_degrees=False, external incoming arc counts toward in-degree of p_split
-        multiplier = calculate_symmetry_multiplier(
-            net, comp_nodes, [p_in, p_out], use_subnet_degrees=False
+        multiplier = NetTopology(net).calculate_symmetry_multiplier(
+            comp_nodes, [p_in, p_out], use_subnet_degrees=False
         )
         self.assertEqual(multiplier, 1)
 
@@ -740,6 +740,17 @@ class TestSubnetDataclassAndTopologyMultiplier(unittest.TestCase):
         comp_nodes = {p_in, p_out} | set(trans_ids)
         multiplier = topo.calculate_symmetry_multiplier(comp_nodes, [p_in, p_out])
         self.assertEqual(multiplier, 1)
+
+    def test_find_sese_candidates_generator(self):
+        net, p_in, p_out, trans_ids = build_choice_net(2)
+        topo = NetTopology(net)
+        candidates = list(_find_sese_candidates(topo, topo.place_ids))
+        self.assertEqual(len(candidates), 1)
+        src, snk, sese = candidates[0]
+        self.assertEqual(src, p_in)
+        self.assertEqual(snk, p_out)
+        self.assertEqual(sese, {p_in, p_out} | set(trans_ids))
+
 
 
 if __name__ == '__main__':
