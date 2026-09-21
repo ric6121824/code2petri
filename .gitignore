@@ -11,3 +11,4 @@ composer.lock
 vendor
 !code2petri/viewer/vendor/
 !code2petri/viewer/vendor/**
+.scratch/code2petri/graphs

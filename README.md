@@ -57,7 +57,9 @@ code2petri app.js --target-function="loop" --context webgl-engine.js -o loop.dot
 The project is actively being developed to analyze large-scale game engine codebases. 
 - **Phase 1 (Completed)**: Core infrastructure, Python & JavaScript AST walkers, `WalkerProtocol`, game-loop recursive detection.
 - **Phase 2 (Completed)**: Cross-File Reference Tracing (resolving function and method calls across multiple files with constructor variable bindings, symbol indexing, and PNML/DOT/JSON serialization).
-- **Phase 2.5 (Active Next)**: Interactive HTML Viewer with Lassen & van der Aalst structural folding and Strictness Measure (SM) scoring.
+- **Phase 2.5 (Completed)**: Structural Component Folding & Structuredness Metric (SM) computation per Lassen & van der Aalst (2008), inline expansion engine (`inline.py`), and standalone Cytoscape.js HTML viewer.
+- **Phase 2.6 (Completed)**: ProM reduction algorithm port (Single-Place Contraction, Atomic Choice Collapse, SESE reachability), nested call resolution, interactive client-side compound subnet expansion, and canvas viewport controls (middle/right drag pan, scroll wheel zoom, node dragging).
+- **Active Next**: Multi-level deep "Expand All" / "Collapse All" viewer control (Ticket 28).
 - **Phase 3 & 4 (Planned)**: **C# / Unity** and **C++ / Unreal Engine** support, mapping engine lifecycles (`Update`, `Tick`, `BeginPlay`) into implicit overarching Petri nets.
 
 ## License

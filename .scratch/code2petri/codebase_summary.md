@@ -40,8 +40,9 @@ code2flow/
 ├── docs/                          # Architecture decision records and specifications
 │   └── adr/
 │       ├── 0001-constructor-only-variable-resolution.md # ADR on constructor-only variable binding resolution
-│       └── 0002-boundary-place-unification.md           # ADR on boundary place unification for bipartite graph integrity
-├── tests/                         # Comprehensive unit, integration, & validation test suites (318 passing tests)
+│       ├── 0002-boundary-place-unification.md           # ADR on boundary place unification for bipartite graph integrity
+│       └── 0003-adopt-prom-local-reduction-algorithm.md # ADR on adopting ProM local reduction algorithms
+├── tests/                         # Comprehensive unit, integration, & validation test suites (366 passing tests)
 │   ├── petri_assertions.py        # Shared structural assertion utilities for Petri nets
 │   ├── test_petri_model.py        # Tests for Place, Transition, Arc, PetriNet, CallResolution, and serializers
 │   ├── test_walker_protocol.py    # Contract adherence & instantiation tests for WalkerProtocol & WalkResult
@@ -50,11 +51,11 @@ code2flow/
 │   ├── test_symbol_table.py       # Multi-file symbol table indexing and resolution unit tests
 │   ├── test_context_pipeline.py   # CLI `--context` ingestion and multi-format serialization integration tests
 │   ├── test_game_of_life_validation.py # End-to-end multi-file validation suite against GameOfLife Simulator
-│   ├── test_fold_detection.py     # Structural component detection & FoldConfig tests (Ticket 17)
-│   ├── test_fold_reduction.py     # Fold reduction engine & SM computation tests (Ticket 18)
-│   ├── test_inline_expansion.py   # Inline expansion engine & recursion guard tests (Ticket 19)
+│   ├── test_fold_detection.py     # Structural component detection & FoldConfig tests (Ticket 17, 23, 24)
+│   ├── test_fold_reduction.py     # Fold reduction engine & SM computation tests (Ticket 18, 23, 24)
+│   ├── test_inline_expansion.py   # Inline expansion engine & recursion guard tests (Ticket 19, 22)
 │   ├── test_cli_fold_inline.py    # CLI integration tests for --fold, --inline, and headless exports (Ticket 20)
-│   ├── test_html_viewer.py        # Self-contained offline HTML viewer generation & DOM tests (Ticket 21)
+│   ├── test_html_viewer.py        # Self-contained offline HTML viewer generation & DOM tests (Ticket 21, 25-27)
 │   ├── test_petri_if_branching.py # Python if/elif/else branching tests
 │   ├── test_petri_loops.py        # Python while/for loop tests
 │   ├── test_petri_try.py          # Python try/except/finally tests
@@ -66,8 +67,8 @@ code2flow/
 └── .scratch/code2petri/           # Local documentation, grand roadmap, specs, issues, and review logs
     ├── codebase_summary.md        # This document
     ├── grand_plan.md              # Grand roadmap from Phase 1 to Phase 6
-    ├── issues/                    # Detailed ticket task specifications (Tickets 01–21)
-    ├── specs/                     # Master phase specifications (Phases 1, 2, 2.5)
+    ├── issues/                    # Detailed ticket task specifications (Tickets 01–28)
+    ├── specs/                     # Master phase specifications (Phases 1, 2, 2.5, 2.6)
     └── reviews/                   # Two-axis code review audit reports
 ```
 
@@ -268,7 +269,7 @@ SUPPORTED_WALKERS = {
 - `--verbose`: Enables detailed debug logging (including symbol indexing and resolution diagnostics).
 
 #### Output Formats Supported by `code2petri`
-- `.html`: Self-contained interactive offline viewer embedding Cytoscape.js, Dagre layout, live SM score display, and animated fold/unfold playback controls.
+- `.html`: Self-contained interactive offline viewer embedding Cytoscape.js, Dagre layout, live SM score display, animated fold/unfold playback controls, interactive compound subnet expansion on resolved calls, filename badge, dual-button viewport panning (right & middle click), scroll wheel zoom, and left-click node repositioning.
 - `.pnml`: Standard ISO/IEC 15909-2 Petri net exchange XML with `<toolspecific>` metadata elements. When `--fold` is active, outputs the penultimate fold state.
 - `.dot` / `.gv`: Graphviz DOT syntax with tooltips and color-coded borders. When `--fold` is active, renders the penultimate fold state with the SM score in the graph title.
 - `.json`: Structured schema. When `--fold` is active, serializes full `FoldResult` schema (initial net, ordered fold steps, final SM, and reducibility flag).
@@ -283,7 +284,8 @@ SUPPORTED_WALKERS = {
 3. **Constructor-Only Variable Resolution ([ADR 0001](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0001-constructor-only-variable-resolution.md))**: Lightweight, sound variable binding extraction targeting constructor instantiations (`x = Foo()` / `const x = new Foo()`) without full dynamic dataflow analysis.
 4. **Strict Language Boundary Enforcement**: Call resolution only links symbols between source files of the same programming language.
 5. **Non-Destructive Reference Serialization**: Cross-file references enrich Petri net transitions with metadata and visual styling without modifying underlying bipartite graph topology.
-6. **Bipartite Graph Integrity via Boundary Place Unification ([ADR 0002](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0002-boundary-place-unification.md))**: Inline expansion fuses caller and callee boundary places rather than creating illegal place-to-place arcs, strictly preserving $F \\subseteq (P \\times T) \\cup (T \\times P)$ and 1-safe sound firing semantics.
-7. **Lassen & van der Aalst Structural Folding & SM Computation**: Quantifies control flow complexity via deterministic, greedy bottom-up component reduction (Sequence, Choice, Loop, Unstructured) and accumulates complexity weight $\\tau$.
-8. **Self-Contained Offline Visualization**: HTML viewer operates without external CDNs or network connections, embedding minified layout engines and serializing pre-computed fold snapshots directly into the document.
-9. **Comprehensive Verification**: Validated by **318 automated unit, integration, and cross-file validation tests**, including end-to-end multi-file tests against the [`GameOfLife_Simulator`](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator) validation target (`app.js` and `webgl-engine.js`).
+6. **Bipartite Graph Integrity via Boundary Place Unification ([ADR 0002](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0002-boundary-place-unification.md))**: Inline expansion fuses caller and callee boundary places rather than creating illegal place-to-place arcs, strictly preserving $F \subseteq (P \times T) \cup (T \times P)$ and 1-safe sound firing semantics.
+7. **ProM Local Reduction Algorithms ([ADR 0003](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0003-adopt-prom-local-reduction-algorithm.md))**: Employs fine-grained Single-Place Contraction ($1 \to 1 \to 1$), Atomic Choice Collapse (1.5x penalty), and bidirectional SESE reachability to naturally fold AST-generated branching routing places without spurious unstructured penalties.
+8. **Interactive Client-Side Subnet Expansion**: HTML viewer embeds pre-computed callee payloads and dynamically expands green resolved calls into Cytoscape compound nodes with boundary place rewiring and independent fold slider operations.
+9. **Self-Contained Offline Visualization**: HTML viewer operates without external CDNs or network connections, embedding minified layout engines, full callee net payloads, and pre-computed fold snapshots directly into the document.
+10. **Comprehensive Verification**: Validated by **366 automated unit, integration, and cross-file validation tests**, including end-to-end multi-file tests against the [`GameOfLife_Simulator`](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator) validation target (`app.js` and `webgl-engine.js`).
