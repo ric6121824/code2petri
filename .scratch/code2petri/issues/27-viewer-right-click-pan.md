@@ -7,7 +7,7 @@
 **Status:** resolved
 
 - [x] Left-click dragging on the canvas background does nothing (default Cytoscape user panning disabled).
-- [x] Nodes are locked to layout (`autoungrabify: true`) so they cannot be dragged out of alignment.
+- [x] Nodes can be dragged with the left mouse button (`autoungrabify: false`).
 - [x] Right-click and middle-click dragging smoothly pan the viewport.
 - [x] Mouse wheel and trackpad scroll zooming operates smoothly, anchored to cursor position.
 - [x] Left-clicking on interactive call transitions and compound nodes continues to toggle expansion and collapse.
@@ -15,8 +15,8 @@
 
 ## Answer
 1. **Cytoscape Canvas Configuration**:
-   - `autoungrabify: true` ensures nodes cannot be dragged out of layout by users.
-   - `userPanningEnabled: false` disables default left-drag canvas panning.
+   - `autoungrabify: false` ensures individual nodes can be repositioned / dragged with the left mouse button.
+   - `userPanningEnabled: false` disables default left-drag canvas background panning.
    - `boxSelectionEnabled: false` prevents box/marquee selection when dragging with the left mouse button.
 2. **Right & Middle Click Drag Panning**:
    - Suppressed context menu (`contextmenu.preventDefault()`) and middle-click autoscroll (`auxclick.preventDefault()`) on `#cy`.

@@ -185,10 +185,10 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         self.assertIn("left: 20px;", html_content)
 
     def test_canvas_panning_and_ungrabify_settings(self):
-        """Validates that Cytoscape locks nodes, disables left-drag pan, binds right and middle drag pan, and supports wheel zoom."""
+        """Validates that Cytoscape allows node dragging, disables background left-drag pan, binds right and middle drag pan, and supports wheel zoom."""
         html_content = generate_html(self.net)
         # Verify Cytoscape canvas settings
-        self.assertIn("autoungrabify: true", html_content)
+        self.assertIn("autoungrabify: false", html_content)
         self.assertIn("userPanningEnabled: false", html_content)
         self.assertIn("boxSelectionEnabled: false", html_content)
 
@@ -218,7 +218,7 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         self.assertIn("expandedNodes", html_content)
 
     def test_headless_canvas_panning_and_wheel_zoom(self):
-        """Validates that Cytoscape headless instance correctly pans and zooms under our logic."""
+        """Validates that Cytoscape headless instance allows node dragging, pans, and zooms."""
         import shutil
         import subprocess
 
@@ -234,15 +234,23 @@ class TestHTMLViewerGenerator(unittest.TestCase):
           headless: true,
           minZoom: 0.2,
           maxZoom: 3.5,
-          autoungrabify: true,
+          autoungrabify: false,
           userPanningEnabled: false,
-          boxSelectionEnabled: false
+          boxSelectionEnabled: false,
+          elements: [
+            {{ data: {{ id: "n1" }}, position: {{ x: 0, y: 0 }} }}
+          ]
         }});
+
+        // Validate node is grabbable for left-click drag
+        if (!cy.$("#n1").grabbable()) {{
+          process.exit(1);
+        }}
 
         // Validate panning via panBy
         cy.panBy({{ x: 40, y: -25 }});
         if (cy.pan().x !== 40 || cy.pan().y !== -25) {{
-          process.exit(1);
+          process.exit(2);
         }}
 
         // Validate wheel zooming via cy.zoom with renderedPosition
@@ -251,7 +259,7 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         const targetZoom = initialZoom * Math.pow(10, s);
         cy.zoom({{ level: targetZoom, renderedPosition: {{ x: 100, y: 100 }} }});
         if (cy.zoom() <= initialZoom) {{
-          process.exit(2);
+          process.exit(3);
         }}
         process.exit(0);
         """

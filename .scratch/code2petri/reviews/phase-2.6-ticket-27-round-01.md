@@ -72,3 +72,16 @@
    - Enhanced `test_canvas_panning_and_ungrabify_settings` in `tests/test_html_viewer.py`.
    - Added `test_headless_canvas_panning_and_wheel_zoom` running headless Cytoscape via Node.js to verify programmatic `panBy` and wheel `cy.zoom` under `userPanningEnabled: false`.
 
+---
+
+# Ticket 27: Code Review (Round 3 — Node Dragging)
+
+**User Feedback:**
+- "I can't drag the nodes with the left mouse button."
+
+### Root Cause & Resolution
+- *Root Cause*: Ticket 27 originally specified `autoungrabify: true`, which prevented nodes from being dragged/repositioned.
+- *Resolution*: Set `autoungrabify: false` in Cytoscape configuration so that users can grab and drag individual nodes using the left mouse button, while background left-drag panning remains disabled (`userPanningEnabled: false`).
+- *Verification*: Updated `tests/test_html_viewer.py` and headless test to assert `autoungrabify: false` and `node.grabbable() === true`.
+
+
