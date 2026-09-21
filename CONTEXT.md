@@ -75,3 +75,7 @@ _Avoid_: Sequence collapsing, chain reduction
 **Live Fold Reduction**:
 The process of executing structural folds (e.g., Single-Place Contractions) natively within the browser's JavaScript engine on the current interactive graph state, independent of Python pre-computation.
 _Avoid_: Client-side folding, JS reduction
+
+**Place-Centric Fold Trigger**:
+The interaction paradigm where a user explicitly selects a single Place node to initiate a Live Fold Reduction on its immediate structural environment, ensuring fine-grained step-by-step graph simplification.
+_Avoid_: Node clicking, manual reduction
