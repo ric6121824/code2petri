@@ -83,3 +83,7 @@ _Avoid_: Node clicking, manual reduction
 **Collapsed Compound State**:
 The visual state of an inlined function where its internal Petri net structure has been entirely reduced to a single transition, represented in the UI as a closed container (displaying the function name and component ID) rather than a naked opaque transition.
 _Avoid_: Folder node, closed sub-graph
+
+**Component-Local Unfold**:
+The non-linear undo mechanism where a user directly interacts with a specific opaque transition or collapsed compound to restore the exact sub-graph it consumed, without affecting folds made elsewhere on the canvas.
+_Avoid_: Local undo, node expansion
