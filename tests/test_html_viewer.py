@@ -184,6 +184,31 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         self.assertIn("bottom: 20px;", html_content)
         self.assertIn("left: 20px;", html_content)
 
+    def test_canvas_panning_and_ungrabify_settings(self):
+        """Validates that Cytoscape locks nodes, disables left-drag pan, and binds right-drag pan."""
+        html_content = generate_html(self.net)
+        # Verify Cytoscape canvas settings
+        self.assertIn("autoungrabify: true", html_content)
+        self.assertIn("userPanningEnabled: false", html_content)
+        self.assertIn("boxSelectionEnabled: false", html_content)
+
+        # Verify contextmenu suppression on canvas
+        self.assertIn("'contextmenu'", html_content)
+        self.assertIn("preventDefault()", html_content)
+
+        # Verify right-click button constants and dragging lifecycle
+        self.assertIn("MOUSE_BUTTON_RIGHT = 2;", html_content)
+        self.assertIn("MOUSE_BUTTONS_RIGHT_MASK = 2;", html_content)
+        self.assertIn("e.button === MOUSE_BUTTON_RIGHT", html_content)
+        self.assertIn("'mousemove'", html_content)
+        self.assertIn("'mouseup'", html_content)
+        self.assertIn("cy.panBy({ x: dx, y: dy })", html_content)
+
+        # Verify coexistence: node tap handling for expand/collapse remains intact
+        self.assertIn("cy.on('tap', 'node'", html_content)
+        self.assertIn("expandedNodes", html_content)
+
+
 
 class TestCLIEngineHTMLIntegration(unittest.TestCase):
     def setUp(self):
