@@ -178,11 +178,11 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         self.assertEqual(embedded_data.get("filename"), "")
         self.assertEqual(embedded_data.get("source_file"), "")
 
-    def test_info_panel_bottom_right_layout(self):
-        """Validates that the info panel is positioned in the bottom-right corner."""
+    def test_info_panel_layout(self):
+        """Validates that the info panel is positioned in the bottom-left corner."""
         html_content = generate_html(self.net)
         self.assertIn("bottom: 20px;", html_content)
-        self.assertIn("right: 20px;", html_content)
+        self.assertIn("left: 20px;", html_content)
 
 
 class TestCLIEngineHTMLIntegration(unittest.TestCase):
