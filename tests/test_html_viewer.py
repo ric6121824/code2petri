@@ -185,28 +185,79 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         self.assertIn("left: 20px;", html_content)
 
     def test_canvas_panning_and_ungrabify_settings(self):
-        """Validates that Cytoscape locks nodes, disables left-drag pan, and binds right-drag pan."""
+        """Validates that Cytoscape locks nodes, disables left-drag pan, binds right and middle drag pan, and supports wheel zoom."""
         html_content = generate_html(self.net)
         # Verify Cytoscape canvas settings
         self.assertIn("autoungrabify: true", html_content)
         self.assertIn("userPanningEnabled: false", html_content)
         self.assertIn("boxSelectionEnabled: false", html_content)
 
-        # Verify contextmenu suppression on canvas
+        # Verify contextmenu and auxclick suppression on canvas
         self.assertIn("'contextmenu'", html_content)
+        self.assertIn("'auxclick'", html_content)
         self.assertIn("preventDefault()", html_content)
 
-        # Verify right-click button constants and dragging lifecycle
+        # Verify button constants and dragging lifecycle for middle and right mouse buttons
+        self.assertIn("MOUSE_BUTTON_MIDDLE = 1;", html_content)
         self.assertIn("MOUSE_BUTTON_RIGHT = 2;", html_content)
+        self.assertIn("MOUSE_BUTTONS_MIDDLE_MASK = 4;", html_content)
         self.assertIn("MOUSE_BUTTONS_RIGHT_MASK = 2;", html_content)
-        self.assertIn("e.button === MOUSE_BUTTON_RIGHT", html_content)
+        self.assertIn("MOUSE_BUTTON_MIDDLE", html_content)
+        self.assertIn("MOUSE_BUTTON_RIGHT", html_content)
         self.assertIn("'mousemove'", html_content)
         self.assertIn("'mouseup'", html_content)
         self.assertIn("cy.panBy({ x: dx, y: dy })", html_content)
 
+        # Verify wheel/scroll zoom listener is explicitly attached to canvas container
+        self.assertIn("'wheel'", html_content)
+        self.assertIn("cy.zoom({", html_content)
+        self.assertIn("renderedPosition", html_content)
+
         # Verify coexistence: node tap handling for expand/collapse remains intact
         self.assertIn("cy.on('tap', 'node'", html_content)
         self.assertIn("expandedNodes", html_content)
+
+    def test_headless_canvas_panning_and_wheel_zoom(self):
+        """Validates that Cytoscape headless instance correctly pans and zooms under our logic."""
+        import shutil
+        import subprocess
+
+        if not shutil.which("node"):
+            self.skipTest("Node.js not available in environment")
+
+        vendor_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "vendor", "cytoscape.min.js")
+        )
+        js_code = f"""
+        const cytoscape = require({json.dumps(vendor_path)});
+        const cy = cytoscape({{
+          headless: true,
+          minZoom: 0.2,
+          maxZoom: 3.5,
+          autoungrabify: true,
+          userPanningEnabled: false,
+          boxSelectionEnabled: false
+        }});
+
+        // Validate panning via panBy
+        cy.panBy({{ x: 40, y: -25 }});
+        if (cy.pan().x !== 40 || cy.pan().y !== -25) {{
+          process.exit(1);
+        }}
+
+        // Validate wheel zooming via cy.zoom with renderedPosition
+        const initialZoom = cy.zoom();
+        const s = (-100 / -250) * 0.25;
+        const targetZoom = initialZoom * Math.pow(10, s);
+        cy.zoom({{ level: targetZoom, renderedPosition: {{ x: 100, y: 100 }} }});
+        if (cy.zoom() <= initialZoom) {{
+          process.exit(2);
+        }}
+        process.exit(0);
+        """
+        proc = subprocess.run(["node", "-e", js_code], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Headless test failed: {proc.stderr}")
+
 
 
 

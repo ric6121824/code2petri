@@ -51,3 +51,24 @@
 ## Summary
 - **Standards findings**: 0 hard violations, 3 baseline smells (all addressed).
 - **Spec findings**: 0 missing requirements, 2 robustness fixes applied (button mask & mouseup filtering).
+
+---
+
+# Ticket 27: Code Review (Round 2 — Follow-up)
+
+**User Feedback:**
+1. "the scroll doesn't work after your implementation"
+2. "I want the middle button to be able to pan as well. (both buttons work)"
+
+### Root Cause & Resolution
+1. **Scroll (Wheel Zoom) Inactive**:
+   - *Root Cause*: Cytoscape's internal wheel event handler explicitly checks `n.panningEnabled() && n.userPanningEnabled() && n.zoomingEnabled() && n.userZoomingEnabled()`. By configuring `userPanningEnabled: false` (to disable left-click canvas panning), Cytoscape automatically suppressed wheel zoom events.
+   - *Resolution*: Added an explicit `wheel` listener to `#cy` that calculates zoom factor based on `e.deltaY` and `wheelSensitivity`, invoking `cy.zoom({ level: targetZoom, renderedPosition })` centered at the cursor coordinates.
+2. **Middle Mouse Button Drag Panning**:
+   - *Resolution*: Expanded drag panning to accept `e.button === MOUSE_BUTTON_MIDDLE` (1) alongside `MOUSE_BUTTON_RIGHT` (2).
+   - Added `auxclick` event listener on `#cy` calling `e.preventDefault()` to prevent browser autoscroll.
+   - Combined button masks `PAN_BUTTON_MASKS = 4 | 2` (6) in `mousemove` and `mouseup` to ensure smooth panning with either or both buttons.
+3. **Automated Verification**:
+   - Enhanced `test_canvas_panning_and_ungrabify_settings` in `tests/test_html_viewer.py`.
+   - Added `test_headless_canvas_panning_and_wheel_zoom` running headless Cytoscape via Node.js to verify programmatic `panBy` and wheel `cy.zoom` under `userPanningEnabled: false`.
+

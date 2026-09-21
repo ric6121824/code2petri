@@ -737,11 +737,15 @@
 
       applyLayout(false);
 
-      // Right-click drag canvas panning
+      // Canvas drag panning via Middle Mouse Button and Right Mouse Button
+      const MOUSE_BUTTON_MIDDLE = 1;
       const MOUSE_BUTTON_RIGHT = 2;
+      const MOUSE_BUTTONS_MIDDLE_MASK = 4;
       const MOUSE_BUTTONS_RIGHT_MASK = 2;
+      const PAN_BUTTON_MASKS = MOUSE_BUTTONS_MIDDLE_MASK | MOUSE_BUTTONS_RIGHT_MASK;
+
       const cyContainer = document.getElementById('cy');
-      let isRightDragging = false;
+      let isPanningDrag = false;
       let lastDragPos = { x: 0, y: 0 };
 
       function setDragPos(e) {
@@ -755,9 +759,39 @@
           e.preventDefault();
         });
 
+        // Prevent browser middle-click autoscroll on canvas
+        cyContainer.addEventListener('auxclick', function(e) {
+          if (e.button === MOUSE_BUTTON_MIDDLE) {
+            e.preventDefault();
+          }
+        });
+
+        // Wheel / scroll zooming (re-enabled explicitly because Cytoscape's internal wheel
+        // handler is bypassed when userPanningEnabled is false)
+        cyContainer.addEventListener('wheel', function(e) {
+          e.preventDefault();
+          const rect = cyContainer.getBoundingClientRect();
+          const renderedPosition = {
+            x: e.clientX - rect.left,
+            y: e.clientY - rect.top
+          };
+          let s = e.deltaY != null ? e.deltaY / -250 : 0;
+          if (e.deltaMode === 1) {
+            s *= 33;
+          } else if (e.deltaMode === 2) {
+            s *= 100;
+          }
+          s *= 0.25; // wheelSensitivity
+          const targetZoom = cy.zoom() * Math.pow(10, s);
+          cy.zoom({
+            level: targetZoom,
+            renderedPosition: renderedPosition
+          });
+        }, { passive: false });
+
         cyContainer.addEventListener('mousedown', function(e) {
-          if (e.button === MOUSE_BUTTON_RIGHT) {
-            isRightDragging = true;
+          if (e.button === MOUSE_BUTTON_MIDDLE || e.button === MOUSE_BUTTON_RIGHT) {
+            isPanningDrag = true;
             setDragPos(e);
             cyContainer.style.cursor = 'grabbing';
             e.preventDefault();
@@ -766,10 +800,10 @@
       }
 
       window.addEventListener('mousemove', function(e) {
-        if (!isRightDragging) return;
-        // Verify right mouse button is still held down (prevents stuck dragging if released outside window)
-        if ((e.buttons & MOUSE_BUTTONS_RIGHT_MASK) === 0) {
-          isRightDragging = false;
+        if (!isPanningDrag) return;
+        // Verify middle or right mouse button is still held down (prevents stuck dragging if released outside window)
+        if ((e.buttons & PAN_BUTTON_MASKS) === 0) {
+          isPanningDrag = false;
           if (cyContainer) cyContainer.style.cursor = '';
           return;
         }
@@ -780,24 +814,26 @@
       });
 
       window.addEventListener('mouseup', function(e) {
-        if (isRightDragging && e.button === MOUSE_BUTTON_RIGHT) {
-          isRightDragging = false;
-          if (cyContainer) {
-            cyContainer.style.cursor = '';
+        if (isPanningDrag && (e.button === MOUSE_BUTTON_MIDDLE || e.button === MOUSE_BUTTON_RIGHT)) {
+          if ((e.buttons & PAN_BUTTON_MASKS) === 0) {
+            isPanningDrag = false;
+            if (cyContainer) {
+              cyContainer.style.cursor = '';
+            }
           }
         }
       });
 
       // Cursor feedback on hover
       cy.on('mouseover', 'node', function(evt) {
-        if (isRightDragging) return;
+        if (isPanningDrag) return;
         const n = evt.target;
         if (n.data('resolved') === true || expandedNodes.has(n.id()) || n.hasClass('compound')) {
           if (cyContainer) cyContainer.style.cursor = 'pointer';
         }
       });
       cy.on('mouseout', 'node', function() {
-        if (isRightDragging) return;
+        if (isPanningDrag) return;
         if (cyContainer) cyContainer.style.cursor = '';
       });
 
