@@ -79,3 +79,7 @@ _Avoid_: Client-side folding, JS reduction
 **Place-Centric Fold Trigger**:
 The interaction paradigm where a user explicitly selects a single Place node to initiate a Live Fold Reduction on its immediate structural environment, ensuring fine-grained step-by-step graph simplification.
 _Avoid_: Node clicking, manual reduction
+
+**Collapsed Compound State**:
+The visual state of an inlined function where its internal Petri net structure has been entirely reduced to a single transition, represented in the UI as a closed container (displaying the function name and component ID) rather than a naked opaque transition.
+_Avoid_: Folder node, closed sub-graph
