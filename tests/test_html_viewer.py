@@ -160,6 +160,30 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         self.assertIn("#e8f5e9", html_content)
         self.assertIn("cy.on('tap', 'node'", html_content)
 
+    def test_generate_html_embeds_source_file_and_filename(self):
+        """Validates that passing source_file embeds filename in info-panel and code2petri-data."""
+        html_content = generate_html(self.net, source_file="/path/to/my_module.py")
+        self.assertIn("my_module.py", html_content)
+        self.assertIn('id="info-filename"', html_content)
+        self.assertIn('title="/path/to/my_module.py"', html_content)
+
+        embedded_data = _extract_embedded_data(html_content)
+        self.assertEqual(embedded_data["filename"], "my_module.py")
+        self.assertEqual(embedded_data["source_file"], "/path/to/my_module.py")
+
+    def test_generate_html_without_source_file(self):
+        """Validates that omitting source_file defaults to empty string and hides info-file-box."""
+        html_content = generate_html(self.net)
+        embedded_data = _extract_embedded_data(html_content)
+        self.assertEqual(embedded_data.get("filename"), "")
+        self.assertEqual(embedded_data.get("source_file"), "")
+
+    def test_info_panel_bottom_right_layout(self):
+        """Validates that the info panel is positioned in the bottom-right corner."""
+        html_content = generate_html(self.net)
+        self.assertIn("bottom: 20px;", html_content)
+        self.assertIn("right: 20px;", html_content)
+
 
 class TestCLIEngineHTMLIntegration(unittest.TestCase):
     def setUp(self):
@@ -272,6 +296,42 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
         # Cross-file callee WebGLEngine.step should NOT be present without context
         self.assertNotIn("WebGLEngine.step", callee_data)
 
+    def test_cli_engine_embeds_source_filename_in_html(self):
+        """Validates that code2petri with HTML output embeds source_file and filename in payload and DOM."""
+        out_html = os.path.join(self.temp_dir.name, "stepCpu_filename.html")
+        code2petri(
+            source_path=self.app_js,
+            target_function="stepCpu",
+            output_file=out_html,
+        )
+        self.assertTrue(os.path.exists(out_html))
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        data = _extract_embedded_data(content)
+        self.assertEqual(data["filename"], "app.js")
+        self.assertEqual(data["source_file"], self.app_js)
+        self.assertIn("app.js", content)
+        self.assertIn('id="info-filename"', content)
+
+    def test_cli_main_embeds_source_filename_in_html(self):
+        """Validates that CLI main with HTML output propagates source filename to the viewer."""
+        out_html = os.path.join(self.temp_dir.name, "main_filename.html")
+        main([
+            self.app_js,
+            "-t", "stepCpu",
+            "-o", out_html,
+        ])
+        self.assertTrue(os.path.exists(out_html))
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        data = _extract_embedded_data(content)
+        self.assertEqual(data["filename"], "app.js")
+        self.assertEqual(data["source_file"], self.app_js)
+        self.assertIn("app.js", content)
+
 
 if __name__ == "__main__":
     unittest.main()
+

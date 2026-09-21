@@ -55,6 +55,7 @@ def generate_html(
     net_or_fold: Union[PetriNet, FoldResult, Any],
     title: Optional[str] = None,
     callee_nets: Optional[Dict[str, Any]] = None,
+    source_file: Optional[str] = None,
 ) -> str:
     """Generates a 100% self-contained offline HTML viewer for a PetriNet or FoldResult.
 
@@ -62,11 +63,15 @@ def generate_html(
                         instance (for interactive fold playback).
     :param title: Optional title to display in the header.
     :param callee_nets: Optional dictionary of pre-computed raw callee nets keyed by symbol name.
+    :param source_file: Optional source file path or name being visualized.
     :return: Complete HTML document string with inlined Cytoscape, Dagre, and graph data.
     """
     template = _load_template()
     vendor_scripts = _load_vendor_scripts()
     callee_dict = callee_nets if callee_nets is not None else {}
+
+    full_source_path = source_file or ""
+    file_display = os.path.basename(source_file) if source_file else ""
 
     if isinstance(net_or_fold, FoldResult):
         fold_dict = net_or_fold.to_dict()
@@ -88,7 +93,13 @@ def generate_html(
             "fully_reducible": False,
         }
 
+    payload["source_file"] = full_source_path
+    payload["filename"] = file_display
+
     escaped_title = html.escape(display_title)
+    escaped_source_file = html.escape(full_source_path)
+    escaped_filename = html.escape(file_display)
+    file_box_style = "display: flex;" if file_display else "display: none;"
     json_data = json.dumps(payload, indent=2)
     callee_nets_json = json.dumps(callee_dict, indent=2)
 
@@ -97,5 +108,9 @@ def generate_html(
     rendered = rendered.replace("{{DATA_JSON}}", json_data)
     rendered = rendered.replace("{{CALLEE_NETS_JSON}}", callee_nets_json)
     rendered = rendered.replace("{{callee_nets_json}}", callee_nets_json)
+    rendered = rendered.replace("{{SOURCE_FILE}}", escaped_source_file)
+    rendered = rendered.replace("{{FILENAME}}", escaped_filename)
+    rendered = rendered.replace("{{FILE_BOX_STYLE}}", file_box_style)
 
     return rendered
+

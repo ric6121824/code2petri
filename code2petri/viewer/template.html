@@ -117,7 +117,7 @@
     #info-panel {
       position: absolute;
       bottom: 20px;
-      left: 20px;
+      right: 20px;
       background: rgba(255, 255, 255, 0.95);
       border: 1px solid #dee2e6;
       border-radius: 6px;
@@ -127,6 +127,28 @@
       box-shadow: 0 4px 12px rgba(0,0,0,0.08);
       z-index: 5;
       backdrop-filter: blur(4px);
+    }
+    .info-file-box {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #e9ecef;
+      font-size: 12px;
+    }
+    .info-file-label {
+      font-weight: 600;
+      color: #6c757d;
+      text-transform: uppercase;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+    }
+    .info-filename {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-weight: 600;
+      color: #0366d6;
+      word-break: break-all;
     }
     #info-panel h4 {
       margin-bottom: 6px;
@@ -212,6 +234,10 @@
     <div id="cy"></div>
 
     <div id="info-panel">
+      <div id="info-file-box" class="info-file-box" style="{{FILE_BOX_STYLE}}">
+        <span class="info-file-label">File:</span>
+        <span id="info-filename" class="info-filename" title="{{SOURCE_FILE}}">{{FILENAME}}</span>
+      </div>
       <h4 id="info-step-title">Petri Net View</h4>
       <p id="info-step-desc">Interactive Petri net graph representation.</p>
       <div class="legend">
