@@ -72,3 +72,6 @@ _Avoid_: Intermediate net, reduction snapshot
 The fine-grained reduction operation that removes exactly one intermediate place and merges its adjacent transitions, replacing maximal chain matching to gracefully collapse AST branch anomalies.
 _Avoid_: Sequence collapsing, chain reduction
 
+**Live Fold Reduction**:
+The process of executing structural folds (e.g., Single-Place Contractions) natively within the browser's JavaScript engine on the current interactive graph state, independent of Python pre-computation.
+_Avoid_: Client-side folding, JS reduction
