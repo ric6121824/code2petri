@@ -415,6 +415,106 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
         self.assertEqual(data["source_file"], self.app_js)
         self.assertIn("app.js", content)
 
+    def test_generate_html_composite_mode_explicit(self):
+        """Validates that generate_html with mode='composite' or composite_net embeds composite payload."""
+        comp_net = PetriNet()
+        p0 = comp_net.add_place("p0", "start", initial_tokens=1)
+        t0 = comp_net.add_transition("t0", "run()")
+        comp_net.add_arc(p0, t0)
+        comp_net.add_compound(
+            id="compound_worker",
+            label="worker()",
+            function_name="worker",
+            file="worker.py",
+            parent=None,
+        )
+
+        html_content = generate_html(comp_net, title="Composite Overview", mode="composite")
+        self.assertIn("Composite Overview", html_content)
+
+        data = _extract_embedded_data(html_content)
+        self.assertEqual(data["mode"], "composite")
+        self.assertEqual(data["fold_steps"], [])
+        self.assertEqual(data["final_sm"], 0.0)
+        self.assertIn("composite_net", data)
+        self.assertIn("compounds", data)
+        self.assertEqual(len(data["compounds"]), 1)
+        self.assertEqual(data["compounds"][0]["id"], "compound_worker")
+
+        # Pre-computed fold playback controls are omitted/hidden
+        self.assertIn('<div class="controls" id="fold-controls" style="display: none;">', html_content)
+
+    def test_generate_html_composite_mode_via_composite_net_arg(self):
+        """Validates passing composite_net parameter directly into generate_html."""
+        comp_net = PetriNet()
+        comp_net.add_place("p_start", "start", initial_tokens=1)
+        comp_net.add_compound(
+            id="compound_calc",
+            label="calc()",
+            function_name="calc",
+            file="math.py",
+            parent=None,
+        )
+
+        dummy_net = PetriNet()
+        html_content = generate_html(dummy_net, composite_net=comp_net)
+        data = _extract_embedded_data(html_content)
+        self.assertEqual(data["mode"], "composite")
+        self.assertIn("composite_net", data)
+        self.assertEqual(len(data["compounds"]), 1)
+        self.assertEqual(data["compounds"][0]["id"], "compound_calc")
+
+    def test_net_to_elements_preserves_hierarchy_and_enclosing_function(self):
+        """Validates that netToElements in template.html maps parent and enclosing_function to Cytoscape data."""
+        import subprocess
+        import re
+
+        template_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "template.html")
+        )
+        with open(template_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        m = re.search(r"(function netToElements\(net\) \{[\s\S]*?\n      \})", html)
+        self.assertIsNotNone(m)
+        net_to_elements_fn = m.group(1)
+
+        node_script = f"""
+{net_to_elements_fn}
+
+const net = {{
+  compounds: [
+    {{ id: 'c1', label: 'fn1()', function_name: 'fn1', file: 'a.py', parent: null }}
+  ],
+  places: [
+    {{ id: 'p1', label: 'p1', parent: 'c1', enclosing_function: 'fn1' }}
+  ],
+  transitions: [
+    {{ id: 't1', label: 't1', parent: 'c1', enclosing_function: 'fn1' }}
+  ],
+  arcs: []
+}};
+
+const elements = netToElements(net);
+const pElem = elements.find(e => e.data && e.data.id === 'p1');
+const tElem = elements.find(e => e.data && e.data.id === 't1');
+const cElem = elements.find(e => e.data && e.data.id === 'c1');
+
+if (!pElem || pElem.data.parent !== 'c1' || pElem.data.enclosing_function !== 'fn1') {{
+  throw new Error('Place failed: ' + JSON.stringify(pElem));
+}}
+if (!tElem || tElem.data.parent !== 'c1' || tElem.data.enclosing_function !== 'fn1') {{
+  throw new Error('Transition failed: ' + JSON.stringify(tElem));
+}}
+if (!cElem || cElem.data.is_compound !== true) {{
+  throw new Error('Compound failed: ' + JSON.stringify(cElem));
+}}
+console.log('PASS');
+"""
+        proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -288,7 +288,7 @@
       }
 
       const isFoldMode = payload.mode === "fold" && Array.isArray(payload.fold_steps) && payload.fold_steps.length > 0;
-      const initialNet = payload.initial_net || { places: [], transitions: [], arcs: [] };
+      const initialNet = payload.composite_net || payload.initial_net || { places: [], transitions: [], arcs: [] };
       const foldSteps = payload.fold_steps || [];
       const totalSteps = foldSteps.length;
       let currentStep = 0;
@@ -338,11 +338,31 @@
         const places = net.places || [];
         const transitions = net.transitions || [];
         const arcs = net.arcs || [];
+        const compounds = net.compounds || (typeof payload !== 'undefined' && payload && payload.compounds) || [];
+
+        // Add compound parent containers
+        compounds.forEach(function(c) {
+          elements.push({
+            group: 'nodes',
+            data: {
+              id: c.id,
+              label: c.label || c.id,
+              function_name: c.function_name,
+              file: c.file,
+              is_compound: true,
+              parent: c.parent || undefined,
+              type: 'Compound Function Container'
+            },
+            classes: 'compound'
+          });
+        });
 
         function formatPlaceElement(p, prefix, parentId) {
           prefix = prefix || '';
           const tokens = p.initial_tokens || 0;
           const label = (p.label || p.id) + (tokens > 0 ? ' (' + tokens + ')' : '');
+          const pid = parentId || p.parent || (p.metadata && p.metadata.parent) || undefined;
+          const encFn = p.enclosing_function || (p.metadata && p.metadata.enclosing_function) || undefined;
           const data = {
             id: prefix + p.id,
             label: label,
@@ -350,8 +370,11 @@
             tokens: tokens,
             raw_label: p.label || p.id
           };
-          if (parentId) {
-            data.parent = parentId;
+          if (encFn) {
+            data.enclosing_function = encFn;
+          }
+          if (pid) {
+            data.parent = pid;
           }
           return {
             group: 'nodes',
@@ -365,6 +388,7 @@
           const meta = t.metadata || {};
           const isOpaque = Boolean(meta.opaque || (t.id && t.id.startsWith('t_C')));
           const tau = meta.tau !== undefined ? Number(meta.tau) : (t.tau !== undefined ? Number(t.tau) : 1.0);
+          const pid = parentId || t.parent || (meta && meta.parent) || undefined;
           
           let displayLabel = t.label || t.id;
           if (t.line_number !== null && t.line_number !== undefined) {
@@ -395,6 +419,7 @@
           if (isOpaque) classes.push('opaque');
           if (statusClass) classes.push(statusClass);
 
+          const encFn = t.enclosing_function || (meta && meta.enclosing_function) || undefined;
           const nodeData = {
             id: prefix + t.id,
             label: displayLabel,
@@ -409,8 +434,11 @@
             target_file: t.target_file,
             component_type: meta.component_type
           };
-          if (parentId) {
-            nodeData.parent = parentId;
+          if (encFn) {
+            nodeData.enclosing_function = encFn;
+          }
+          if (pid) {
+            nodeData.parent = pid;
           }
           if (badgeSvg) {
             nodeData.badge_svg = badgeSvg;
@@ -554,14 +582,16 @@
           });
         }
 
-        Array.from(expandedNodes.keys()).forEach(function(nodeId) {
-          const matching = elements.some(function(el) {
-            return el.group === 'nodes' && el.data.id === nodeId;
+        if (typeof expandedNodes !== 'undefined' && expandedNodes) {
+          Array.from(expandedNodes.keys()).forEach(function(nodeId) {
+            const matching = elements.some(function(el) {
+              return el.group === 'nodes' && el.data.id === nodeId;
+            });
+            if (matching) {
+              applyExpansion(nodeId, expandedNodes.get(nodeId).calleeName);
+            }
           });
-          if (matching) {
-            applyExpansion(nodeId, expandedNodes.get(nodeId).calleeName);
-          }
-        });
+        }
 
         return elements;
       }
@@ -898,6 +928,15 @@
       if (isFoldMode) {
         foldControls.style.display = 'flex';
         updateUI();
+      } else {
+        foldControls.style.display = 'none';
+        if (payload.mode === "composite") {
+          if (foldControls.parentNode) {
+            foldControls.remove();
+          }
+          infoTitle.textContent = 'Composite Petri Net View';
+          infoDesc.textContent = 'Fully expanded composite Petri net with inlined function subnets and parent hierarchy.';
+        }
       }
 
       function updateUI() {

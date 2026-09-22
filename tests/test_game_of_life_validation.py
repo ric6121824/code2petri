@@ -280,7 +280,7 @@ class TestGameOfLifeCrossFileValidation(unittest.TestCase):
         match = re.search(r'<script id="code2petri-data" type="application/json">\s*(\{.*?\})\s*</script>', content, re.DOTALL)
         self.assertIsNotNone(match)
         data = json.loads(match.group(1))
-        self.assertEqual(data["mode"], "fold")
+        self.assertEqual(data["mode"], "composite")
         # Composite net before folding must contain inlined WebGLEngine.step nodes
         initial_trans = data["initial_net"]["transitions"]
         initial_trans_ids = [t["id"] for t in initial_trans]

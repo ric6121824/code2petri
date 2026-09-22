@@ -621,6 +621,205 @@ class TestInlineExpansionEngine(unittest.TestCase):
         self.assertIn('node.transition.resolved', html_str)
         self.assertIn('#2e7d32', html_str)
 
+    def test_composite_assembly_hierarchy_metadata_single_level(self):
+        """Validates that single-level inline expansion attaches parent and enclosing_function metadata."""
+        code = (
+            "def worker_func():\n"
+            "    w1 = 1\n"
+            "    w2 = 2\n"
+            "\n"
+            "def main_func():\n"
+            "    step1 = 1\n"
+            "    worker_func()\n"
+            "    step2 = 2\n"
+        )
+        fp = self._write_temp_file("hierarchy_single.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        main_node = self.py_walker.find_function(tree, "main_func")
+        main_res = self.py_walker.walk_function(main_node, "main_func", filepath=fp)
+
+        composite_net = inline_expand(
+            main_res.net,
+            main_res.call_sites,
+            symbol_table,
+            max_depth=1,
+            caller_function="main_func",
+        )
+        assert_valid_petri_net(self, composite_net)
+
+        # 1. Compounds check
+        self.assertEqual(len(composite_net.compounds), 1)
+        comp = composite_net.compounds[0]
+        self.assertEqual(comp["function_name"], "worker_func")
+        self.assertIsNone(comp["parent"])
+        compound_id = comp["id"]
+
+        # 2. Root caller nodes check
+        main_trans = [t for t in composite_net.transitions if not t.is_inlined]
+        for t in main_trans:
+            self.assertIsNone(t.parent)
+            self.assertEqual(t.enclosing_function, "main_func")
+            self.assertIsNone(t.to_dict()["parent"])
+            self.assertEqual(t.to_dict()["enclosing_function"], "main_func")
+
+        # 3. Callee inlined nodes check
+        inlined_trans = [t for t in composite_net.transitions if t.is_inlined]
+        self.assertGreater(len(inlined_trans), 0)
+        for t in inlined_trans:
+            self.assertEqual(t.parent, compound_id)
+            self.assertEqual(t.enclosing_function, "worker_func")
+            self.assertEqual(t.to_dict()["parent"], compound_id)
+            self.assertEqual(t.to_dict()["enclosing_function"], "worker_func")
+
+        inlined_places = [p for p in composite_net.places if p.metadata and p.metadata.get("inline_expansion")]
+        self.assertGreater(len(inlined_places), 0)
+        for p in inlined_places:
+            self.assertEqual(p.parent, compound_id)
+            self.assertEqual(p.enclosing_function, "worker_func")
+            self.assertEqual(p.to_dict()["parent"], compound_id)
+            self.assertEqual(p.to_dict()["enclosing_function"], "worker_func")
+
+    def test_composite_assembly_hierarchy_metadata_multi_level_recursive(self):
+        """Validates that multi-level recursive inlining preserves nested compound parent hierarchy."""
+        code = (
+            "def leaf_func():\n"
+            "    val = 100\n"
+            "\n"
+            "def worker_func():\n"
+            "    w1 = 1\n"
+            "    leaf_func()\n"
+            "\n"
+            "def main_func():\n"
+            "    step1 = 1\n"
+            "    worker_func()\n"
+        )
+        fp = self._write_temp_file("hierarchy_multi.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        main_node = self.py_walker.find_function(tree, "main_func")
+        main_res = self.py_walker.walk_function(main_node, "main_func", filepath=fp)
+
+        composite_net = inline_expand(
+            main_res.net,
+            main_res.call_sites,
+            symbol_table,
+            max_depth=2,
+            caller_function="main_func",
+        )
+        assert_valid_petri_net(self, composite_net)
+
+        # Expect 2 compounds: worker_func (parent None) and leaf_func (parent worker_func's compound)
+        self.assertEqual(len(composite_net.compounds), 2)
+        worker_comp = next((c for c in composite_net.compounds if c["function_name"] == "worker_func"), None)
+        leaf_comp = next((c for c in composite_net.compounds if c["function_name"] == "leaf_func"), None)
+        self.assertIsNotNone(worker_comp)
+        self.assertIsNotNone(leaf_comp)
+
+        self.assertIsNone(worker_comp["parent"])
+        self.assertEqual(leaf_comp["parent"], worker_comp["id"])
+
+        # Check leaf nodes point to leaf compound
+        leaf_trans = [t for t in composite_net.transitions if "leaf_func" in t.id or t.enclosing_function == "leaf_func"]
+        self.assertGreater(len(leaf_trans), 0)
+        for t in leaf_trans:
+            self.assertEqual(t.parent, leaf_comp["id"])
+            self.assertEqual(t.enclosing_function, "leaf_func")
+
+        # Check worker nodes (excluding leaf) point to worker compound
+        worker_trans = [t for t in composite_net.transitions if t.enclosing_function == "worker_func"]
+        self.assertGreater(len(worker_trans), 0)
+        for t in worker_trans:
+            self.assertEqual(t.parent, worker_comp["id"])
+            self.assertEqual(t.enclosing_function, "worker_func")
+
+        # Check clone preserves full hierarchy
+        cloned = composite_net.clone()
+        self.assertEqual(len(cloned.compounds), 2)
+        cloned_leaf = next(c for c in cloned.compounds if c["function_name"] == "leaf_func")
+        cloned_worker = next(c for c in cloned.compounds if c["function_name"] == "worker_func")
+        self.assertEqual(cloned_leaf["parent"], cloned_worker["id"])
+
+    def test_composite_assembly_duplicate_calls_unique_compound_ids(self):
+        """Validates that calling the same callee twice produces distinct compound IDs."""
+        code = (
+            "def worker():\n"
+            "    x = 10\n"
+            "\n"
+            "def caller_func():\n"
+            "    worker()\n"
+            "    worker()\n"
+        )
+        fp = self._write_temp_file("hierarchy_dup.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        caller_node = self.py_walker.find_function(tree, "caller_func")
+        caller_res = self.py_walker.walk_function(caller_node, "caller_func", filepath=fp)
+
+        composite_net = inline_expand(
+            caller_res.net,
+            caller_res.call_sites,
+            symbol_table,
+            max_depth=1,
+            caller_function="caller_func",
+        )
+        assert_valid_petri_net(self, composite_net)
+
+        self.assertEqual(len(composite_net.compounds), 2)
+        c1, c2 = composite_net.compounds[0], composite_net.compounds[1]
+        self.assertNotEqual(c1["id"], c2["id"])
+
+    def test_composite_assembly_duplicate_nested_calls_unique_compound_ids(self):
+        """Validates that calling a function with nested callees multiple times generates unique nested compound IDs."""
+        code = (
+            "def leaf():\n"
+            "    z = 1\n"
+            "\n"
+            "def branch():\n"
+            "    leaf()\n"
+            "\n"
+            "def root():\n"
+            "    branch()\n"
+            "    branch()\n"
+        )
+        fp = self._write_temp_file("hierarchy_dup_nested.py", code)
+        symbol_table = SymbolTable()
+        symbol_table.index_file(fp)
+
+        tree = self.py_walker.parse_file(fp)
+        root_node = self.py_walker.find_function(tree, "root")
+        root_res = self.py_walker.walk_function(root_node, "root", filepath=fp)
+
+        composite_net = inline_expand(
+            root_res.net,
+            root_res.call_sites,
+            symbol_table,
+            max_depth=2,
+            caller_function="root",
+        )
+        assert_valid_petri_net(self, composite_net)
+
+        # 2 branch calls + 2 leaf calls = 4 compounds
+        self.assertEqual(len(composite_net.compounds), 4)
+        compound_ids = [c["id"] for c in composite_net.compounds]
+        self.assertEqual(len(compound_ids), len(set(compound_ids)))
+
+        branch_comps = [c for c in composite_net.compounds if c["function_name"] == "branch"]
+        leaf_comps = [c for c in composite_net.compounds if c["function_name"] == "leaf"]
+        self.assertEqual(len(branch_comps), 2)
+        self.assertEqual(len(leaf_comps), 2)
+
+        # Each leaf comp must have its parent pointing to one of the branch comps
+        branch_ids = {c["id"] for c in branch_comps}
+        for lc in leaf_comps:
+            self.assertIn(lc["parent"], branch_ids)
+
 
 if __name__ == "__main__":
     unittest.main()

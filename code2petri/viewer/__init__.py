@@ -56,6 +56,8 @@ def generate_html(
     title: Optional[str] = None,
     callee_nets: Optional[Dict[str, Any]] = None,
     source_file: Optional[str] = None,
+    composite_net: Optional[Union[PetriNet, Dict[str, Any]]] = None,
+    mode: Optional[str] = None,
 ) -> str:
     """Generates a 100% self-contained offline HTML viewer for a PetriNet or FoldResult.
 
@@ -64,6 +66,8 @@ def generate_html(
     :param title: Optional title to display in the header.
     :param callee_nets: Optional dictionary of pre-computed raw callee nets keyed by symbol name.
     :param source_file: Optional source file path or name being visualized.
+    :param composite_net: Optional fully-wired Composite Net (PetriNet or dict) to display.
+    :param mode: Optional mode override ('fold', 'no-fold', or 'composite').
     :return: Complete HTML document string with inlined Cytoscape, Dagre, and graph data.
     """
     template = _load_template()
@@ -73,19 +77,52 @@ def generate_html(
     full_source_path = source_file or ""
     file_display = os.path.basename(source_file) if source_file else ""
 
-    if isinstance(net_or_fold, FoldResult):
+    is_composite = (
+        mode == "composite"
+        or composite_net is not None
+        or (
+            isinstance(net_or_fold, PetriNet)
+            and bool(getattr(net_or_fold, "compounds", None))
+            and mode is None
+        )
+    )
+
+    if is_composite:
+        target_comp = composite_net if composite_net is not None else net_or_fold
+        if isinstance(target_comp, PetriNet):
+            comp_dict = target_comp.to_dict()
+            compounds = [dict(c) for c in target_comp.compounds]
+        elif isinstance(target_comp, dict):
+            comp_dict = target_comp
+            compounds = list(target_comp.get("compounds", []))
+        else:
+            comp_dict = {}
+            compounds = []
+
+        display_title = title if title is not None else "Composite Petri Net"
+        payload: Dict[str, Any] = {
+            "mode": "composite",
+            "title": display_title,
+            "initial_net": comp_dict,
+            "composite_net": comp_dict,
+            "compounds": compounds,
+            "fold_steps": [],
+            "final_sm": 0.0,
+            "fully_reducible": False,
+        }
+    elif isinstance(net_or_fold, FoldResult):
         fold_dict = net_or_fold.to_dict()
         display_title = title if title is not None else f"SM Score = {net_or_fold.final_sm}"
-        payload: Dict[str, Any] = {
-            "mode": "fold",
+        payload = {
+            "mode": mode or "fold",
             "title": display_title,
             **fold_dict,
         }
     else:
-        net_dict = net_or_fold.to_dict() if isinstance(net_or_fold, PetriNet) else {}
+        net_dict = net_or_fold.to_dict() if isinstance(net_or_fold, PetriNet) else (net_or_fold if isinstance(net_or_fold, dict) else {})
         display_title = title if title is not None else "Petri Net"
         payload = {
-            "mode": "no-fold",
+            "mode": mode or "no-fold",
             "title": display_title,
             "initial_net": net_dict,
             "fold_steps": [],

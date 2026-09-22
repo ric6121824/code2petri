@@ -33,6 +33,9 @@ class Place:
         line_number: Optional[int] = None,
         initial_tokens: int = 0,
         id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        parent: Optional[str] = None,
+        enclosing_function: Optional[str] = None,
     ) -> None:
         node_id = id if id is not None else id_
         if node_id is None:
@@ -41,11 +44,43 @@ class Place:
         self.label = str(label)
         self.line_number = line_number
         self.initial_tokens = int(initial_tokens)
+        self.metadata: Optional[Dict[str, Any]] = dict(metadata) if metadata is not None else None
+        if parent is not None:
+            if self.metadata is None:
+                self.metadata = {}
+            self.metadata["parent"] = parent
+        if enclosing_function is not None:
+            if self.metadata is None:
+                self.metadata = {}
+            self.metadata["enclosing_function"] = enclosing_function
+
+    @property
+    def parent(self) -> Optional[str]:
+        """Returns the parent compound ID if this place is enclosed in a compound node."""
+        return self.metadata.get("parent") if self.metadata else None
+
+    @parent.setter
+    def parent(self, value: Optional[str]) -> None:
+        if self.metadata is None:
+            self.metadata = {}
+        self.metadata["parent"] = value
+
+    @property
+    def enclosing_function(self) -> Optional[str]:
+        """Returns the name of the function enclosing this place."""
+        return self.metadata.get("enclosing_function") if self.metadata else None
+
+    @enclosing_function.setter
+    def enclosing_function(self, value: Optional[str]) -> None:
+        if self.metadata is None:
+            self.metadata = {}
+        self.metadata["enclosing_function"] = value
 
     def __repr__(self) -> str:
+        meta_str = f", metadata={self.metadata!r}" if self.metadata is not None else ""
         return (
             f"Place(id={self.id!r}, label={self.label!r}, "
-            f"line_number={self.line_number!r}, initial_tokens={self.initial_tokens!r})"
+            f"line_number={self.line_number!r}, initial_tokens={self.initial_tokens!r}{meta_str})"
         )
 
     def to_dot_node(self) -> str:
@@ -59,12 +94,19 @@ class Place:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the Place into a dictionary."""
-        return {
+        d: Dict[str, Any] = {
             "id": self.id,
             "label": self.label,
             "line_number": self.line_number,
             "initial_tokens": self.initial_tokens,
         }
+        if self.metadata is not None:
+            d["metadata"] = dict(self.metadata)
+            if "parent" in self.metadata:
+                d["parent"] = self.metadata["parent"]
+            if "enclosing_function" in self.metadata:
+                d["enclosing_function"] = self.metadata["enclosing_function"]
+        return d
 
     @property
     def is_start(self) -> bool:
@@ -112,6 +154,8 @@ class Transition:
         id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         resolution: Optional[CallResolution] = None,
+        parent: Optional[str] = None,
+        enclosing_function: Optional[str] = None,
     ) -> None:
         node_id = id if id is not None else id_
         if node_id is None:
@@ -120,12 +164,42 @@ class Transition:
         self.label = str(label)
         self.line_number = line_number
         self.metadata: Optional[Dict[str, Any]] = dict(metadata) if metadata is not None else None
+        if parent is not None:
+            if self.metadata is None:
+                self.metadata = {}
+            self.metadata["parent"] = parent
+        if enclosing_function is not None:
+            if self.metadata is None:
+                self.metadata = {}
+            self.metadata["enclosing_function"] = enclosing_function
         if resolution is not None:
             self.resolution: Optional[CallResolution] = resolution
         elif self.metadata is not None:
             self.resolution = CallResolution.from_metadata(self.metadata)
         else:
             self.resolution = None
+
+    @property
+    def parent(self) -> Optional[str]:
+        """Returns the parent compound ID if this transition is enclosed in a compound node."""
+        return self.metadata.get("parent") if self.metadata else None
+
+    @parent.setter
+    def parent(self, value: Optional[str]) -> None:
+        if self.metadata is None:
+            self.metadata = {}
+        self.metadata["parent"] = value
+
+    @property
+    def enclosing_function(self) -> Optional[str]:
+        """Returns the name of the function enclosing this transition."""
+        return self.metadata.get("enclosing_function") if self.metadata else None
+
+    @enclosing_function.setter
+    def enclosing_function(self, value: Optional[str]) -> None:
+        if self.metadata is None:
+            self.metadata = {}
+        self.metadata["enclosing_function"] = value
 
     def __repr__(self) -> str:
         metadata_str = f", metadata={self.metadata!r}" if self.metadata is not None else ""
@@ -144,6 +218,10 @@ class Transition:
         }
         if self.metadata is not None:
             d["metadata"] = dict(self.metadata)
+            if "parent" in self.metadata:
+                d["parent"] = self.metadata["parent"]
+            if "enclosing_function" in self.metadata:
+                d["enclosing_function"] = self.metadata["enclosing_function"]
         if self.resolution is not None:
             d["resolved"] = self.resolution.resolved
             if self.resolution.resolved_to is not None:
@@ -312,6 +390,7 @@ class PetriNet:
         self.places: List[Place] = []
         self.transitions: List[Transition] = []
         self.arcs: List[Arc] = []
+        self.compounds: List[Dict[str, Any]] = []
 
     def add_place(
         self,
@@ -320,6 +399,9 @@ class PetriNet:
         line_number: Optional[int] = None,
         initial_tokens: int = 0,
         id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        parent: Optional[str] = None,
+        enclosing_function: Optional[str] = None,
     ) -> Place:
         node_id = id if id is not None else id_
         place = Place(
@@ -327,6 +409,9 @@ class PetriNet:
             label=label,
             line_number=line_number,
             initial_tokens=initial_tokens,
+            metadata=metadata,
+            parent=parent,
+            enclosing_function=enclosing_function,
         )
         self.places.append(place)
         return place
@@ -339,6 +424,8 @@ class PetriNet:
         id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
         resolution: Optional[CallResolution] = None,
+        parent: Optional[str] = None,
+        enclosing_function: Optional[str] = None,
     ) -> Transition:
         node_id = id if id is not None else id_
         transition = Transition(
@@ -347,9 +434,33 @@ class PetriNet:
             line_number=line_number,
             metadata=metadata,
             resolution=resolution,
+            parent=parent,
+            enclosing_function=enclosing_function,
         )
         self.transitions.append(transition)
         return transition
+
+    def add_compound(
+        self,
+        id: str,
+        label: str,
+        function_name: str,
+        file: Optional[str] = None,
+        parent: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Registers a compound node representing an inlined function container."""
+        for c in self.compounds:
+            if c.get("id") == id:
+                return c
+        compound: Dict[str, Any] = {
+            "id": str(id),
+            "label": str(label),
+            "function_name": str(function_name),
+            "file": str(file or ""),
+            "parent": parent,
+        }
+        self.compounds.append(compound)
+        return compound
 
     def add_arc(
         self,
@@ -443,11 +554,14 @@ class PetriNet:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serializes the Petri net into a dictionary structure."""
-        return {
+        d: Dict[str, Any] = {
             "places": [p.to_dict() for p in self.places],
             "transitions": [t.to_dict() for t in self.transitions],
             "arcs": [a.to_dict() for a in self.arcs],
         }
+        if self.compounds:
+            d["compounds"] = [dict(c) for c in self.compounds]
+        return d
 
     def to_json(self, indent: int = 2) -> str:
         """Serializes the Petri net into formatted JSON."""
@@ -464,11 +578,13 @@ class PetriNet:
         new_net = PetriNet()
 
         for p in self.places:
+            new_p_meta = dict(p.metadata) if p.metadata else None
             new_net.add_place(
                 id=p.id,
                 label=p.label,
                 line_number=p.line_number,
                 initial_tokens=p.initial_tokens,
+                metadata=new_p_meta,
             )
 
         for t in self.transitions:
@@ -487,6 +603,8 @@ class PetriNet:
                 metadata=new_meta,
                 resolution=new_res,
             )
+
+        new_net.compounds = [dict(c) for c in self.compounds]
 
         node_map = new_net.get_node_map()
         for a in self.arcs:

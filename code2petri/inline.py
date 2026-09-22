@@ -88,6 +88,8 @@ def _splice_callee_net(
     callee_net: PetriNet,
     callee_id: str,
     used_prefixes: Set[str],
+    callee_name: Optional[str] = None,
+    callee_file: Optional[str] = None,
 ) -> None:
     """Splices a callee Petri net into caller_net replacing call_transition."""
     preset_places = [
@@ -125,11 +127,61 @@ def _splice_callee_net(
             idx += 1
     used_prefixes.add(prefix)
 
+    # Determine unique compound container ID for this inlined callee
+    fn_name = callee_name or callee_id
+    clean_fn = fn_name.replace(".", "_")
+    base_compound_id = f"compound_{clean_fn}"
+    existing_compound_ids = {c["id"] for c in caller_net.compounds}
+    if base_compound_id not in existing_compound_ids:
+        compound_id = base_compound_id
+    else:
+        compound_id = f"compound_{prefix.rstrip('_')}"
+        idx = 2
+        while compound_id in existing_compound_ids:
+            compound_id = f"compound_{prefix.rstrip('_')}_{idx}"
+            idx += 1
+
+    caller_parent = call_transition.parent
+
+    # Register compound container in caller_net
+    caller_net.add_compound(
+        id=compound_id,
+        label=f"{fn_name}()",
+        function_name=fn_name,
+        file=callee_file or "",
+        parent=caller_parent,
+    )
+
+    # Re-parent and register any nested compounds from callee_net
+    for c in callee_net.compounds:
+        c_copy = dict(c)
+        orig_id = c_copy["id"]
+        prefixed_id = f"{prefix}{orig_id}" if prefix else orig_id
+        c_copy["id"] = prefixed_id
+        if c_copy.get("parent") is None:
+            c_copy["parent"] = compound_id
+        elif prefix and c_copy.get("parent"):
+            c_copy["parent"] = f"{prefix}{c_copy['parent']}"
+        caller_net.add_compound(
+            id=c_copy["id"],
+            label=c_copy.get("label", c_copy["id"]),
+            function_name=c_copy.get("function_name", ""),
+            file=c_copy.get("file", ""),
+            parent=c_copy.get("parent"),
+        )
+
     cloned_transitions: Dict[str, Transition] = {}
     for ct in callee_net.transitions:
         new_id = f"{prefix}{ct.id}"
         new_meta = dict(ct.metadata) if ct.metadata is not None else {}
         new_meta["inline_expansion"] = True
+        if "parent" not in new_meta or new_meta["parent"] is None:
+            new_meta["parent"] = compound_id
+        elif prefix and new_meta.get("parent"):
+            new_meta["parent"] = f"{prefix}{new_meta['parent']}"
+        if "enclosing_function" not in new_meta or new_meta["enclosing_function"] is None:
+            new_meta["enclosing_function"] = fn_name
+
         cloned_t = caller_net.add_transition(
             id=new_id,
             label=ct.label,
@@ -144,11 +196,21 @@ def _splice_callee_net(
         if cp.id in (callee_source_place.id, callee_sink_place.id):
             continue
         new_id = f"{prefix}{cp.id}"
+        new_meta = dict(cp.metadata) if cp.metadata is not None else {}
+        new_meta["inline_expansion"] = True
+        if "parent" not in new_meta or new_meta["parent"] is None:
+            new_meta["parent"] = compound_id
+        elif prefix and new_meta.get("parent"):
+            new_meta["parent"] = f"{prefix}{new_meta['parent']}"
+        if "enclosing_function" not in new_meta or new_meta["enclosing_function"] is None:
+            new_meta["enclosing_function"] = fn_name
+
         cloned_p = caller_net.add_place(
             id=new_id,
             label=cp.label,
             line_number=cp.line_number,
             initial_tokens=0,
+            metadata=new_meta,
         )
         cloned_places[cp.id] = cloned_p
 
@@ -219,9 +281,26 @@ def _inline_expand_recursive(
     max_depth: int,
     call_stack: Optional[Set[CallFrame]] = None,
     used_prefixes: Optional[Set[str]] = None,
+    caller_function: Optional[str] = None,
 ) -> PetriNet:
     """Internal recursive worker for inline expansion."""
     composite_net = net.clone()
+    if caller_function is None and call_sites:
+        caller_function = next((cs.caller_function for cs in call_sites if cs.caller_function), None)
+
+    # Ensure caller net root nodes have enclosing_function and parent initialized
+    for p in composite_net.places:
+        if p.metadata is None or "parent" not in p.metadata:
+            p.parent = None
+        if p.enclosing_function is None and caller_function:
+            p.enclosing_function = caller_function
+
+    for t in composite_net.transitions:
+        if t.metadata is None or "parent" not in t.metadata:
+            t.parent = None
+        if t.enclosing_function is None and caller_function:
+            t.enclosing_function = caller_function
+
     if max_depth <= 0:
         return composite_net
 
@@ -276,6 +355,8 @@ def _inline_expand_recursive(
 
         new_stack = set(active_stack)
         new_stack.update(callee_frames)
+        callee_fn_name = sym.name or cs.callee_name
+        callee_file_path = sym.filepath or (os.path.abspath(cs.caller_file) if cs.caller_file else "")
 
         if max_depth > 1:
             callee_net = _inline_expand_recursive(
@@ -285,14 +366,17 @@ def _inline_expand_recursive(
                 max_depth=max_depth - 1,
                 call_stack=new_stack,
                 used_prefixes=used_prefixes,
+                caller_function=callee_fn_name,
             )
 
         _splice_callee_net(
             caller_net=composite_net,
             call_transition=trans,
             callee_net=callee_net,
-            callee_id=sym.name or cs.callee_name,
+            callee_id=callee_fn_name,
             used_prefixes=used_prefixes,
+            callee_name=callee_fn_name,
+            callee_file=callee_file_path,
         )
 
     return composite_net
@@ -303,6 +387,7 @@ def inline_expand(
     call_sites: List[CallSite],
     symbol_table: SymbolTable,
     max_depth: int = 1,
+    caller_function: Optional[str] = None,
 ) -> PetriNet:
     """Recursively inlines resolved callee Petri nets into caller net producing a Composite Net.
 
@@ -311,9 +396,10 @@ def inline_expand(
         call_sites: List of CallSite records extracted from the caller net.
         symbol_table: Multi-file symbol table used for cross-file call resolution.
         max_depth: Maximum recursion depth for expanding nested callee calls (default 1).
+        caller_function: Optional name of the root caller function.
 
     Returns:
-        A new PetriNet instance with resolved callee subnets spliced in.
+        A new PetriNet instance with resolved callee subnets spliced in and hierarchy metadata.
     """
     return _inline_expand_recursive(
         net=net,
@@ -321,6 +407,7 @@ def inline_expand(
         symbol_table=symbol_table,
         max_depth=max_depth,
         call_stack=None,
+        caller_function=caller_function,
     )
 
 

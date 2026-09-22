@@ -4,9 +4,9 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Running `code2petri` on a file with inlined function calls produces an HTML file whose viewer opens showing all callee subnets already present in the graph, not collapsed behind opaque transitions
-- [ ] Node hierarchy information (which nodes belong to which inlined function boundary) is present in the data payload and readable by JavaScript at load time
-- [ ] The pre-computed fold step playback slider is absent when composite mode is active
-- [ ] A composite net with at least two levels of nesting (A calls B calls C) is supported and verified
+- [x] Running `code2petri` on a file with inlined function calls produces an HTML file whose viewer opens showing all callee subnets already present in the graph, not collapsed behind opaque transitions
+- [x] Node hierarchy information (which nodes belong to which inlined function boundary) is present in the data payload and readable by JavaScript at load time
+- [x] The pre-computed fold step playback slider is absent when composite mode is active
+- [x] A composite net with at least two levels of nesting (A calls B calls C) is supported and verified

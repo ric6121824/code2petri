@@ -208,7 +208,13 @@ def code2petri(
         if symbol_table is None:
             symbol_table = SymbolTable()
         logger.info("Executing inline expansion with depth %d...", inline_depth)
-        net = inline_expand(net, call_sites, symbol_table, max_depth=inline_depth)
+        net = inline_expand(
+            net,
+            call_sites,
+            symbol_table,
+            max_depth=inline_depth,
+            caller_function=target_function,
+        )
 
     logger.info(
         "Constructed Petri net with %d places, %d transitions, and %d arcs.",
@@ -219,7 +225,8 @@ def code2petri(
 
     # Determine fold activation
     is_html = (ext == "html")
-    fold_active = (fold or is_html) and not no_fold
+    is_composite_html = is_html and inline
+    fold_active = (fold or (is_html and not inline)) and not no_fold and not is_composite_html
 
     fold_result: Optional[FoldResult] = None
     if fold_active:
@@ -247,7 +254,10 @@ def code2petri(
             serializer_kwargs = {}
             if ext == "html":
                 serializer_kwargs["source_file"] = source_path
-                if symbol_table is not None:
+                if is_composite_html:
+                    serializer_kwargs["composite_net"] = net
+                    serializer_kwargs["mode"] = "composite"
+                elif symbol_table is not None:
                     serializer_kwargs["callee_nets"] = precompute_callee_nets(
                         call_sites=call_sites,
                         symbol_table=symbol_table,

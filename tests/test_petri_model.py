@@ -630,5 +630,83 @@ class TestTransitionMetadataAndSerialization(unittest.TestCase):
         self.assertIn('label="SM score = 42.0";', dot_str)
 
 
+class TestHierarchyMetadata(unittest.TestCase):
+    def test_place_hierarchy_metadata(self):
+        p = Place(
+            id="p1",
+            label="mid",
+            parent="compound_func",
+            enclosing_function="my_func",
+        )
+        self.assertEqual(p.parent, "compound_func")
+        self.assertEqual(p.enclosing_function, "my_func")
+        self.assertEqual(p.metadata.get("parent"), "compound_func")
+        self.assertEqual(p.metadata.get("enclosing_function"), "my_func")
+
+        # Setter updates metadata
+        p.parent = "compound_outer"
+        self.assertEqual(p.parent, "compound_outer")
+        self.assertEqual(p.metadata["parent"], "compound_outer")
+
+        # Serialization to dict includes parent and enclosing_function
+        d = p.to_dict()
+        self.assertEqual(d["parent"], "compound_outer")
+        self.assertEqual(d["enclosing_function"], "my_func")
+        self.assertIn("metadata", d)
+        self.assertEqual(d["metadata"]["parent"], "compound_outer")
+
+    def test_transition_hierarchy_metadata(self):
+        t = Transition(
+            id="t1",
+            label="step()",
+            parent="compound_func",
+            enclosing_function="my_func",
+        )
+        self.assertEqual(t.parent, "compound_func")
+        self.assertEqual(t.enclosing_function, "my_func")
+        self.assertEqual(t.metadata.get("parent"), "compound_func")
+
+        t.enclosing_function = "outer_func"
+        self.assertEqual(t.enclosing_function, "outer_func")
+        self.assertEqual(t.metadata["enclosing_function"], "outer_func")
+
+        d = t.to_dict()
+        self.assertEqual(d["parent"], "compound_func")
+        self.assertEqual(d["enclosing_function"], "outer_func")
+
+    def test_petrinet_add_compound_and_clone(self):
+        net = PetriNet()
+        p = net.add_place("p0", "p0", parent="compound_a", enclosing_function="func_a")
+        t = net.add_transition("t0", "t0", parent="compound_a", enclosing_function="func_a")
+        net.add_arc(p, t)
+
+        c = net.add_compound(
+            id="compound_a",
+            label="func_a()",
+            function_name="func_a",
+            file="module.py",
+            parent=None,
+        )
+        self.assertEqual(c["id"], "compound_a")
+        self.assertEqual(len(net.compounds), 1)
+
+        # to_dict contains compounds
+        d = net.to_dict()
+        self.assertIn("compounds", d)
+        self.assertEqual(len(d["compounds"]), 1)
+        self.assertEqual(d["compounds"][0]["id"], "compound_a")
+
+        # clone preserves compounds and hierarchy metadata
+        cloned = net.clone()
+        self.assertEqual(len(cloned.compounds), 1)
+        self.assertEqual(cloned.compounds[0]["id"], "compound_a")
+        cloned_p = cloned.places[0]
+        cloned_t = cloned.transitions[0]
+        self.assertEqual(cloned_p.parent, "compound_a")
+        self.assertEqual(cloned_p.enclosing_function, "func_a")
+        self.assertEqual(cloned_t.parent, "compound_a")
+        self.assertEqual(cloned_t.enclosing_function, "func_a")
+
+
 if __name__ == '__main__':
     unittest.main()
