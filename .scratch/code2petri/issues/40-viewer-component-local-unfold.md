@@ -1,14 +1,13 @@
 # 40 — Viewer: Component-Local Unfold
 
-**What to build:**
-Enable non-linear local undo. Right-clicking an opaque transition or a Collapsed Compound Node restores the exact sub-graph consumed during that fold without undoing unrelated folds elsewhere.
+**What to build:** The user can right-click any opaque component or Collapsed Compound State to instantly restore the exact sub-graph that was consumed when it was created. This unfold is local — other folds made elsewhere on the canvas remain in their folded state, unaffected.
 
 **Blocked by:** 39 — Viewer: Collapsed Compound State
 
 **Status:** ready-for-agent
 
-- [ ] Right-clicking an opaque transition or collapsed compound extracts its serialized consumed nodes and edges
-- [ ] Removes the component node and re-inserts the original elements back into the Cytoscape graph
-- [ ] External arc connections to the boundary places/transitions are rewired to the restored elements
-- [ ] Other folded components on the canvas retain their folded state intact
-- [ ] Retains selection focus on the restored sub-graph
+- [ ] Right-clicking an opaque component restores the nodes and edges it consumed, removing the component node
+- [ ] Right-clicking a Collapsed Compound State reopens the compound to its fully expanded internal state
+- [ ] Arc connections at the boundary are correctly restored to the original elements
+- [ ] Other folded components on the canvas are not affected by the unfold operation
+- [ ] After unfold, the restored elements are selectable and eligible for further fold operations

@@ -1,13 +1,13 @@
-# 31 — Viewer: Input Remapping (Hold-to-Pan, Left-Click Actions)
+# 31 — Viewer: Input Remapping
 
-**What to build:**
-Remap viewport and node interaction events so that panning is handled by holding the right and middle mouse buttons, freeing left-click for place and transition actions.
+**What to build:** The viewer's mouse controls are remapped so that panning is done by holding and dragging the right or middle mouse button, and left-click is completely free for node interactions. Left-clicking a transition or component node opens an inspector panel showing that node's static metadata.
 
 **Blocked by:** 30 — Viewer: Nested Compound Nodes on Load
 
 **Status:** ready-for-agent
 
-- [ ] Holding and dragging the right or middle mouse button pans the canvas viewport
-- [ ] Left-clicking a place node is reserved for fold triggering and does not trigger viewport panning
-- [ ] Left-clicking a transition or component node selects the node and opens a placeholder inspector HUD panel
-- [ ] Wheel zooming remains functional and smooth
+- [ ] Holding and dragging the right mouse button pans the canvas
+- [ ] Holding and dragging the middle mouse button pans the canvas
+- [ ] Left-clicking a place node does not trigger panning or viewport movement
+- [ ] Left-clicking a transition or component node opens an inspector panel displaying the node's label, tau weight, component type, and source line number
+- [ ] Scroll wheel zoom continues to work

@@ -1,13 +1,12 @@
 # 29 — Prefactor: Backend Composite Assembly
 
-**What to build:**
-Extend composite net generation to build a fully-wired Composite Net with enclosing function and hierarchy parent metadata embedded in each node. Update the HTML generation seam to accept this composite net structure in the data payload, making the fully expanded net available immediately on load.
+**What to build:** When `code2petri` generates an HTML output file for a program with inlined callees, the viewer receives a single pre-assembled composite net that already contains every callee's subnet at maximum depth. The viewer opens in the fully-expanded state immediately without requiring the user to click anything.
 
-**Blocked by:** None — can start immediately
+**Blocked by:** None — can start immediately.
 
 **Status:** ready-for-agent
 
-- [ ] Composite net generation assembles all inlined function subnets into a single Petri net data model with parent hierarchy metadata attached to nodes
-- [ ] HTML generation accepts the composite net data and embeds it into the viewer payload
-- [ ] When composite mode is active, the pre-computed step playback slider is disabled or omitted
-- [ ] Automated tests verify hierarchy metadata preservation during recursive inlining
+- [ ] Running `code2petri` on a file with inlined function calls produces an HTML file whose viewer opens showing all callee subnets already present in the graph, not collapsed behind opaque transitions
+- [ ] Node hierarchy information (which nodes belong to which inlined function boundary) is present in the data payload and readable by JavaScript at load time
+- [ ] The pre-computed fold step playback slider is absent when composite mode is active
+- [ ] A composite net with at least two levels of nesting (A calls B calls C) is supported and verified

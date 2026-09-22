@@ -1,13 +1,12 @@
 # 37 — JS Fold Engine: Well-Structured SESE Reduction
 
-**What to build:**
-Client-side reduction for maximal Well-Structured SESE subnets that are free from PT/TP handles and internal cycles.
+**What to build:** The user can trigger a Well-Structured reduction that collapses a SESE subnet which is free from PT/TP handles and internal cycles — representing general structured control flow that doesn't fit the more specific Marked Graph or State Machine patterns.
 
 **Blocked by:** 36 — JS Fold Engine: Marked Graph + State Machine Reductions
 
 **Status:** ready-for-agent
 
-- [ ] SESE search identifies maximal subnets free of PT/TP handles and cycles
-- [ ] Well-structured reduction rule collapses the detected subnet into a single opaque transition
-- [ ] Weight tau and penalty omega match the reference well-structured formula
-- [ ] Consumed subnet elements are saved in node data for local undo
+- [ ] Well-Structured SESE subnets (free of PT/TP handles and internal cycles) are detected and their boundary nodes are visually highlighted
+- [ ] Triggering the reduction collapses the subnet into a single opaque component
+- [ ] JS tau and omega values match the Python fold engine for the same topology
+- [ ] The resulting component stores enough information to restore the original subnet on demand
