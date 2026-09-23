@@ -800,6 +800,18 @@
             }
           },
           {
+            selector: 'node.place.contractible, node.place.contractible-sequence',
+            style: {
+              'border-color': '#3fb950',
+              'border-style': 'solid',
+              'border-width': 2.5,
+              'background-color': 'rgba(63, 185, 80, 0.15)',
+              'shadow-blur': 8,
+              'shadow-color': 'rgba(63, 185, 80, 0.5)',
+              'shadow-opacity': 0.8
+            }
+          },
+          {
             selector: 'node.transition',
             style: {
               'shape': 'rectangle',
@@ -1128,11 +1140,354 @@
         }
       });
 
+      // Phase 2.7 Live Fold Reduction Engine
+      class LiveFoldReductionEngine {
+        constructor(cy, options = {}) {
+          this.cy = cy;
+          this.stepCounter = 0;
+          this.history = [];
+          this.cfg = {
+            sequence: 1.0,
+            choice: 1.0,
+            loop: 3.0
+          };
+          this.onStateChange = options.onStateChange || null;
+        }
+
+        static generateTauBadgeSvg(tau) {
+          if (tau === undefined || tau === null) return '';
+          const tauVal = Number(tau);
+          const tauStr = Number.isInteger(tauVal) ? tauVal.toFixed(1) : String(tauVal);
+          const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="18" viewBox="0 0 50 18">' +
+            '<rect x="1" y="1" width="48" height="16" rx="8" fill="#24292e" stroke="#61afef" stroke-width="1.5"/>' +
+            '<text x="25" y="12.5" font-family="ui-monospace, monospace" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle">τ=' + tauStr + '</text>' +
+            '</svg>';
+          return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+        }
+
+        calculateSMScore() {
+          let sm = 0.0;
+          this.cy.nodes('.transition').forEach(function(t) {
+            const tau = parseFloat(t.data('tau'));
+            sm += isNaN(tau) ? 1.0 : tau;
+          });
+          return parseFloat(sm.toFixed(2));
+        }
+
+        isFunctionFoldedIntoSingleComponent(compoundIdOrNode) {
+          if (!compoundIdOrNode) return false;
+          const compoundId = typeof compoundIdOrNode === 'string'
+            ? compoundIdOrNode
+            : (compoundIdOrNode.id ? compoundIdOrNode.id() : null);
+          if (!compoundId) return false;
+          const compoundNode = this.cy.getElementById(compoundId);
+          if (!compoundNode || compoundNode.length === 0) return false;
+
+          if (compoundNode.hasClass('collapsed-compound') || compoundNode.data('collapsed_opaque_id')) {
+            return true;
+          }
+
+          const children = this.cy.nodes().filter(function(n) {
+            return n.data('parent') === compoundId;
+          });
+          if (children.length === 1) {
+            const child = children[0];
+            if (child.data('is_opaque') === true || child.data('opaque') === true || child.hasClass('component') || child.hasClass('opaque')) {
+              return true;
+            }
+          }
+
+          return false;
+        }
+
+        canContractPlace(placeNode) {
+          if (!placeNode || !placeNode.hasClass('place')) {
+            return { ok: false, reason: "Target is not a Petri net place." };
+          }
+
+          const tokens = parseInt(placeNode.data('initial_tokens') || 0, 10);
+          if (tokens > 0) {
+            return { ok: false, reason: "Cannot contract marked start/source places (tokens > 0)." };
+          }
+
+          const inArcs = placeNode.incomers('edge');
+          const outArcs = placeNode.outgoers('edge');
+
+          if (inArcs.length !== 1 || outArcs.length !== 1) {
+            return {
+              ok: false,
+              reason: `Single-Place Contraction requires exactly 1 input and 1 output arc (has ${inArcs.length} in, ${outArcs.length} out).`
+            };
+          }
+
+          const t_src = inArcs[0].source();
+          const t_snk = outArcs[0].target();
+
+          if (!t_src.hasClass('transition') || !t_snk.hasClass('transition')) {
+            return { ok: false, reason: "Connected nodes must both be transitions to preserve bipartite structure." };
+          }
+
+          if (t_src.id() === t_snk.id()) {
+            return { ok: false, reason: "Self-loop transition detected; requires loop reduction rule." };
+          }
+
+          // Source transition must only output to this place
+          const t_src_out = t_src.outgoers('edge');
+          if (t_src_out.length !== 1) {
+            return {
+              ok: false,
+              reason: `Preceding transition '${t_src.data('label')}' branches to multiple places (${t_src_out.length}).`
+            };
+          }
+
+          // Sink transition must only input from this place
+          const t_snk_in = t_snk.incomers('edge');
+          if (t_snk_in.length !== 1) {
+            return {
+              ok: false,
+              reason: `Succeeding transition '${t_snk.data('label')}' has multiple inputs (${t_snk_in.length}).`
+            };
+          }
+
+          // Function boundary constraint:
+          // Do not allow a place to fold when one of its neighbor transitions belongs to another function
+          // unless that function is folded into a single component node.
+          const parentPlace = placeNode.data('parent') || null;
+          const parentSrc = t_src.data('parent') || null;
+          const parentSnk = t_snk.data('parent') || null;
+
+          if (parentSrc !== parentSnk || (parentPlace !== null && (parentPlace !== parentSrc || parentPlace !== parentSnk))) {
+            if (parentSrc !== null && (parentSrc !== parentSnk || parentSrc !== parentPlace)) {
+              if (!this.isFunctionFoldedIntoSingleComponent(parentSrc)) {
+                return {
+                  ok: false,
+                  reason: `Preceding transition belongs to function container '${parentSrc}', which is not yet folded into a single component node.`
+                };
+              }
+            }
+            if (parentSnk !== null && (parentSnk !== parentSrc || parentSnk !== parentPlace)) {
+              if (!this.isFunctionFoldedIntoSingleComponent(parentSnk)) {
+                return {
+                  ok: false,
+                  reason: `Succeeding transition belongs to function container '${parentSnk}', which is not yet folded into a single component node.`
+                };
+              }
+            }
+          }
+
+          return { ok: true, t_src: t_src, t_snk: t_snk, inArc: inArcs[0], outArc: outArcs[0] };
+        }
+
+        executeSinglePlaceContraction(placeNode) {
+          const check = this.canContractPlace(placeNode);
+          if (!check.ok) {
+            return { success: false, message: check.reason };
+          }
+
+          const t_src = check.t_src;
+          const t_snk = check.t_snk;
+          const inArc = check.inArc;
+          const outArc = check.outArc;
+
+          this.stepCounter++;
+          const stepNum = this.stepCounter;
+          const opaqueId = 'c_' + String(stepNum).padStart(2, '0');
+
+          // 1. Calculate weights
+          const tauSrc = parseFloat(t_src.data('tau') !== undefined ? t_src.data('tau') : 1.0);
+          const tauSnk = parseFloat(t_snk.data('tau') !== undefined ? t_snk.data('tau') : 1.0);
+          const omega = this.cfg.sequence; // 1.0
+          const accumulatedTau = parseFloat((omega + tauSrc + tauSnk).toFixed(2));
+
+          // 2. Discover parent compound container
+          const parentSrc = t_src.data('parent') || null;
+          const parentSnk = t_snk.data('parent') || null;
+          let parentId = null;
+          if (parentSrc && parentSnk && parentSrc === parentSnk) {
+            parentId = parentSrc;
+          } else {
+            parentId = null; // Cross-boundary fold merges into outer scope
+          }
+
+          // 3. Serialize boundary arcs and consumed subgraph BEFORE any mutations occur
+          const boundaryInArcs = t_src.incomers('edge').map(function(edge) {
+            return {
+              sourceId: edge.source().id(),
+              targetId: opaqueId,
+              originalTargetId: t_src.id(),
+              weight: edge.data('weight') || 1,
+              classes: edge.classes().join(' ')
+            };
+          });
+
+          const boundaryOutArcs = t_snk.outgoers('edge').map(function(edge) {
+            return {
+              sourceId: opaqueId,
+              originalSourceId: t_snk.id(),
+              targetId: edge.target().id(),
+              weight: edge.data('weight') || 1,
+              classes: edge.classes().join(' ')
+            };
+          });
+
+          const consumedNodes = [
+            { group: 'nodes', data: Object.assign({}, placeNode.data()), classes: placeNode.classes().join(' '), position: Object.assign({}, placeNode.position()) },
+            { group: 'nodes', data: Object.assign({}, t_src.data()), classes: t_src.classes().join(' '), position: Object.assign({}, t_src.position()) },
+            { group: 'nodes', data: Object.assign({}, t_snk.data()), classes: t_snk.classes().join(' '), position: Object.assign({}, t_snk.position()) }
+          ];
+
+          const consumedInternalEdges = [
+            { group: 'edges', data: Object.assign({}, inArc.data()), classes: inArc.classes().join(' ') },
+            { group: 'edges', data: Object.assign({}, outArc.data()), classes: outArc.classes().join(' ') }
+          ];
+
+          // Check if any compound container has all its children consumed by this cross-boundary fold
+          const consumedCompounds = [];
+          const self = this;
+          [parentSrc, parentSnk].forEach(function(pCompId) {
+            if (pCompId && pCompId !== parentId) {
+              const pNode = self.cy.getElementById(pCompId);
+              const remaining = self.cy.nodes().filter(function(n) {
+                return n.data('parent') === pCompId &&
+                  n.id() !== t_src.id() &&
+                  n.id() !== t_snk.id() &&
+                  n.id() !== placeNode.id();
+              });
+              if (remaining.length === 0 && pNode.length > 0) {
+                consumedCompounds.push({
+                  group: 'nodes',
+                  data: Object.assign({}, pNode.data()),
+                  classes: pNode.classes().join(' '),
+                  position: Object.assign({}, pNode.position())
+                });
+              }
+            }
+          });
+
+          const consumedSubgraph = {
+            stepNumber: stepNum,
+            opaqueId: opaqueId,
+            componentType: 'Sequence',
+            omega: omega,
+            tau: accumulatedTau,
+            consumedPlaceId: placeNode.id(),
+            consumedTransIds: [t_src.id(), t_snk.id()],
+            parentCompound: parentId,
+            consumedCompounds: consumedCompounds,
+            nodes: consumedNodes,
+            internalEdges: consumedInternalEdges,
+            boundaryInArcs: boundaryInArcs,
+            boundaryOutArcs: boundaryOutArcs
+          };
+
+          // 4. Remove consumed elements and emptied compound containers
+          consumedCompounds.forEach(function(c) {
+            const pNode = self.cy.getElementById(c.data.id);
+            if (pNode.inside()) self.cy.remove(pNode);
+          });
+          if (inArc.inside()) this.cy.remove(inArc);
+          if (outArc.inside()) this.cy.remove(outArc);
+          if (placeNode.inside()) this.cy.remove(placeNode);
+          if (t_src.inside()) this.cy.remove(t_src);
+          if (t_snk.inside()) this.cy.remove(t_snk);
+
+          // 5. Create new opaque transition node
+          const rawSrc = t_src.data('raw_label') || t_src.data('label') || t_src.id();
+          const rawSnk = t_snk.data('raw_label') || t_snk.data('label') || t_snk.id();
+          const newNodeData = {
+            id: opaqueId,
+            label: opaqueId,
+            raw_label: `${rawSrc} ; ${rawSnk}`,
+            type: 'Opaque Transition',
+            component_type: 'Sequence',
+            is_opaque: true,
+            opaque: true,
+            step_number: stepNum,
+            tau: accumulatedTau,
+            omega: omega,
+            badge_svg: LiveFoldReductionEngine.generateTauBadgeSvg(accumulatedTau),
+            consumedSubgraph: consumedSubgraph
+          };
+          if (parentId) {
+            newNodeData.parent = parentId;
+          }
+
+          const opaqueNode = this.cy.add({
+            group: 'nodes',
+            data: newNodeData,
+            classes: 'transition opaque component'
+          });
+
+          // 6. Connect boundary arcs to new opaque transition
+          boundaryInArcs.forEach(function(bArc, idx) {
+            self.cy.add({
+              group: 'edges',
+              data: {
+                id: `arc_in_${opaqueId}_${idx}`,
+                source: bArc.sourceId,
+                target: opaqueId,
+                weight: bArc.weight
+              },
+              classes: bArc.classes || 'arc'
+            });
+          });
+
+          boundaryOutArcs.forEach(function(bArc, idx) {
+            self.cy.add({
+              group: 'edges',
+              data: {
+                id: `arc_out_${opaqueId}_${idx}`,
+                source: opaqueId,
+                target: bArc.targetId,
+                weight: bArc.weight
+              },
+              classes: bArc.classes || 'arc'
+            });
+          });
+
+          this.history.push({
+            type: 'sequence',
+            stepNumber: stepNum,
+            opaqueId: opaqueId,
+            placeId: placeNode.id(),
+            consumedSubgraph: consumedSubgraph
+          });
+
+          if (typeof this.onStateChange === 'function') {
+            this.onStateChange({ type: 'sequence', step: stepNum, node: opaqueNode });
+          }
+
+          return {
+            success: true,
+            message: `Folded sequence into '${opaqueId}'`,
+            step: consumedSubgraph,
+            node: opaqueNode
+          };
+        }
+      }
+
+      function updateFoldableHighlights() {
+        if (!cy || typeof cy.nodes !== 'function' || !foldEngine) return;
+        cy.nodes('.place').forEach(function(p) {
+          const check = foldEngine.canContractPlace(p);
+          if (check.ok) {
+            p.addClass('contractible');
+            p.addClass('contractible-sequence');
+          } else {
+            p.removeClass('contractible');
+            p.removeClass('contractible-sequence');
+          }
+        });
+      }
+
+      const foldEngine = new LiveFoldReductionEngine(cy);
+      updateFoldableHighlights();
+
       // Cursor feedback on hover
       cy.on('mouseover', 'node', function(evt) {
         if (isPanningDrag) return;
         const n = evt.target;
-        if (n.hasClass('transition') || n.hasClass('compound') || n.data('resolved') === true || expandedNodes.has(n.id())) {
+        if (n.hasClass('contractible') || n.hasClass('transition') || n.hasClass('compound') || n.data('resolved') === true || expandedNodes.has(n.id())) {
           if (cyContainer) cyContainer.style.cursor = 'pointer';
         }
       });
@@ -1141,13 +1496,27 @@
         if (cyContainer) cyContainer.style.cursor = '';
       });
 
-      // Interactive compound expansion / collapse and inspection on tap
+      // Interactive compound expansion / collapse, live fold, and inspection on tap
       cy.on('tap', 'node', function(evt) {
         const targetNode = evt.target;
         const targetId = targetNode.id();
 
-        // 1. Left-clicking a place node does not trigger panning or viewport movement
+        // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction)
         if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
+          if (typeof foldEngine !== 'undefined' && foldEngine && (targetNode.hasClass('contractible') || foldEngine.canContractPlace(targetNode).ok)) {
+            const res = foldEngine.executeSinglePlaceContraction(targetNode);
+            if (res.success) {
+              if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
+                cy.layout(DAGRE_LAYOUT_OPTIONS).run();
+              }
+              if (typeof updateFoldableHighlights === 'function') {
+                updateFoldableHighlights();
+              }
+              if (res.node && typeof openInspector === 'function') {
+                openInspector(res.node);
+              }
+            }
+          }
           return;
         }
 
@@ -1286,6 +1655,7 @@
         cy.add(elements);
         applyLayout(animate);
         updateUI();
+        updateFoldableHighlights();
       }
 
       if (btnFold) {

@@ -1163,6 +1163,322 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
 
+    def test_place_contractible_sequence_styling_in_template(self):
+        """Verifies template.html includes contractible place CSS styling in green."""
+        html = _read_template_html()
+        self.assertIn("node.place.contractible", html)
+        self.assertIn("#3fb950", html)
+
+    def test_place_nodes_eligible_for_sequence_contraction_colored_green_headless(self):
+        """Validates that intermediate sequence places receive .contractible class on load."""
+        html = _read_template_html()
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        m_engine = re.search(r'class LiveFoldReductionEngine \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_engine, "Could not extract LiveFoldReductionEngine from template.html")
+        engine_js = m_engine.group(0)
+
+        m_update = re.search(r'function updateFoldableHighlights\(\) \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_update, "Could not extract updateFoldableHighlights from template.html")
+        update_highlights_js = m_update.group(0)
+
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{net_to_elements_js}
+{engine_js}
+
+const net = {{
+  places: [
+    {{ id: 'p_start', label: 'start', initial_tokens: 1 }},
+    {{ id: 'p_mid', label: 'mid', initial_tokens: 0 }},
+    {{ id: 'p_end', label: 'end', initial_tokens: 0 }}
+  ],
+  transitions: [
+    {{ id: 't1', label: 'step1()' }},
+    {{ id: 't2', label: 'step2()' }}
+  ],
+  arcs: [
+    {{ source: 'p_start', target: 't1' }},
+    {{ source: 't1', target: 'p_mid' }},
+    {{ source: 'p_mid', target: 't2' }},
+    {{ source: 't2', target: 'p_end' }}
+  ]
+}};
+
+const cy = cytoscape({{
+  elements: netToElements(net),
+  userPanningEnabled: false
+}});
+
+const foldEngine = new LiveFoldReductionEngine(cy);
+
+{update_highlights_js}
+
+updateFoldableHighlights();
+
+const pStart = cy.getElementById('p_start');
+const pMid = cy.getElementById('p_mid');
+const pEnd = cy.getElementById('p_end');
+
+if (pStart.hasClass('contractible')) {{
+  throw new Error('p_start should NOT be contractible (has tokens)');
+}}
+if (!pMid.hasClass('contractible')) {{
+  throw new Error('p_mid MUST be contractible (1 -> 1 -> 1 sequence)');
+}}
+if (pEnd.hasClass('contractible')) {{
+  throw new Error('p_end should NOT be contractible (sink place)');
+}}
+
+console.log('PASS');
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_left_click_eligible_place_contracts_sequence_headless(self):
+        """Validates left-clicking an eligible place performs Single-Place Contraction into an opaque component."""
+        html = _read_template_html()
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        m_engine = re.search(r'class LiveFoldReductionEngine \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_engine, "Could not extract LiveFoldReductionEngine from template.html")
+        engine_js = m_engine.group(0)
+
+        m_inspect = re.search(r'function getInspectorData\(node\) \{.*?\n      function closeInspector\(\) \{.*?\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_inspect, "Could not extract inspector functions from template.html")
+        inspector_js = m_inspect.group(0)
+
+        m_tap = re.search(r'cy\.on\(\'tap\', \'node\', function\(evt\) \{(.*?)\n      \}\);', html, re.DOTALL)
+        self.assertIsNotNone(m_tap, "Could not extract cy.on('tap', 'node') from template.html")
+        tap_handler_js = m_tap.group(0)
+
+        m_update = re.search(r'function updateFoldableHighlights\(\) \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_update, "Could not extract updateFoldableHighlights from template.html")
+        update_highlights_js = m_update.group(0)
+
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{net_to_elements_js}
+{engine_js}
+
+// Mock DOM elements for inspector
+const inspectorPanel = {{ style: {{ display: 'none' }} }};
+const inspectorLabel = {{ textContent: '' }};
+const inspectorType = {{ textContent: '' }};
+const inspectorTau = {{ textContent: '' }};
+const inspectorLine = {{ textContent: '' }};
+
+{inspector_js}
+
+const net = {{
+  places: [
+    {{ id: 'p0', label: 'start', initial_tokens: 1 }},
+    {{ id: 'p1', label: 'mid', initial_tokens: 0 }},
+    {{ id: 'p2', label: 'end', initial_tokens: 0 }}
+  ],
+  transitions: [
+    {{ id: 't1', label: 'first()' }},
+    {{ id: 't2', label: 'second()' }}
+  ],
+  arcs: [
+    {{ source: 'p0', target: 't1' }},
+    {{ source: 't1', target: 'p1' }},
+    {{ source: 'p1', target: 't2' }},
+    {{ source: 't2', target: 'p2' }}
+  ]
+}};
+
+const expandedNodes = new Map();
+const calleeNetsMap = {{}};
+const currentStep = 0;
+function renderStep() {{}}
+
+const cy = cytoscape({{
+  elements: netToElements(net),
+  userPanningEnabled: false
+}});
+
+const foldEngine = new LiveFoldReductionEngine(cy);
+
+{update_highlights_js}
+updateFoldableHighlights();
+
+{tap_handler_js}
+
+// Tap eligible place p1
+const p1 = cy.getElementById('p1');
+if (!p1.hasClass('contractible')) {{
+  throw new Error('p1 was not marked contractible before tap');
+}}
+
+p1.emit('tap');
+
+// Verify consumed nodes removed
+if (cy.getElementById('p1').length !== 0) {{
+  throw new Error('p1 was not removed after contraction');
+}}
+if (cy.getElementById('t1').length !== 0) {{
+  throw new Error('t1 was not removed after contraction');
+}}
+if (cy.getElementById('t2').length !== 0) {{
+  throw new Error('t2 was not removed after contraction');
+}}
+
+// Verify opaque component created
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) {{
+  throw new Error('Opaque component c_01 was not created');
+}}
+if (c01.data('tau') !== 3.0) {{
+  throw new Error('Expected tau 3.0, got ' + c01.data('tau'));
+}}
+if (c01.data('omega') !== 1.0) {{
+  throw new Error('Expected omega 1.0, got ' + c01.data('omega'));
+}}
+if (c01.data('component_type') !== 'Sequence') {{
+  throw new Error('Expected component_type Sequence, got ' + c01.data('component_type'));
+}}
+if (c01.data('is_opaque') !== true) {{
+  throw new Error('Expected is_opaque true');
+}}
+
+// Verify boundary arcs rewired
+const inEdges = c01.incomers('edge');
+if (inEdges.length !== 1 || inEdges[0].source().id() !== 'p0') {{
+  throw new Error('Incomers to c_01 not rewired from p0');
+}}
+const outEdges = c01.outgoers('edge');
+if (outEdges.length !== 1 || outEdges[0].target().id() !== 'p2') {{
+  throw new Error('Outgoers from c_01 not rewired to p2');
+}}
+
+// Verify consumed subgraph storage for local unfold
+const sub = c01.data('consumedSubgraph');
+if (!sub) {{
+  throw new Error('c_01 missing consumedSubgraph');
+}}
+if (sub.consumedPlaceId !== 'p1') {{
+  throw new Error('consumedSubgraph wrong placeId: ' + sub.consumedPlaceId);
+}}
+if (sub.consumedTransIds[0] !== 't1' || sub.consumedTransIds[1] !== 't2') {{
+  throw new Error('consumedSubgraph wrong transIds: ' + JSON.stringify(sub.consumedTransIds));
+}}
+if (sub.nodes.length !== 3) {{
+  throw new Error('consumedSubgraph nodes length expected 3, got ' + sub.nodes.length);
+}}
+if (sub.internalEdges.length !== 2) {{
+  throw new Error('consumedSubgraph internalEdges length expected 2, got ' + sub.internalEdges.length);
+}}
+
+// Verify inspector panel opened on newly created component
+if (inspectorPanel.style.display !== 'flex') {{
+  throw new Error('Inspector panel did not open for c_01');
+}}
+if (inspectorTau.textContent !== '3.0') {{
+  throw new Error('Inspector tau expected 3.0, got ' + inspectorTau.textContent);
+}}
+if (inspectorType.textContent !== 'Sequence') {{
+  throw new Error('Inspector type expected Sequence, got ' + inspectorType.textContent);
+}}
+
+console.log('PASS');
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_sequence_contraction_tau_and_omega_match_python_fold_engine(self):
+        """Validates that JS sequence fold calculations match Python fold_single_place_contraction."""
+        from code2petri.model import PetriNet, Place, Transition
+        from code2petri.fold import fold_single_place_contraction, FoldConfig
+
+        # 1. Python calculation with custom weights
+        py_net = PetriNet()
+        p0 = py_net.add_place(id="p0", label="start", initial_tokens=1)
+        p1 = py_net.add_place(id="p1", label="mid", initial_tokens=0)
+        p2 = py_net.add_place(id="p2", label="end", initial_tokens=0)
+
+        t1 = py_net.add_transition(id="t1", label="op1", metadata={"tau": 2.5})
+        t2 = py_net.add_transition(id="t2", label="op2", metadata={"tau": 1.75})
+
+        py_net.add_arc(p0, t1)
+        py_net.add_arc(t1, p1)
+        py_net.add_arc(p1, t2)
+        py_net.add_arc(t2, p2)
+
+        py_folded, py_step = fold_single_place_contraction(py_net, step_number=1, config=FoldConfig(sequence=1.0))
+        self.assertIsNotNone(py_step)
+        expected_tau = py_step.tau  # 1.0 + 2.5 + 1.75 = 5.25
+        expected_omega = py_step.omega  # 1.0
+        expected_sm = py_step.running_sm  # 5.25
+
+        # 2. JS calculation
+        html = _read_template_html()
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        m_engine = re.search(r'class LiveFoldReductionEngine \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_engine, "Could not extract LiveFoldReductionEngine from template.html")
+        engine_js = m_engine.group(0)
+
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{net_to_elements_js}
+{engine_js}
+
+const net = {{
+  places: [
+    {{ id: 'p0', label: 'start', initial_tokens: 1 }},
+    {{ id: 'p1', label: 'mid', initial_tokens: 0 }},
+    {{ id: 'p2', label: 'end', initial_tokens: 0 }}
+  ],
+  transitions: [
+    {{ id: 't1', label: 'op1', tau: 2.5, metadata: {{ tau: 2.5 }} }},
+    {{ id: 't2', label: 'op2', tau: 1.75, metadata: {{ tau: 1.75 }} }}
+  ],
+  arcs: [
+    {{ source: 'p0', target: 't1' }},
+    {{ source: 't1', target: 'p1' }},
+    {{ source: 'p1', target: 't2' }},
+    {{ source: 't2', target: 'p2' }}
+  ]
+}};
+
+const cy = cytoscape({{
+  elements: netToElements(net),
+  userPanningEnabled: false
+}});
+
+const engine = new LiveFoldReductionEngine(cy);
+const p1 = cy.getElementById('p1');
+const res = engine.executeSinglePlaceContraction(p1);
+
+if (!res.success) {{
+  throw new Error('JS contraction failed: ' + res.message);
+}}
+
+const c01 = cy.getElementById('c_01');
+const result = {{
+  tau: c01.data('tau'),
+  omega: c01.data('omega'),
+  running_sm: engine.calculateSMScore()
+}};
+
+console.log(JSON.stringify(result));
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
+        self.assertEqual(js_data["running_sm"], expected_sm)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 

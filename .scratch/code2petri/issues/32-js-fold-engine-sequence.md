@@ -4,10 +4,11 @@
 
 **Blocked by:** 31 — Viewer: Input Remapping
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Place nodes eligible for Single-Place Contraction are visually coloured green
-- [ ] Left-clicking an eligible place contracts it and replaces the two adjacent transitions with a single opaque component
-- [ ] The resulting component displays its updated tau weight
-- [ ] The new component stores enough information to restore the original nodes on demand (for local unfold)
-- [ ] The JS tau and omega values for a sequence contraction match the output of the Python fold engine for the same topology
+- [x] Place nodes eligible for Single-Place Contraction are visually coloured green
+- [x] Left-clicking an eligible place contracts it and replaces the two adjacent transitions with a single opaque component
+- [x] The resulting component displays its updated tau weight
+- [x] The new component stores enough information to restore the original nodes on demand (for local unfold)
+- [x] The JS tau and omega values for a sequence contraction match the output of the Python fold engine for the same topology
+
