@@ -1,0 +1,1592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PROTOTYPE — Phase 2.7 Live Fold Reduction</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: #0d1117;
+      color: #c9d1d9;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Top Navigation / HUD */
+    header {
+      background-color: #161b22;
+      border-bottom: 1px solid #30363d;
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      z-index: 20;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .proto-badge {
+      background: linear-gradient(135deg, #f0883e, #d29922);
+      color: #0d1117;
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      padding: 3px 7px;
+      border-radius: 4px;
+      letter-spacing: 0.5px;
+    }
+    .title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #f0f6fc;
+    }
+    .sample-select-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: 10px;
+    }
+    .sample-select {
+      background-color: #21262d;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    .metrics-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .metric-pill {
+      background-color: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 5px;
+      padding: 4px 10px;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    .metric-pill .label {
+      color: #8b949e;
+      font-size: 10px;
+      text-transform: uppercase;
+    }
+    .metric-pill .val {
+      font-weight: 700;
+      color: #58a6ff;
+    }
+    .metric-pill .val.sm-score {
+      color: #7ee787;
+      font-size: 13px;
+    }
+
+    .btn-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn {
+      background-color: #21262d;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover:not(:disabled) {
+      background-color: #30363d;
+      border-color: #8b949e;
+      color: #f0f6fc;
+    }
+    .btn-primary {
+      background-color: #238636;
+      border-color: #2ea043;
+      color: #ffffff;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background-color: #2ea043;
+    }
+    .btn-accent {
+      background-color: #1f6feb;
+      border-color: #388bfd;
+      color: #ffffff;
+    }
+    .btn-accent:hover:not(:disabled) {
+      background-color: #388bfd;
+    }
+
+    /* Layout Containers */
+    #viewport-container {
+      flex: 1;
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      overflow: hidden;
+    }
+    #cy-wrapper {
+      flex: 1;
+      position: relative;
+      height: 100%;
+      background-color: #090d13;
+    }
+    #cy {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Canvas Top Toast / Instructions */
+    #canvas-toast {
+      position: absolute;
+      top: 14px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(22, 27, 34, 0.92);
+      border: 1px solid #30363d;
+      backdrop-filter: blur(8px);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      color: #8b949e;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      z-index: 10;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    #canvas-toast.highlight {
+      color: #7ee787;
+      border-color: #238636;
+    }
+    #canvas-toast.error {
+      color: #f85149;
+      border-color: #da3633;
+    }
+
+    /* =========================================================
+       VARIANT A: Docked Right Sidebar
+       ========================================================= */
+    #sidebar-variant-a {
+      width: 340px;
+      background-color: #161b22;
+      border-left: 1px solid #30363d;
+      display: flex;
+      flex-direction: column;
+      z-index: 15;
+      transition: transform 0.25s ease;
+    }
+    .panel-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 13px;
+      font-weight: 600;
+      color: #f0f6fc;
+    }
+    .panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .form-label {
+      font-size: 11px;
+      font-weight: 600;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .form-input {
+      background-color: #0d1117;
+      border: 1px solid #30363d;
+      color: #f0f6fc;
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 13px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      outline: none;
+    }
+    .form-input:focus {
+      border-color: #58a6ff;
+    }
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+    .stat-card {
+      background-color: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .stat-card .key {
+      font-size: 10px;
+      color: #8b949e;
+      text-transform: uppercase;
+    }
+    .stat-card .val {
+      font-size: 14px;
+      font-weight: 700;
+      color: #58a6ff;
+      font-family: ui-monospace, monospace;
+    }
+
+    /* =========================================================
+       VARIANT B: Floating Popover HUD
+       ========================================================= */
+    #hud-variant-b {
+      position: absolute;
+      top: 60px;
+      right: 24px;
+      width: 320px;
+      background: rgba(22, 27, 34, 0.95);
+      border: 1px solid #484f58;
+      border-radius: 12px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+      backdrop-filter: blur(12px);
+      z-index: 18;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      animation: popoverFade 0.15s ease-out;
+    }
+    @keyframes popoverFade {
+      from { opacity: 0; transform: translateY(-6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .hud-header {
+      padding: 10px 14px;
+      background: rgba(48, 54, 61, 0.4);
+      border-bottom: 1px solid #30363d;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* =========================================================
+       VARIANT C: Bottom Drawer & History Stream
+       ========================================================= */
+    #drawer-variant-c {
+      position: absolute;
+      bottom: 60px;
+      left: 16px;
+      right: 16px;
+      height: 250px;
+      background: rgba(22, 27, 34, 0.95);
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      box-shadow: 0 -8px 24px rgba(0,0,0,0.4);
+      backdrop-filter: blur(10px);
+      z-index: 18;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .drawer-split {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+    .drawer-inspector {
+      width: 360px;
+      padding: 14px;
+      border-right: 1px solid #30363d;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .drawer-history {
+      flex: 1;
+      padding: 14px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .history-card {
+      background-color: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      font-family: ui-monospace, monospace;
+    }
+    .history-card .meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .history-tag {
+      background-color: #388bfd26;
+      color: #58a6ff;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    /* =========================================================
+       Floating Prototype Switcher Bar (Per UI.md specification)
+       ========================================================= */
+    #prototype-switcher {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: #161b22;
+      border: 1px solid #f0883e;
+      box-shadow: 0 4px 20px rgba(240, 136, 62, 0.25);
+      border-radius: 30px;
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      z-index: 99;
+      font-size: 12px;
+      color: #f0f6fc;
+    }
+    .switcher-btn {
+      background: none;
+      border: none;
+      color: #f0883e;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .switcher-btn:hover {
+      background-color: rgba(240, 136, 62, 0.2);
+    }
+    .switcher-label {
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      min-width: 170px;
+      text-align: center;
+    }
+    .switcher-tag {
+      font-size: 10px;
+      color: #8b949e;
+      margin-left: 4px;
+      font-weight: normal;
+    }
+  </style>
+
+  <!-- Offline Vendored Scripts -->
+  <script src="../vendor/dagre.min.js"></script>
+  <script src="../vendor/cytoscape.min.js"></script>
+  <script src="../vendor/cytoscape-dagre.js"></script>
+
+  <!-- Prototype Logic Modules -->
+  <script src="sample_data.js"></script>
+  <script src="reduction_engine.js"></script>
+  <script src="pnml_exporter.js"></script>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="header-left" style="display: flex; align-items: center; gap: 12px;">
+      <div class="header-brand">
+        <span class="proto-badge">Prototype</span>
+        <span class="title">Phase 2.7 Live Fold Reduction</span>
+      </div>
+      <div class="sample-select-wrap">
+        <label for="sample-select" style="font-size: 11px; color: #8b949e; text-transform: uppercase;">Sample Net:</label>
+        <select id="sample-select" class="sample-select">
+          <option value="ecommerce_workflow">E-Commerce Pipeline (Multi-Function Inlined)</option>
+          <option value="python_mixed_pipeline">Python mixed_pipeline_func (AST Generated)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="metrics-bar">
+      <div class="metric-pill">
+        <span class="label">SM Score:</span>
+        <span id="metric-sm" class="val sm-score">10.0</span>
+      </div>
+      <div class="metric-pill">
+        <span class="label">Places:</span>
+        <span id="metric-places" class="val">0</span>
+      </div>
+      <div class="metric-pill">
+        <span class="label">Transitions:</span>
+        <span id="metric-trans" class="val">0</span>
+      </div>
+      <div class="metric-pill">
+        <span class="label">Folds:</span>
+        <span id="metric-steps" class="val">0</span>
+      </div>
+      <div class="metric-pill" title="Place Highlighting Legend">
+        <span class="label">Affordance:</span>
+        <span class="val" style="font-size: 11px; font-weight: normal;">
+          <span style="color: #3fb950; font-weight: bold;">●</span> Seq &nbsp;<span style="color: #d29922; font-weight: bold;">●</span> Choice
+        </span>
+      </div>
+    </div>
+
+    <div class="btn-group">
+      <button id="btn-reset" class="btn" title="Reset net back to unreduced composite state">↺ Reset Net</button>
+      <button id="btn-auto-fold" class="btn btn-accent" title="Auto-detect and fold first contractible place">⚡ Auto Fold Next</button>
+      <button id="btn-export-pnml" class="btn btn-primary" title="Export interactive graph state to ISO/IEC PNML XML">⬇ Export PNML</button>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <div id="viewport-container">
+    <div id="cy-wrapper">
+      <div id="canvas-toast">💡 Left-click Place to fold. Right-click Component to unfold. Right/Middle drag to pan.</div>
+      <div id="cy"></div>
+
+      <!-- VARIANT B: Floating Popover HUD -->
+      <div id="hud-variant-b">
+        <div class="hud-header">
+          <span id="hud-title">Node Inspector</span>
+          <button id="btn-close-hud" style="background:none; border:none; color:#8b949e; cursor:pointer; font-size:14px;">✕</button>
+        </div>
+        <div style="padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+          <div class="form-group">
+            <span class="form-label">Name / Label:</span>
+            <input id="hud-input-label" class="form-input" />
+          </div>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <span class="key">Tau (τ):</span>
+              <span id="hud-val-tau" class="val">1.0</span>
+            </div>
+            <div class="stat-card">
+              <span class="key">Penalty (ω):</span>
+              <span id="hud-val-omega" class="val">0.0</span>
+            </div>
+          </div>
+          <!-- Place Reduction State & Next Action (HUD) -->
+          <div id="hud-place-action-wrap" style="display: none; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px; flex-direction: column; gap: 6px;">
+            <div id="hud-place-status" style="font-size: 11px; font-weight: bold; color: #3fb950;">🟢 Sequence Foldable</div>
+            <div id="hud-place-desc" style="font-size: 10px; color: #8b949e; line-height: 1.3;">Ready for contraction.</div>
+            <button id="btn-hud-fold-place" class="btn btn-primary" style="width: 100%; justify-content: center; font-size: 11px; padding: 4px;">⚡ Fold Place</button>
+          </div>
+          <div id="hud-unfold-wrap" style="display: none; margin-top: 4px;">
+            <button id="btn-hud-unfold" class="btn btn-accent" style="width: 100%; justify-content: center;">⟲ Component-Local Unfold</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- VARIANT C: Bottom Drawer & History -->
+      <div id="drawer-variant-c">
+        <div class="panel-header">
+          <span>Component Inspector & Live Fold Stream</span>
+          <span style="font-size: 11px; color: #8b949e;">Click any step card to locally reverse it</span>
+        </div>
+        <div class="drawer-split">
+          <div class="drawer-inspector">
+            <div class="form-group">
+              <span class="form-label">Selected Node:</span>
+              <input id="drawer-input-label" class="form-input" />
+            </div>
+            <div class="stat-grid">
+              <div class="stat-card">
+                <span class="key">Tau (τ):</span>
+                <span id="drawer-val-tau" class="val">1.0</span>
+              </div>
+              <div class="stat-card">
+                <span class="key">Penalty (ω):</span>
+                <span id="drawer-val-omega" class="val">0.0</span>
+              </div>
+            </div>
+            <!-- Place Reduction State & Next Action (Drawer) -->
+            <div id="drawer-place-action-wrap" style="display: none; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 8px; flex-direction: column; gap: 6px; margin-top: 6px;">
+              <div id="drawer-place-status" style="font-size: 11px; font-weight: bold; color: #3fb950;">🟢 Sequence Foldable</div>
+              <div id="drawer-place-desc" style="font-size: 10px; color: #8b949e; line-height: 1.3;">Ready for contraction.</div>
+              <button id="btn-drawer-fold-place" class="btn btn-primary" style="width: 100%; justify-content: center; font-size: 11px; padding: 4px;">⚡ Fold Place</button>
+            </div>
+            <div id="drawer-unfold-wrap" style="display: none; margin-top: auto;">
+              <button id="btn-drawer-unfold" class="btn btn-accent" style="width: 100%; justify-content: center;">⟲ Local Unfold Subnet</button>
+            </div>
+          </div>
+          <div class="drawer-history" id="drawer-history-list">
+            <div style="font-size: 12px; color: #8b949e; text-align: center; margin-top: 40px;">No fold steps performed yet. Left-click an intermediate place on canvas.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- VARIANT A: Docked Right Sidebar -->
+    <aside id="sidebar-variant-a">
+      <div class="panel-header">
+        <span>Node Inspector</span>
+        <span id="sidebar-node-type" style="font-size: 11px; color: #58a6ff; font-family: monospace;">[None]</span>
+      </div>
+      <div class="panel-body">
+        <div id="sidebar-empty-state" style="font-size: 12px; color: #8b949e; line-height: 1.5; padding: 20px 0; text-align: center;">
+          Select a place or transition to inspect metadata or rename component.
+        </div>
+        <div id="sidebar-content" style="display: none; flex-direction: column; gap: 14px;">
+          <div class="form-group">
+            <span class="form-label">Node ID:</span>
+            <input id="sidebar-node-id" class="form-input" readonly style="opacity: 0.7;" />
+          </div>
+          <div class="form-group">
+            <span class="form-label">Label / Component Name:</span>
+            <input id="sidebar-node-label" class="form-input" placeholder="Rename node..." />
+          </div>
+          <div class="stat-grid">
+            <div class="stat-card">
+              <span class="key">Weight (τ):</span>
+              <span id="sidebar-stat-tau" class="val">1.0</span>
+            </div>
+            <div class="stat-card">
+              <span class="key">Penalty (ω):</span>
+              <span id="sidebar-stat-omega" class="val">0.0</span>
+            </div>
+          </div>
+          <div class="form-group" id="sidebar-scope-wrap">
+            <span class="form-label">Compound Scope:</span>
+            <input id="sidebar-node-scope" class="form-input" readonly style="opacity: 0.7;" />
+          </div>
+          <!-- Place Reduction State & Next Action (Sidebar) -->
+          <div id="sidebar-place-action-wrap" style="display: none; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px; flex-direction: column; gap: 8px;">
+            <div style="font-size: 10px; text-transform: uppercase; color: #8b949e; font-weight: bold; letter-spacing: 0.5px;">Reduction State</div>
+            <div id="sidebar-place-status" style="font-size: 12px; font-weight: bold; color: #3fb950;">🟢 Sequence Foldable</div>
+            <div id="sidebar-place-desc" style="font-size: 11px; color: #8b949e; line-height: 1.4;">Ready for Single-Place Contraction.</div>
+            <button id="btn-sidebar-fold-place" class="btn btn-primary" style="width: 100%; justify-content: center; font-size: 12px;">⚡ Contract Sequence Place</button>
+          </div>
+          <div id="sidebar-unfold-wrap" style="display: none; margin-top: 8px;">
+            <button id="btn-sidebar-unfold" class="btn btn-accent" style="width: 100%; justify-content: center; padding: 8px;">
+              ⟲ Component-Local Unfold
+            </button>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Floating Prototype Switcher Bar (Per UI.md specification) -->
+  <nav id="prototype-switcher" aria-label="Prototype UI Variants">
+    <button id="btn-variant-prev" class="switcher-btn" title="Previous Variant (←)">←</button>
+    <div class="switcher-label">
+      <span id="switcher-variant-name">Variant A — Docked Sidebar</span>
+      <span class="switcher-tag">[← / →]</span>
+    </div>
+    <button id="btn-variant-next" class="switcher-btn" title="Next Variant (→)">→</button>
+  </nav>
+
+  <!-- Application Logic -->
+  <script>
+    (function() {
+      // 1. UI Variants Definition
+      const VARIANTS = [
+        { id: 'A', name: 'Variant A — Docked Sidebar' },
+        { id: 'B', name: 'Variant B — Floating Popover HUD' },
+        { id: 'C', name: 'Variant C — Bottom Drawer & Stream' }
+      ];
+
+      // Parse initial variant from URL query param ?variant=A
+      const urlParams = new URLSearchParams(window.location.search);
+      let currentVariantId = (urlParams.get('variant') || 'A').toUpperCase();
+      if (!VARIANTS.some(v => v.id === currentVariantId)) currentVariantId = 'A';
+
+      let cy = null;
+      let engine = null;
+      let selectedNode = null;
+
+      // 2. Cytoscape Stylesheet
+      const cyStyle = [
+        {
+          selector: 'node.place',
+          style: {
+            'shape': 'ellipse',
+            'background-color': '#0d1117',
+            'border-width': 2,
+            'border-color': '#58a6ff',
+            'width': 36,
+            'height': 36,
+            'label': 'data(label)',
+            'text-valign': 'bottom',
+            'text-halign': 'center',
+            'text-margin-y': 5,
+            'font-size': '11px',
+            'font-family': 'ui-monospace, monospace',
+            'color': '#8b949e',
+            'text-background-opacity': 0.85,
+            'text-background-color': '#0d1117',
+            'text-background-padding': '2px',
+            'text-background-shape': 'roundrectangle',
+            'cursor': 'pointer'
+          }
+        },
+        {
+          selector: 'node.place[initial_tokens > 0]',
+          style: {
+            'background-color': '#1f6feb',
+            'border-width': 3,
+            'border-color': '#58a6ff',
+            'color': '#f0f6fc'
+          }
+        },
+        {
+          selector: 'node.place.contractible',
+          style: {
+            'border-color': '#3fb950',
+            'border-style': 'solid',
+            'border-width': 2.5,
+            'background-color': 'rgba(63, 185, 80, 0.15)',
+            'shadow-blur': 8,
+            'shadow-color': 'rgba(63, 185, 80, 0.5)',
+            'shadow-opacity': 0.8
+          }
+        },
+        {
+          selector: 'node.place.contractible-choice',
+          style: {
+            'border-color': '#d29922',
+            'border-width': 3,
+            'border-style': 'dashed',
+            'background-color': 'rgba(210, 153, 34, 0.18)',
+            'shadow-blur': 8,
+            'shadow-color': 'rgba(210, 153, 34, 0.5)',
+            'shadow-opacity': 0.8
+          }
+        },
+        {
+          selector: 'node.place.contractible-while',
+          style: {
+            'border-color': '#bc8cff',
+            'border-width': 3,
+            'border-style': 'double',
+            'background-color': 'rgba(188, 140, 255, 0.20)',
+            'shadow-blur': 12,
+            'shadow-color': 'rgba(188, 140, 255, 0.75)',
+            'shadow-opacity': 0.9
+          }
+        },
+        {
+          selector: 'node.transition',
+          style: {
+            'shape': 'rectangle',
+            'background-color': '#21262d',
+            'border-width': 1.5,
+            'border-color': '#30363d',
+            'width': 'label',
+            'height': 32,
+            'padding': '8px',
+            'label': 'data(label)',
+            'text-valign': 'center',
+            'text-halign': 'center',
+            'font-size': '11px',
+            'font-family': 'ui-monospace, monospace',
+            'color': '#c9d1d9',
+            'cursor': 'pointer'
+          }
+        },
+        {
+          selector: 'node.transition.opaque',
+          style: {
+            'background-color': '#1c2128',
+            'border-width': 2,
+            'border-style': 'dashed',
+            'border-color': '#f0883e',
+            'color': '#f0883e',
+            'font-weight': 'bold'
+          }
+        },
+        {
+          selector: 'node.compound, node:parent',
+          style: {
+            'shape': 'roundrectangle',
+            'background-color': 'rgba(56, 139, 253, 0.05)',
+            'border-width': 1.5,
+            'border-color': '#388bfd',
+            'border-style': 'solid',
+            'padding': '18px',
+            'label': 'data(label)',
+            'text-valign': 'top',
+            'text-halign': 'center',
+            'text-margin-y': 6,
+            'font-size': '12px',
+            'font-weight': 'bold',
+            'font-family': 'ui-monospace, monospace',
+            'color': '#58a6ff',
+            'text-background-opacity': 0.9,
+            'text-background-color': '#161b22',
+            'text-background-padding': '3px',
+            'text-background-shape': 'roundrectangle'
+          }
+        },
+        {
+          selector: 'node.collapsed-compound',
+          style: {
+            'background-color': 'rgba(210, 153, 34, 0.15)',
+            'border-color': '#d29922',
+            'border-width': 2,
+            'border-style': 'solid',
+            'label': 'data(collapsed_label)',
+            'color': '#e3b341',
+            'cursor': 'pointer'
+          }
+        },
+        {
+          selector: 'node:selected',
+          style: {
+            'border-color': '#58a6ff',
+            'border-width': 3,
+            'shadow-blur': 10,
+            'shadow-color': 'rgba(88, 166, 255, 0.5)',
+            'shadow-opacity': 0.9
+          }
+        },
+        {
+          selector: 'node.place.contractible:selected',
+          style: {
+            'border-color': '#3fb950',
+            'border-width': 3.5,
+            'border-style': 'solid',
+            'background-color': 'rgba(63, 185, 80, 0.28)',
+            'shadow-blur': 12,
+            'shadow-color': 'rgba(63, 185, 80, 0.8)',
+            'shadow-opacity': 1.0
+          }
+        },
+        {
+          selector: 'node.place.contractible-choice:selected',
+          style: {
+            'border-color': '#d29922',
+            'border-width': 3.5,
+            'border-style': 'dashed',
+            'background-color': 'rgba(210, 153, 34, 0.28)',
+            'shadow-blur': 12,
+            'shadow-color': 'rgba(210, 153, 34, 0.8)',
+            'shadow-opacity': 1.0
+          }
+        },
+        {
+          selector: 'node.place.contractible-while:selected',
+          style: {
+            'border-color': '#bc8cff',
+            'border-width': 3.5,
+            'border-style': 'double',
+            'background-color': 'rgba(188, 140, 255, 0.35)',
+            'shadow-blur': 16,
+            'shadow-color': 'rgba(188, 140, 255, 0.9)',
+            'shadow-opacity': 1.0
+          }
+        },
+        {
+          selector: 'edge.arc',
+          style: {
+            'curve-style': 'bezier',
+            'target-arrow-shape': 'triangle',
+            'target-arrow-color': '#8b949e',
+            'line-color': '#484f58',
+            'width': 1.8,
+            'arrow-scale': 1.2
+          }
+        }
+      ];
+
+      // 3. Graph Assembly & Initialization
+      function initGraph(sampleKey) {
+        const sample = window.PROTOTYPE_SAMPLES[sampleKey] || window.PROTOTYPE_SAMPLES['ecommerce_workflow'];
+        const elements = [];
+
+        // Add compound parent nodes
+        (sample.compounds || []).forEach(c => {
+          elements.push({
+            group: 'nodes',
+            data: {
+              id: c.id,
+              label: `📁 ${c.label}`,
+              function_name: c.function_name,
+              file: c.file,
+              is_compound: true,
+              type: 'Compound Function Container'
+            },
+            classes: 'compound'
+          });
+        });
+
+        // Add places
+        sample.places.forEach(p => {
+          elements.push({
+            group: 'nodes',
+            data: {
+              id: p.id,
+              label: p.label || p.id,
+              initial_tokens: p.initial_tokens || 0,
+              type: 'Petri Net Place',
+              parent: p.parent || undefined
+            },
+            classes: 'place'
+          });
+        });
+
+        // Add transitions
+        sample.transitions.forEach(t => {
+          elements.push({
+            group: 'nodes',
+            data: {
+              id: t.id,
+              label: t.label || t.id,
+              tau: t.tau !== undefined ? t.tau : 1.0,
+              line_number: t.line_number,
+              type: 'Transition',
+              parent: t.parent || undefined
+            },
+            classes: 'transition'
+          });
+        });
+
+        // Add arcs
+        sample.arcs.forEach((a, idx) => {
+          elements.push({
+            group: 'edges',
+            data: {
+              id: `arc_${idx}_${a.source}_${a.target}`,
+              source: a.source,
+              target: a.target,
+              weight: a.weight || 1
+            },
+            classes: 'arc'
+          });
+        });
+
+        if (cy) {
+          cy.destroy();
+        }
+
+        cy = cytoscape({
+          container: document.getElementById('cy'),
+          elements: elements,
+          style: cyStyle,
+          layout: {
+            name: 'dagre',
+            rankDir: 'TB',
+            nodeDimensionsIncludeLabels: true,
+            spacingFactor: 1.2
+          },
+          minZoom: 0.2,
+          maxZoom: 3.5,
+          wheelSensitivity: 0.25,
+          autoungrabify: false,
+          userPanningEnabled: false,
+          boxSelectionEnabled: false
+        });
+
+        engine = new LiveFoldReductionEngine(cy, {
+          onStateChange: handleEngineStateChange
+        });
+
+        bindCanvasEvents();
+        updateContractibleHighlights();
+        updateHUDMetrics();
+        applyVariant(currentVariantId);
+      }
+
+      function runLayout(animate = true) {
+        const layout = cy.layout({
+          name: 'dagre',
+          rankDir: 'TB',
+          nodeDimensionsIncludeLabels: true,
+          spacingFactor: 1.2,
+          animate: animate,
+          animationDuration: 300
+        });
+        layout.run();
+        updateContractibleHighlights();
+      }
+
+      function showToast(msg, type = 'normal') {
+        const toast = document.getElementById('canvas-toast');
+        toast.textContent = msg;
+        toast.className = '';
+        if (type === 'highlight') toast.classList.add('highlight');
+        if (type === 'error') toast.classList.add('error');
+      }
+
+      function updateContractibleHighlights() {
+        cy.nodes('.place').forEach(p => {
+          const seqRes = engine.canContractPlace(p);
+          if (seqRes.ok) {
+            p.addClass('contractible');
+            p.removeClass('contractible-choice');
+            p.removeClass('contractible-while');
+          } else {
+            p.removeClass('contractible');
+            const choiceRes = engine.detectChoiceCandidates(p);
+            if (choiceRes.ok) {
+              p.addClass('contractible-choice');
+              p.removeClass('contractible-while');
+            } else {
+              p.removeClass('contractible-choice');
+              const whileRes = engine.detectWhileCandidates(p);
+              if (whileRes.ok) {
+                p.addClass('contractible-while');
+              } else {
+                p.removeClass('contractible-while');
+              }
+            }
+          }
+        });
+      }
+
+      function updateHUDMetrics() {
+        document.getElementById('metric-sm').textContent = engine.calculateSMScore().toFixed(1);
+        document.getElementById('metric-places').textContent = cy.nodes('.place').length;
+        document.getElementById('metric-trans').textContent = cy.nodes('.transition').length;
+        document.getElementById('metric-steps').textContent = engine.history.length;
+      }
+
+      function handleEngineStateChange(event) {
+        updateHUDMetrics();
+        updateContractibleHighlights();
+        renderHistoryStream();
+        if (selectedNode && selectedNode.inside()) {
+          selectNode(selectedNode);
+        } else {
+          clearSelection();
+        }
+      }
+
+      // 4. Canvas Drag Panning & Mouse Interactions
+      function bindCanvasEvents() {
+        const cyContainer = document.getElementById('cy');
+        let isPanning = false;
+        let startPos = { x: 0, y: 0 };
+        let lastPos = { x: 0, y: 0 };
+        let hasDragged = false;
+        let rightClickHandled = false;
+        const DRAG_THRESHOLD = 5;
+
+        cyContainer.addEventListener('contextmenu', e => {
+          e.preventDefault();
+        });
+        cyContainer.addEventListener('auxclick', e => {
+          if (e.button === 1) e.preventDefault();
+        });
+
+        // Wheel Zoom
+        cyContainer.addEventListener('wheel', e => {
+          e.preventDefault();
+          const rect = cyContainer.getBoundingClientRect();
+          const renderedPosition = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+          let factor = e.deltaY != null ? e.deltaY / -250 : 0;
+          if (e.deltaMode === 1) factor *= 33;
+          factor *= 0.25;
+          const targetZoom = cy.zoom() * Math.pow(10, factor);
+          cy.zoom({ level: targetZoom, renderedPosition: renderedPosition });
+        }, { passive: false });
+
+        // Middle and Right Click Panning
+        cyContainer.addEventListener('mousedown', e => {
+          if (e.button === 1 || e.button === 2) {
+            isPanning = true;
+            hasDragged = false;
+            rightClickHandled = false;
+            startPos = { x: e.clientX, y: e.clientY };
+            lastPos = { x: e.clientX, y: e.clientY };
+            if (e.button === 1) {
+              cyContainer.style.cursor = 'grabbing';
+              e.preventDefault();
+            }
+          }
+        });
+
+        window.addEventListener('mousemove', e => {
+          if (!isPanning) return;
+          if ((e.buttons & (2 | 4)) === 0) {
+            isPanning = false;
+            cyContainer.style.cursor = '';
+            return;
+          }
+          const dist = Math.hypot(e.clientX - startPos.x, e.clientY - startPos.y);
+          if (dist >= DRAG_THRESHOLD) {
+            hasDragged = true;
+            cyContainer.style.cursor = 'grabbing';
+          }
+          if (hasDragged) {
+            const dx = e.clientX - lastPos.x;
+            const dy = e.clientY - lastPos.y;
+            lastPos = { x: e.clientX, y: e.clientY };
+            cy.panBy({ x: dx, y: dy });
+          }
+        });
+
+        function handleRightClickUnfold(node) {
+          if (!node) return;
+
+          let targetToUnfold = null;
+          if (node.data('consumedSubgraph') || node.data('opaque')) {
+            targetToUnfold = node;
+          } else if (node.hasClass('collapsed-compound') || node.data('collapsed_opaque_id')) {
+            targetToUnfold = node;
+          } else if (node.hasClass('compound')) {
+            const children = node.children();
+            const opaqueChild = children.filter(c => c.data('consumedSubgraph') || c.data('opaque'));
+            if (opaqueChild.length > 0) {
+              targetToUnfold = opaqueChild[0];
+            }
+          }
+
+          if (targetToUnfold) {
+            const res = engine.executeComponentLocalUnfold(targetToUnfold);
+            if (res.success) {
+              showToast(res.message, 'highlight');
+              runLayout(true);
+              clearSelection();
+            } else {
+              showToast(res.message, 'error');
+            }
+          } else {
+            showToast(`Node '${node.data('label') || node.id()}' is not a folded component. Right-click to unfold applies to folded components.`, 'normal');
+          }
+        }
+
+        // Primary Cytoscape right-click event
+        cy.on('cxttap', 'node', function(evt) {
+          if (hasDragged) return;
+          rightClickHandled = true;
+          handleRightClickUnfold(evt.target);
+        });
+
+        // Mouseup fallback and panning cleanup
+        window.addEventListener('mouseup', e => {
+          if (e.button === 2 && !hasDragged && !rightClickHandled) {
+            const rect = cyContainer.getBoundingClientRect();
+            if (
+              e.clientX >= rect.left && e.clientX <= rect.right &&
+              e.clientY >= rect.top && e.clientY <= rect.bottom
+            ) {
+              const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+              const hitNodes = cy.nodes().filter(n => {
+                const bb = n.renderedBoundingBox();
+                return pos.x >= bb.x1 && pos.x <= bb.x2 && pos.y >= bb.y1 && pos.y <= bb.y2;
+              });
+              if (hitNodes.length > 0) {
+                const target = hitNodes[hitNodes.length - 1];
+                handleRightClickUnfold(target);
+              }
+            }
+          }
+
+          if (isPanning && (e.button === 1 || e.button === 2)) {
+            isPanning = false;
+            cyContainer.style.cursor = '';
+          }
+          rightClickHandled = false;
+        });
+
+        // Hover hints
+        cy.on('mouseover', 'node', function(evt) {
+          const node = evt.target;
+          if (node.hasClass('place')) {
+            if (engine.canContractPlace(node).ok) {
+              showToast(`💡 Left-click Place '${node.data('label')}' to fold Sequence.`);
+            } else if (engine.detectChoiceCandidates(node).ok) {
+              const check = engine.detectChoiceCandidates(node);
+              const targetNames = check.bundles.map(b => b.targetPlace.data('label') || b.targetPlaceId).join(', ');
+              showToast(`💡 Left-click Place '${node.data('label')}' to fold Choice (parallel branches converge on ${targetNames}).`);
+            }
+          } else if (node.data('opaque') || node.data('consumedSubgraph') || node.hasClass('collapsed-compound')) {
+            showToast(`💡 Right-click '${node.data('label') || node.id()}' to unfold component locally.`);
+          }
+        });
+
+        cy.on('mouseout', 'node', function() {
+          showToast('💡 Left-click Place to fold (Seq/Choice). Right-click Component to unfold. Right/Middle drag to pan.');
+        });
+
+        // Click Handling on Elements
+        cy.on('tap', function(evt) {
+          if (evt.target === cy) {
+            clearSelection();
+            return;
+          }
+
+          const node = evt.target;
+
+          // 1. Left-click on Place: Trigger Place-Centric Fold (Sequence or Choice)
+          if (node.hasClass('place')) {
+            const seqCheck = engine.canContractPlace(node);
+            if (seqCheck.ok) {
+              const res = engine.executeSinglePlaceContraction(node);
+              showToast(res.message, 'highlight');
+              runLayout(true);
+              if (res.node) selectNode(res.node);
+              return;
+            }
+
+            const choiceCheck = engine.detectChoiceCandidates(node);
+            if (choiceCheck.ok) {
+              const res = engine.executeChoiceContraction(node, 0);
+              if (res.success) {
+                runLayout(true);
+                // Keep the clicked place selected so its next state is immediately visible!
+                selectNode(node);
+                const nowSeq = engine.canContractPlace(node);
+                const nowWhile = engine.detectWhileCandidates(node);
+                if (nowSeq.ok) {
+                  showToast(`Folded choice into '${res.step.opaqueId}'. Place '${node.data('label') || node.id()}' is now Sequence Foldable (click again to contract)!`, 'highlight');
+                } else if (nowWhile.ok) {
+                  showToast(`Folded choice into '${res.step.opaqueId}'. Place '${node.data('label') || node.id()}' is now While Loop Foldable!`, 'highlight');
+                } else {
+                  showToast(res.message, 'highlight');
+                }
+              } else {
+                showToast(res.message, 'error');
+              }
+              return;
+            }
+
+            const whileCheck = engine.detectWhileCandidates(node);
+            if (whileCheck.ok) {
+              const res = engine.executeWhileContraction(node);
+              if (res.success) {
+                showToast(res.message, 'highlight');
+                runLayout(true);
+                if (res.node) selectNode(res.node);
+              } else {
+                showToast(res.message, 'error');
+              }
+              return;
+            }
+
+            if (engine.isPendingLoopHead && engine.isPendingLoopHead(node)) {
+              showToast(`Cannot fold loop head '${node.data('label') || node.id()}': reduce internal loop body places first.`, 'error');
+              selectNode(node);
+              return;
+            }
+
+            showToast(`Cannot contract '${node.data('label')}': ${seqCheck.reason}`, 'error');
+            selectNode(node);
+            return;
+          }
+
+          // 2. Left-click on Transition / Component / Collapsed Compound: Open Inspector
+          selectNode(node);
+        });
+      }
+
+      // 5. Node Selection & Inspector Binding
+      function selectNode(node) {
+        selectedNode = node;
+        cy.nodes().unselect();
+        node.select();
+
+        const nodeId = node.id();
+        const label = node.data('label') || nodeId;
+        const tau = node.data('tau') !== undefined ? node.data('tau') : 1.0;
+        const omega = node.data('omega') !== undefined ? node.data('omega') : 0.0;
+        const isOpaque = Boolean(node.data('opaque') || node.hasClass('collapsed-compound'));
+        const parent = node.data('parent') || (node.hasClass('compound') ? '(Compound Root)' : 'None');
+
+        // Variant A (Sidebar)
+        document.getElementById('sidebar-empty-state').style.display = 'none';
+        document.getElementById('sidebar-content').style.display = 'flex';
+        document.getElementById('sidebar-node-type').textContent = node.data('type') || (node.hasClass('place') ? 'Place' : 'Transition');
+        document.getElementById('sidebar-node-id').value = nodeId;
+        document.getElementById('sidebar-node-label').value = label;
+        document.getElementById('sidebar-stat-tau').textContent = tau;
+        document.getElementById('sidebar-stat-omega').textContent = omega;
+        document.getElementById('sidebar-node-scope').value = parent;
+        document.getElementById('sidebar-unfold-wrap').style.display = isOpaque ? 'block' : 'none';
+
+        // Variant B (Floating HUD)
+        if (currentVariantId === 'B') {
+          const hud = document.getElementById('hud-variant-b');
+          hud.style.display = 'flex';
+          document.getElementById('hud-title').textContent = `${node.data('type') || 'Node'} [${nodeId}]`;
+          document.getElementById('hud-input-label').value = label;
+          document.getElementById('hud-val-tau').textContent = tau;
+          document.getElementById('hud-val-omega').textContent = omega;
+          document.getElementById('hud-unfold-wrap').style.display = isOpaque ? 'block' : 'none';
+        }
+
+        // Variant C (Bottom Drawer)
+        if (currentVariantId === 'C') {
+          document.getElementById('drawer-input-label').value = label;
+          document.getElementById('drawer-val-tau').textContent = tau;
+          document.getElementById('drawer-val-omega').textContent = omega;
+          document.getElementById('drawer-unfold-wrap').style.display = isOpaque ? 'block' : 'none';
+        }
+
+        // Place Reduction State & Next Action Binding
+        const isPlace = node.hasClass('place');
+        const sidebarPlaceWrap = document.getElementById('sidebar-place-action-wrap');
+        const btnSidebarPlaceFold = document.getElementById('btn-sidebar-fold-place');
+        const hudPlaceWrap = document.getElementById('hud-place-action-wrap');
+        const btnHudPlaceFold = document.getElementById('btn-hud-fold-place');
+        const drawerPlaceWrap = document.getElementById('drawer-place-action-wrap');
+        const btnDrawerPlaceFold = document.getElementById('btn-drawer-fold-place');
+
+        if (isPlace) {
+          const seqCheck = engine.canContractPlace(node);
+          const choiceCheck = engine.detectChoiceCandidates(node);
+          const whileCheck = engine.detectWhileCandidates(node);
+
+          let statusText = '';
+          let statusColor = '';
+          let descText = '';
+          let btnText = '';
+          let canFold = false;
+          let foldAction = null;
+
+          if (seqCheck.ok) {
+            statusText = '🟢 Sequence Foldable (1 → 1 → 1)';
+            statusColor = '#3fb950';
+            const tSrcLabel = seqCheck.t_src.data('label') || seqCheck.t_src.id();
+            const tSnkLabel = seqCheck.t_snk.data('label') || seqCheck.t_snk.id();
+            descText = `Next state: fuses preceding '${tSrcLabel}' and succeeding '${tSnkLabel}' into an opaque transition.`;
+            btnText = '⚡ Contract Sequence Place';
+            canFold = true;
+            foldAction = () => {
+              const res = engine.executeSinglePlaceContraction(node);
+              showToast(res.message, 'highlight');
+              runLayout(true);
+              if (res.node) selectNode(res.node);
+            };
+          } else if (choiceCheck.ok) {
+            statusText = '🟠 Choice Foldable (Parallel Branches)';
+            statusColor = '#d29922';
+            const targetNames = choiceCheck.bundles.map(b => b.targetPlace.data('label') || b.targetPlaceId).join(', ');
+            descText = `Next state: fuses parallel branches converging on '${targetNames}'. After choice fold, this place becomes Sequence Foldable!`;
+            btnText = '⑂ Fold Choice Branches';
+            canFold = true;
+            foldAction = () => {
+              const res = engine.executeChoiceContraction(node, 0);
+              runLayout(true);
+              selectNode(node);
+              const nowSeq = engine.canContractPlace(node);
+              if (nowSeq.ok) {
+                showToast(`Folded choice into '${res.step.opaqueId}'. Place '${node.data('label') || node.id()}' is now Sequence Foldable!`, 'highlight');
+              } else {
+                showToast(res.message, 'highlight');
+              }
+            };
+          } else if (whileCheck.ok) {
+            statusText = '🟣 While Loop Foldable (Self-Loop Cycle)';
+            statusColor = '#bc8cff';
+            const tSrcLabel = whileCheck.t_src.data('label') || whileCheck.t_src.id();
+            const tSnkLabel = whileCheck.t_snk.data('label') || whileCheck.t_snk.id();
+            const tLoopLabel = whileCheck.t_loop.data('label') || whileCheck.t_loop.id();
+            descText = `Next state: fuses entry '${tSrcLabel}', exit '${tSnkLabel}', and loop body '${tLoopLabel}' into an opaque transition (ω=${whileCheck.omega}).`;
+            btnText = '🔄 Fold While Loop';
+            canFold = true;
+            foldAction = () => {
+              const res = engine.executeWhileContraction(node);
+              if (res.success) {
+                showToast(res.message, 'highlight');
+                runLayout(true);
+                if (res.node) selectNode(res.node);
+              } else {
+                showToast(res.message, 'error');
+              }
+            };
+          } else if (engine.isPendingLoopHead && engine.isPendingLoopHead(node)) {
+            statusText = '⚪ Loop Head Place (Pending Body Reduction)';
+            statusColor = '#bc8cff';
+            descText = "This place heads a loop cycle. Reduce the internal loop body places first to collapse the cycle into a single self-loop transition.";
+            canFold = false;
+          } else {
+            statusText = '⚪ Non-Contractible Place';
+            statusColor = '#8b949e';
+            descText = seqCheck.reason || "Does not meet reduction conditions.";
+            canFold = false;
+          }
+
+          if (sidebarPlaceWrap) {
+            sidebarPlaceWrap.style.display = 'flex';
+            document.getElementById('sidebar-place-status').textContent = statusText;
+            document.getElementById('sidebar-place-status').style.color = statusColor;
+            document.getElementById('sidebar-place-desc').textContent = descText;
+            btnSidebarPlaceFold.style.display = canFold ? 'block' : 'none';
+            btnSidebarPlaceFold.textContent = btnText;
+            btnSidebarPlaceFold.onclick = foldAction;
+          }
+
+          if (hudPlaceWrap) {
+            hudPlaceWrap.style.display = 'flex';
+            document.getElementById('hud-place-status').textContent = statusText;
+            document.getElementById('hud-place-status').style.color = statusColor;
+            document.getElementById('hud-place-desc').textContent = descText;
+            btnHudPlaceFold.style.display = canFold ? 'block' : 'none';
+            btnHudPlaceFold.textContent = btnText;
+            btnHudPlaceFold.onclick = foldAction;
+          }
+
+          if (drawerPlaceWrap) {
+            drawerPlaceWrap.style.display = 'flex';
+            document.getElementById('drawer-place-status').textContent = statusText;
+            document.getElementById('drawer-place-status').style.color = statusColor;
+            document.getElementById('drawer-place-desc').textContent = descText;
+            btnDrawerPlaceFold.style.display = canFold ? 'block' : 'none';
+            btnDrawerPlaceFold.textContent = btnText;
+            btnDrawerPlaceFold.onclick = foldAction;
+          }
+        } else {
+          if (sidebarPlaceWrap) sidebarPlaceWrap.style.display = 'none';
+          if (hudPlaceWrap) hudPlaceWrap.style.display = 'none';
+          if (drawerPlaceWrap) drawerPlaceWrap.style.display = 'none';
+        }
+      }
+
+      function clearSelection() {
+        selectedNode = null;
+        cy.nodes().unselect();
+
+        // Hide place action wraps
+        const sidebarPlaceWrap = document.getElementById('sidebar-place-action-wrap');
+        const hudPlaceWrap = document.getElementById('hud-place-action-wrap');
+        const drawerPlaceWrap = document.getElementById('drawer-place-action-wrap');
+        if (sidebarPlaceWrap) sidebarPlaceWrap.style.display = 'none';
+        if (hudPlaceWrap) hudPlaceWrap.style.display = 'none';
+        if (drawerPlaceWrap) drawerPlaceWrap.style.display = 'none';
+
+        // Variant A
+        document.getElementById('sidebar-empty-state').style.display = 'block';
+        document.getElementById('sidebar-content').style.display = 'none';
+        document.getElementById('sidebar-node-type').textContent = '[None]';
+
+        // Variant B
+        document.getElementById('hud-variant-b').style.display = 'none';
+
+        // Variant C
+        document.getElementById('drawer-input-label').value = '';
+        document.getElementById('drawer-val-tau').textContent = '-';
+        document.getElementById('drawer-val-omega').textContent = '-';
+        document.getElementById('drawer-unfold-wrap').style.display = 'none';
+      }
+
+      function renderHistoryStream() {
+        const container = document.getElementById('drawer-history-list');
+        if (engine.history.length === 0) {
+          container.innerHTML = '<div style="font-size: 12px; color: #8b949e; text-align: center; margin-top: 40px;">No fold steps performed yet. Left-click an intermediate place on canvas.</div>';
+          return;
+        }
+
+        container.innerHTML = '';
+        engine.history.slice().reverse().forEach(step => {
+          const card = document.createElement('div');
+          card.className = 'history-card';
+          let desc = '';
+          if (step.componentType === 'While Loop Reduction' || step.componentType === 'while') {
+            desc = `folded while loop cycle around '${step.placeId || step.consumedPlaceId}' [${step.tLoopLabel || ''}]`;
+          } else if (step.consumedPlaceId) {
+            desc = `contracted place '${step.consumedPlaceId}'`;
+          } else {
+            desc = `fused choice branches [${(step.consumedTransLabels || []).join(' ⊕ ')}]`;
+          }
+          card.innerHTML = `
+            <div class="meta">
+              <span class="history-tag">Step ${step.stepNumber}</span>
+              <span style="color:#f0f6fc; font-weight:600;">${step.opaqueId}</span>
+              <span style="color:#8b949e;">(${desc})</span>
+              <span style="color:#7ee787;">τ=${step.tau}</span>
+              <span style="color:#d29922;">ω=${step.omega}</span>
+            </div>
+            <button class="btn btn-accent" style="padding: 3px 8px; font-size: 11px;" data-opaque="${step.opaqueId}">
+              ⟲ Unfold
+            </button>
+          `;
+          card.querySelector('button').addEventListener('click', () => {
+            const target = cy.getElementById(step.opaqueId);
+            if (target && target.length > 0) {
+              const res = engine.executeComponentLocalUnfold(target);
+              showToast(res.message, 'highlight');
+              runLayout(true);
+            }
+          });
+          container.appendChild(card);
+        });
+      }
+
+      // 6. UI Variant Switching
+      function applyVariant(variantId) {
+        currentVariantId = variantId;
+        const variantMeta = VARIANTS.find(v => v.id === variantId) || VARIANTS[0];
+        document.getElementById('switcher-variant-name').textContent = variantMeta.name;
+
+        // Update URL search param reload-stably
+        const newUrl = new URL(window.location);
+        newUrl.searchParams.set('variant', variantId);
+        window.history.replaceState({}, '', newUrl);
+
+        const sidebarA = document.getElementById('sidebar-variant-a');
+        const hudB = document.getElementById('hud-variant-b');
+        const drawerC = document.getElementById('drawer-variant-c');
+
+        sidebarA.style.display = (variantId === 'A') ? 'flex' : 'none';
+        hudB.style.display = 'none';
+        drawerC.style.display = (variantId === 'C') ? 'flex' : 'none';
+
+        if (cy) {
+          cy.resize();
+        }
+
+        if (selectedNode && selectedNode.inside()) {
+          selectNode(selectedNode);
+        }
+      }
+
+      function cycleVariant(delta) {
+        const curIdx = VARIANTS.findIndex(v => v.id === currentVariantId);
+        const nextIdx = (curIdx + delta + VARIANTS.length) % VARIANTS.length;
+        applyVariant(VARIANTS[nextIdx].id);
+      }
+
+      // 7. Binding Controls & Shortcuts
+      document.getElementById('btn-variant-prev').addEventListener('click', () => cycleVariant(-1));
+      document.getElementById('btn-variant-next').addEventListener('click', () => cycleVariant(1));
+
+      window.addEventListener('keydown', e => {
+        // Prevent cycling if user is typing in an input
+        if (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+        if (e.key === 'ArrowLeft') {
+          cycleVariant(-1);
+        } else if (e.key === 'ArrowRight') {
+          cycleVariant(1);
+        }
+      });
+
+      document.getElementById('sample-select').addEventListener('change', e => {
+        initGraph(e.target.value);
+        showToast(`Loaded sample net: ${e.target.options[e.target.selectedIndex].text}`);
+      });
+
+      document.getElementById('btn-reset').addEventListener('click', () => {
+        initGraph(document.getElementById('sample-select').value);
+        showToast('Reset net to unreduced composite state.');
+      });
+
+      document.getElementById('btn-auto-fold').addEventListener('click', () => {
+        const seqContractibles = cy.nodes('.place').filter(p => engine.canContractPlace(p).ok);
+        if (seqContractibles.length > 0) {
+          const target = seqContractibles[0];
+          const res = engine.executeSinglePlaceContraction(target);
+          showToast(res.message, 'highlight');
+          runLayout(true);
+          if (res.node) selectNode(res.node);
+          return;
+        }
+
+        const choiceContractibles = cy.nodes('.place').filter(p => engine.detectChoiceCandidates(p).ok);
+        if (choiceContractibles.length > 0) {
+          const target = choiceContractibles[0];
+          const res = engine.executeChoiceContraction(target, 0);
+          showToast(res.message, 'highlight');
+          runLayout(true);
+          if (res.node) selectNode(res.node);
+          return;
+        }
+
+        const whileContractibles = cy.nodes('.place').filter(p => engine.detectWhileCandidates(p).ok);
+        if (whileContractibles.length > 0) {
+          const target = whileContractibles[0];
+          const res = engine.executeWhileContraction(target);
+          showToast(res.message, 'highlight');
+          runLayout(true);
+          if (res.node) selectNode(res.node);
+          return;
+        }
+
+        showToast("No contractible Sequence, Choice, or While candidates found in current net.", "error");
+      });
+
+      document.getElementById('btn-export-pnml').addEventListener('click', () => {
+        const sampleKey = document.getElementById('sample-select').value;
+        const filename = `${sampleKey}_folded.pnml`;
+        downloadPnmlFile(cy, filename);
+        showToast(`Exported current net state to '${filename}'.`, 'highlight');
+      });
+
+      document.getElementById('btn-close-hud').addEventListener('click', () => {
+        document.getElementById('hud-variant-b').style.display = 'none';
+      });
+
+      // Renaming event listeners across variants
+      function bindRenameInput(inputId) {
+        const input = document.getElementById(inputId);
+        input.addEventListener('change', () => {
+          if (selectedNode && selectedNode.inside()) {
+            engine.renameNode(selectedNode.id(), input.value);
+            showToast(`Renamed node '${selectedNode.id()}' to '${input.value}'.`, 'highlight');
+          }
+        });
+        input.addEventListener('keydown', e => {
+          if (e.key === 'Enter') {
+            input.blur();
+          }
+        });
+      }
+      bindRenameInput('sidebar-node-label');
+      bindRenameInput('hud-input-label');
+      bindRenameInput('drawer-input-label');
+
+      // Unfold button listeners across variants
+      function bindUnfoldButton(btnId) {
+        document.getElementById(btnId).addEventListener('click', () => {
+          if (selectedNode && selectedNode.inside()) {
+            const res = engine.executeComponentLocalUnfold(selectedNode);
+            showToast(res.message, 'highlight');
+            runLayout(true);
+          }
+        });
+      }
+      bindUnfoldButton('btn-sidebar-unfold');
+      bindUnfoldButton('btn-hud-unfold');
+      bindUnfoldButton('btn-drawer-unfold');
+
+      // Initial boot
+      initGraph('ecommerce_workflow');
+    })();
+  </script>
+</body>
+</html>
