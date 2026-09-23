@@ -1166,13 +1166,11 @@
         constructor(cy, options = {}) {
           this.cy = cy;
           this.stepCounter = 0;
-          this.history = [];
           this.cfg = {
-            sequence: 1.0,
-            choice: 1.0,
-            loop: 3.0
+            sequence: options.sequence !== undefined ? options.sequence : 0.0,
+            choice: options.choice !== undefined ? options.choice : 1.0,
+            loop: options.loop !== undefined ? options.loop : 3.0
           };
-          this.onStateChange = options.onStateChange || null;
         }
 
         static generateTauBadgeSvg(tau) {
@@ -1184,6 +1182,33 @@
             '<text x="25" y="12.5" font-family="ui-monospace, monospace" font-size="10" font-weight="bold" fill="#ffffff" text-anchor="middle">τ=' + tauStr + '</text>' +
             '</svg>';
           return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+        }
+
+        _createOpaqueComponentNode(opaqueId, label, rawLabel, tau, omega, componentType, parentId, consumedSubnet) {
+          const newNodeData = {
+            id: opaqueId,
+            label: label || opaqueId,
+            raw_label: rawLabel,
+            type: 'Opaque Transition',
+            component_type: componentType,
+            is_opaque: true,
+            opaque: true,
+            step_number: this.stepCounter,
+            tau: tau,
+            omega: omega,
+            badge_svg: LiveFoldReductionEngine.generateTauBadgeSvg(tau),
+            consumedSubnet: consumedSubnet,
+            consumedSubgraph: consumedSubnet
+          };
+          if (parentId) {
+            newNodeData.parent = parentId;
+          }
+
+          return this.cy.add({
+            group: 'nodes',
+            data: newNodeData,
+            classes: 'transition opaque component'
+          });
         }
 
         calculateSMScore() {
@@ -1221,7 +1246,7 @@
           return false;
         }
 
-        canContractPlace(placeNode) {
+        canSinglePlaceContract(placeNode) {
           if (!placeNode || !placeNode.hasClass('place')) {
             return { ok: false, reason: "Target is not a Petri net place." };
           }
@@ -1299,8 +1324,12 @@
           return { ok: true, t_src: t_src, t_snk: t_snk, inArc: inArcs[0], outArc: outArcs[0] };
         }
 
+        canContractPlace(placeNode) {
+          return this.canSinglePlaceContract(placeNode);
+        }
+
         executeSinglePlaceContraction(placeNode) {
-          const check = this.canContractPlace(placeNode);
+          const check = this.canSinglePlaceContract(placeNode);
           if (!check.ok) {
             return { success: false, message: check.reason };
           }
@@ -1314,10 +1343,10 @@
           const stepNum = this.stepCounter;
           const opaqueId = 'c_' + String(stepNum).padStart(2, '0');
 
-          // 1. Calculate weights
+          // 1. Calculate weights per ProM / Lassen Definition 21 (default omega = 0.0)
           const tauSrc = parseFloat(t_src.data('tau') !== undefined ? t_src.data('tau') : 1.0);
           const tauSnk = parseFloat(t_snk.data('tau') !== undefined ? t_snk.data('tau') : 1.0);
-          const omega = this.cfg.sequence; // 1.0
+          const omega = this.cfg.sequence;
           const accumulatedTau = parseFloat((omega + tauSrc + tauSnk).toFixed(2));
 
           // 2. Discover parent compound container
@@ -1330,7 +1359,7 @@
             parentId = null; // Cross-boundary fold merges into outer scope
           }
 
-          // 3. Serialize boundary arcs and consumed subgraph BEFORE any mutations occur
+          // 3. Serialize boundary arcs and consumed subnet BEFORE any mutations occur
           const boundaryInArcs = t_src.incomers('edge').map(function(edge) {
             return {
               sourceId: edge.source().id(),
@@ -1385,7 +1414,7 @@
             }
           });
 
-          const consumedSubgraph = {
+          const consumedSubnet = {
             stepNumber: stepNum,
             opaqueId: opaqueId,
             componentType: 'Sequence',
@@ -1415,29 +1444,9 @@
           // 5. Create new opaque transition node
           const rawSrc = t_src.data('raw_label') || t_src.data('label') || t_src.id();
           const rawSnk = t_snk.data('raw_label') || t_snk.data('label') || t_snk.id();
-          const newNodeData = {
-            id: opaqueId,
-            label: opaqueId,
-            raw_label: `${rawSrc} ; ${rawSnk}`,
-            type: 'Opaque Transition',
-            component_type: 'Sequence',
-            is_opaque: true,
-            opaque: true,
-            step_number: stepNum,
-            tau: accumulatedTau,
-            omega: omega,
-            badge_svg: LiveFoldReductionEngine.generateTauBadgeSvg(accumulatedTau),
-            consumedSubgraph: consumedSubgraph
-          };
-          if (parentId) {
-            newNodeData.parent = parentId;
-          }
-
-          const opaqueNode = this.cy.add({
-            group: 'nodes',
-            data: newNodeData,
-            classes: 'transition opaque component'
-          });
+          const opaqueNode = this._createOpaqueComponentNode(
+            opaqueId, opaqueId, `${rawSrc} ; ${rawSnk}`, accumulatedTau, omega, 'Sequence', parentId, consumedSubnet
+          );
 
           // 6. Connect boundary arcs to new opaque transition
           boundaryInArcs.forEach(function(bArc, idx) {
@@ -1466,22 +1475,10 @@
             });
           });
 
-          this.history.push({
-            type: 'sequence',
-            stepNumber: stepNum,
-            opaqueId: opaqueId,
-            placeId: placeNode.id(),
-            consumedSubgraph: consumedSubgraph
-          });
-
-          if (typeof this.onStateChange === 'function') {
-            this.onStateChange({ type: 'sequence', step: stepNum, node: opaqueNode });
-          }
-
           return {
             success: true,
             message: `Folded sequence into '${opaqueId}'`,
-            step: consumedSubgraph,
+            step: consumedSubnet,
             node: opaqueNode
           };
         }
@@ -1550,6 +1547,10 @@
             }
           });
 
+          validBundles.sort(function(a, b) {
+            return a.targetPlaceId.localeCompare(b.targetPlaceId);
+          });
+
           if (validBundles.length === 0) {
             return { ok: false, reason: "No parallel transitions converging on a shared sink place." };
           }
@@ -1557,7 +1558,14 @@
           return { ok: true, bundles: validBundles };
         }
 
-        executeChoiceContraction(placeNode, bundleIndex) {
+        getFoldType(placeNode) {
+          if (!placeNode || !placeNode.hasClass('place')) return null;
+          if (this.canSinglePlaceContract(placeNode).ok) return 'sequence';
+          if (this.detectChoiceCandidates(placeNode).ok) return 'choice';
+          return null;
+        }
+
+        executeChoiceContraction(placeNode, bundleIndex = 0) {
           const check = this.detectChoiceCandidates(placeNode);
           if (!check.ok) {
             return { success: false, message: check.reason };
@@ -1624,7 +1632,7 @@
             return t.data('raw_label') || t.data('label') || t.id();
           }).join(' ⊕ ');
 
-          const consumedSubgraph = {
+          const consumedSubnet = {
             stepNumber: stepNum,
             opaqueId: opaqueId,
             componentType: 'Choice',
@@ -1649,29 +1657,9 @@
             if (t.inside()) self.cy.remove(t);
           });
 
-          const newNodeData = {
-            id: opaqueId,
-            label: opaqueId,
-            raw_label: transLabels,
-            type: 'Opaque Transition',
-            component_type: 'Choice',
-            is_opaque: true,
-            opaque: true,
-            step_number: stepNum,
-            tau: accumulatedTau,
-            omega: omega,
-            badge_svg: LiveFoldReductionEngine.generateTauBadgeSvg(accumulatedTau),
-            consumedSubgraph: consumedSubgraph
-          };
-          if (parentId) {
-            newNodeData.parent = parentId;
-          }
-
-          const opaqueNode = this.cy.add({
-            group: 'nodes',
-            data: newNodeData,
-            classes: 'transition opaque component'
-          });
+          const opaqueNode = this._createOpaqueComponentNode(
+            opaqueId, opaqueId, transLabels, accumulatedTau, omega, 'Choice', parentId, consumedSubnet
+          );
 
           this.cy.add({
             group: 'edges',
@@ -1695,23 +1683,10 @@
             classes: 'arc'
           });
 
-          this.history.push({
-            type: 'choice',
-            stepNumber: stepNum,
-            opaqueId: opaqueId,
-            sourcePlaceId: placeNode.id(),
-            targetPlaceId: targetPlace.id(),
-            consumedSubgraph: consumedSubgraph
-          });
-
-          if (typeof this.onStateChange === 'function') {
-            this.onStateChange({ type: 'choice', step: stepNum, node: opaqueNode });
-          }
-
           return {
             success: true,
             message: `Folded choice transitions [${transLabels}] into '${opaqueId}' (ω=${omega}, τ=${accumulatedTau}).`,
-            step: consumedSubgraph,
+            step: consumedSubnet,
             node: opaqueNode
           };
         }
@@ -1720,22 +1695,19 @@
       function updateFoldableHighlights() {
         if (!cy || typeof cy.nodes !== 'function' || !foldEngine) return;
         cy.nodes('.place').forEach(function(p) {
-          const seqCheck = foldEngine.canContractPlace(p);
-          if (seqCheck.ok) {
+          const foldType = foldEngine.getFoldType(p);
+          if (foldType === 'sequence') {
             p.addClass('contractible');
             p.addClass('contractible-sequence');
             p.removeClass('contractible-choice');
+          } else if (foldType === 'choice') {
+            p.addClass('contractible');
+            p.addClass('contractible-choice');
+            p.removeClass('contractible-sequence');
           } else {
-            const choiceCheck = foldEngine.detectChoiceCandidates(p);
-            if (choiceCheck.ok) {
-              p.addClass('contractible');
-              p.addClass('contractible-choice');
-              p.removeClass('contractible-sequence');
-            } else {
-              p.removeClass('contractible');
-              p.removeClass('contractible-sequence');
-              p.removeClass('contractible-choice');
-            }
+            p.removeClass('contractible');
+            p.removeClass('contractible-sequence');
+            p.removeClass('contractible-choice');
           }
         });
       }
@@ -1761,13 +1733,14 @@
         const targetNode = evt.target;
         const targetId = targetNode.id();
 
-        // 1. Left-clicking an eligible place node contracts it (Choice or Single-Place Contraction)
+        // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction or Choice)
         if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
           if (typeof foldEngine !== 'undefined' && foldEngine) {
+            const foldType = foldEngine.getFoldType(targetNode);
             let res = null;
-            if (targetNode.hasClass('contractible-choice') || foldEngine.detectChoiceCandidates(targetNode).ok) {
+            if (foldType === 'choice') {
               res = foldEngine.executeChoiceContraction(targetNode);
-            } else if (targetNode.hasClass('contractible') || targetNode.hasClass('contractible-sequence') || foldEngine.canContractPlace(targetNode).ok) {
+            } else if (foldType === 'sequence') {
               res = foldEngine.executeSinglePlaceContraction(targetNode);
             }
             if (res && res.success) {
