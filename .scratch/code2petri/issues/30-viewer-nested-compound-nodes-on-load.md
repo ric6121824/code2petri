@@ -4,9 +4,9 @@
 
 **Blocked by:** 29 — Prefactor: Backend Composite Assembly
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Each inlined function appears as a distinct named container on first load, with its callee nodes rendered inside it
-- [ ] Nested compound nodes (A containing B containing C) are visually distinguishable and do not overlap unintentionally
-- [ ] The canvas lays out the full hierarchy without the user needing to interact first
-- [ ] Compound node headers display a readable function name
+- [x] Each inlined function appears as a distinct named container on first load, with its callee nodes rendered inside it
+- [x] Nested compound nodes (A containing B containing C) are visually distinguishable and do not overlap unintentionally
+- [x] The canvas lays out the full hierarchy without the user needing to interact first
+- [x] Compound node headers display a readable function name

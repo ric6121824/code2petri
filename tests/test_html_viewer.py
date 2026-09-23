@@ -34,6 +34,19 @@ def _extract_callee_nets_data(html_content: str) -> dict:
     return json.loads(match.group(1))
 
 
+def _extract_template_net_to_elements() -> str:
+    """Helper to extract netToElements JavaScript function from template.html."""
+    template_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "template.html")
+    )
+    with open(template_path, "r", encoding="utf-8") as f:
+        html = f.read()
+    match = re.search(r'function netToElements\(net\) \{(.*?)\n      \}', html, re.DOTALL)
+    if not match:
+        raise ValueError("Could not extract netToElements from template.html")
+    return match.group(0)
+
+
 class TestHTMLViewerGenerator(unittest.TestCase):
     def setUp(self):
         self.net = PetriNet()
@@ -533,6 +546,263 @@ console.log('PASS');
             html = f.read()
 
         self.assertIn("targetNode.data('composite_preassembled') === true", html)
+
+    def test_nested_compound_nodes_hierarchy_and_depth_classes(self):
+        """Validates that netToElements sorts compounds topologically, assigns depth and depth classes."""
+        import subprocess
+
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        node_script = f"""
+{net_to_elements_js}
+
+// Compounds provided in reverse order with depth 4 and cycle test
+const net = {{
+  compounds: [
+    {{ id: 'c_deep', function_name: 'deep', parent: 'c_leaf', file: 'a.py' }},
+    {{ id: 'c_leaf', function_name: 'leaf', parent: 'c_middle', file: 'a.py' }},
+    {{ id: 'c_middle', function_name: 'middle', parent: 'c_outer', file: 'a.py' }},
+    {{ id: 'c_outer', function_name: 'outer', parent: null, file: 'a.py' }}
+  ],
+  places: [
+    {{ id: 'p_outer', label: 'p_out', parent: 'c_outer' }},
+    {{ id: 'p_mid', label: 'p_mid', parent: 'c_middle' }},
+    {{ id: 'p_leaf', label: 'p_leaf', parent: 'c_leaf' }},
+    {{ id: 'p_deep', label: 'p_deep', parent: 'c_deep' }}
+  ],
+  transitions: [
+    {{ id: 't_outer', label: 't_out', parent: 'c_outer' }},
+    {{ id: 't_mid', label: 't_mid', parent: 'c_middle' }},
+    {{ id: 't_leaf', label: 't_leaf', parent: 'c_leaf' }},
+    {{ id: 't_deep', label: 't_deep', parent: 'c_deep' }}
+  ],
+  arcs: []
+}};
+
+const elements = netToElements(net);
+
+const cOuter = elements.find(e => e.data && e.data.id === 'c_outer');
+const cMid = elements.find(e => e.data && e.data.id === 'c_middle');
+const cLeaf = elements.find(e => e.data && e.data.id === 'c_leaf');
+const cDeep = elements.find(e => e.data && e.data.id === 'c_deep');
+
+if (!cOuter || !cMid || !cLeaf || !cDeep) throw new Error('Missing compounds');
+
+// Check depth and depth classes (depth 4 clamped to depth-3)
+if (cOuter.data.depth !== 0 || !cOuter.classes.includes('depth-0')) {{
+  throw new Error('c_outer depth failed: ' + JSON.stringify(cOuter));
+}}
+if (cMid.data.depth !== 1 || !cMid.classes.includes('depth-1') || cMid.data.parent !== 'c_outer') {{
+  throw new Error('c_middle depth failed: ' + JSON.stringify(cMid));
+}}
+if (cLeaf.data.depth !== 2 || !cLeaf.classes.includes('depth-2') || cLeaf.data.parent !== 'c_middle') {{
+  throw new Error('c_leaf depth failed: ' + JSON.stringify(cLeaf));
+}}
+if (cDeep.data.depth !== 3 || !cDeep.classes.includes('depth-3') || cDeep.data.parent !== 'c_leaf') {{
+  throw new Error('c_deep depth failed: ' + JSON.stringify(cDeep));
+}}
+
+// Check readable labels
+if (cOuter.data.label !== 'outer()' || cMid.data.label !== 'middle()' || cLeaf.data.label !== 'leaf()') {{
+  throw new Error('Labels failed: ' + cOuter.data.label + ', ' + cMid.data.label + ', ' + cLeaf.data.label);
+}}
+
+// Check topological ordering in elements: outer must precede middle, middle must precede leaf
+const idxOuter = elements.indexOf(cOuter);
+const idxMid = elements.indexOf(cMid);
+const idxLeaf = elements.indexOf(cLeaf);
+const idxDeep = elements.indexOf(cDeep);
+if (idxOuter > idxMid || idxMid > idxLeaf || idxLeaf > idxDeep) {{
+  throw new Error('Topological ordering failed: outer=' + idxOuter + ', mid=' + idxMid + ', leaf=' + idxLeaf + ', deep=' + idxDeep);
+}}
+
+// Resilience test: circular parent references must not crash recursion
+const cyclicNet = {{
+  compounds: [
+    {{ id: 'c_a', function_name: 'a', parent: 'c_b' }},
+    {{ id: 'c_b', function_name: 'b', parent: 'c_a' }}
+  ]
+}};
+const cyclicElements = netToElements(cyclicNet);
+if (cyclicElements.length !== 2) throw new Error('Cyclic net failed');
+
+console.log('PASS');
+"""
+        proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_nested_compounds_css_styling_distinguishable(self):
+        """Validates that template.html defines distinct depth styles and adequate compound padding."""
+        template_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "template.html")
+        )
+        with open(template_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        # Distinct selectors for depths
+        self.assertIn("node.compound.depth-0", html)
+        self.assertIn("node.compound.depth-1", html)
+        self.assertIn("node.compound.depth-2", html)
+
+    def test_cli_end_to_end_3_level_nested_calls_html(self):
+        """Validates that CLI generates 3 levels of nested compound containers on load."""
+        code = (
+            "def leaf():\n"
+            "    z = 1\n"
+            "\n"
+            "def middle():\n"
+            "    leaf()\n"
+            "\n"
+            "def outer():\n"
+            "    middle()\n"
+            "\n"
+            "def run():\n"
+            "    outer()\n"
+        )
+        src_file = os.path.join(self.temp_dir.name, "nested_3_levels.py")
+        with open(src_file, "w", encoding="utf-8") as f:
+            f.write(code)
+
+        out_html = os.path.join(self.temp_dir.name, "nested_3_levels.html")
+        main([
+            src_file,
+            "-t", "run",
+            "--context", self.temp_dir.name,
+            "-o", out_html,
+        ])
+        self.assertTrue(os.path.exists(out_html))
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        data = _extract_embedded_data(content)
+        self.assertEqual(data["mode"], "composite")
+
+        compounds = data.get("compounds", [])
+        self.assertEqual(len(compounds), 3)
+
+        c_outer = next((c for c in compounds if c["function_name"] == "outer"), None)
+        c_mid = next((c for c in compounds if c["function_name"] == "middle"), None)
+        c_leaf = next((c for c in compounds if c["function_name"] == "leaf"), None)
+
+        self.assertIsNotNone(c_outer)
+        self.assertIsNotNone(c_mid)
+        self.assertIsNotNone(c_leaf)
+
+        # Hierarchy validation: outer has no parent, middle's parent is outer, leaf's parent is middle
+        self.assertIsNone(c_outer.get("parent"))
+        self.assertEqual(c_mid.get("parent"), c_outer["id"])
+        self.assertEqual(c_leaf.get("parent"), c_mid["id"])
+
+    def test_nested_compound_nodes_cytoscape_dagre_layout_no_overlap(self):
+        """Validates that Cytoscape Dagre layout executes on nested compounds without node overlaps."""
+        import subprocess
+
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        node_script = f"""
+const Module = require('module');
+const originalRequire = Module.prototype.require;
+const dagre = require('./code2petri/viewer/vendor/dagre.min.js');
+Module.prototype.require = function(path) {{
+  if (path === 'dagre') return dagre;
+  return originalRequire.apply(this, arguments);
+}};
+
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const cytoscapeDagre = require('./code2petri/viewer/vendor/cytoscape-dagre.js');
+cytoscape.use(cytoscapeDagre);
+
+{net_to_elements_js}
+
+const net = {{
+  compounds: [
+    {{ id: 'c_outer', function_name: 'outer', parent: null, file: 'a.py' }},
+    {{ id: 'c_middle', function_name: 'middle', parent: 'c_outer', file: 'a.py' }},
+    {{ id: 'c_leaf', function_name: 'leaf', parent: 'c_middle', file: 'a.py' }}
+  ],
+  places: [
+    {{ id: 'p_out', label: 'start', parent: 'c_outer' }},
+    {{ id: 'p_mid', label: 'p_mid', parent: 'c_middle' }},
+    {{ id: 'p_leaf', label: 'p_leaf', parent: 'c_leaf' }}
+  ],
+  transitions: [
+    {{ id: 't_out', label: 'call_mid()', parent: 'c_outer' }},
+    {{ id: 't_mid', label: 'call_leaf()', parent: 'c_middle' }},
+    {{ id: 't_leaf', label: 'compute()', parent: 'c_leaf' }}
+  ],
+  arcs: [
+    {{ source: 'p_out', target: 't_out' }},
+    {{ source: 't_out', target: 'p_mid' }},
+    {{ source: 'p_mid', target: 't_mid' }},
+    {{ source: 't_mid', target: 'p_leaf' }},
+    {{ source: 'p_leaf', target: 't_leaf' }}
+  ]
+}};
+
+const elements = netToElements(net);
+const cy = cytoscape({{
+  elements: elements
+}});
+
+const layout = cy.layout({{
+  name: 'dagre',
+  rankDir: 'TB',
+  nodeDimensionsIncludeLabels: true,
+  spacingFactor: 1.15,
+  rankSep: 40,
+  nodeSep: 35,
+  padding: 30
+}});
+layout.run();
+
+// 1. Verify parent hierarchy in Cytoscape
+const cOuter = cy.getElementById('c_outer');
+const cMid = cy.getElementById('c_middle');
+const cLeaf = cy.getElementById('c_leaf');
+
+if (!cMid.parent().same(cOuter)) {{
+  throw new Error('c_middle parent should be c_outer');
+}}
+if (!cLeaf.parent().same(cMid)) {{
+  throw new Error('c_leaf parent should be c_middle');
+}}
+
+// 2. Verify compound node bounding boxes (containment without overlap or clipping)
+const bbOuter = cOuter.boundingBox();
+const bbMid = cMid.boundingBox();
+const bbLeaf = cLeaf.boundingBox();
+
+if (bbLeaf.w <= 0 || bbLeaf.h <= 0 || bbMid.w <= 0 || bbMid.h <= 0 || bbOuter.w <= 0 || bbOuter.h <= 0) {{
+  throw new Error('Invalid compound bounding boxes');
+}}
+if (bbLeaf.x1 < bbMid.x1 || bbLeaf.x2 > bbMid.x2 || bbLeaf.y1 < bbMid.y1 || bbLeaf.y2 > bbMid.y2) {{
+  throw new Error('c_leaf not enclosed in c_middle bounding box: leaf=' + JSON.stringify(bbLeaf) + ', mid=' + JSON.stringify(bbMid));
+}}
+if (bbMid.x1 < bbOuter.x1 || bbMid.x2 > bbOuter.x2 || bbMid.y1 < bbOuter.y1 || bbMid.y2 > bbOuter.y2) {{
+  throw new Error('c_middle not enclosed in c_outer bounding box: mid=' + JSON.stringify(bbMid) + ', outer=' + JSON.stringify(bbOuter));
+}}
+
+// 3. Verify all leaf nodes have non-overlapping distinct positions
+const nodeIds = ['p_out', 't_out', 'p_mid', 't_mid', 'p_leaf', 't_leaf'];
+const positions = nodeIds.map(id => ({{ id: id, pos: cy.getElementById(id).position() }}));
+
+for (let i = 0; i < positions.length; i++) {{
+  for (let j = i + 1; j < positions.length; j++) {{
+    const a = positions[i];
+    const b = positions[j];
+    const dist = Math.hypot(a.pos.x - b.pos.x, a.pos.y - b.pos.y);
+    if (dist < 25) {{
+      throw new Error('Nodes ' + a.id + ' and ' + b.id + ' are too close (overlap): dist=' + dist);
+    }}
+  }}
+}}
+
+console.log('PASS');
+"""
+        proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
 
 
 if __name__ == "__main__":

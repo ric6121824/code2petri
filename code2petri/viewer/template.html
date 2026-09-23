@@ -340,21 +340,52 @@
         const arcs = net.arcs || [];
         const compounds = net.compounds || (typeof payload !== 'undefined' && payload && payload.compounds) || [];
 
+        // Sort compounds topologically by hierarchy depth
+        const compoundDepthMap = new Map();
+        function computeCompoundDepth(compoundId, visited) {
+          visited = visited || new Set();
+          if (compoundDepthMap.has(compoundId)) return compoundDepthMap.get(compoundId);
+          if (visited.has(compoundId)) {
+            // Guard against cyclic parent references
+            return 0;
+          }
+          visited.add(compoundId);
+          const compound = compounds.find(function(candidate) { return candidate.id === compoundId; });
+          if (!compound || !compound.parent) {
+            compoundDepthMap.set(compoundId, 0);
+            return 0;
+          }
+          const depth = 1 + computeCompoundDepth(compound.parent, visited);
+          compoundDepthMap.set(compoundId, depth);
+          return depth;
+        }
+        compounds.forEach(function(compound) {
+          computeCompoundDepth(compound.id);
+        });
+
+        const sortedCompounds = compounds.slice().sort(function(a, b) {
+          return computeCompoundDepth(a.id) - computeCompoundDepth(b.id);
+        });
+
         // Add compound parent containers
-        compounds.forEach(function(c) {
+        sortedCompounds.forEach(function(compound) {
+          const depth = computeCompoundDepth(compound.id);
+          const depthClass = 'depth-' + Math.min(depth, 3);
+          const readableLabel = compound.label || (compound.function_name ? compound.function_name + '()' : compound.id);
           elements.push({
             group: 'nodes',
             data: {
-              id: c.id,
-              label: c.label || c.id,
-              function_name: c.function_name,
-              file: c.file,
+              id: compound.id,
+              label: readableLabel,
+              function_name: compound.function_name || '',
+              file: compound.file || '',
+              depth: depth,
               is_compound: true,
               composite_preassembled: true,
-              parent: c.parent || undefined,
+              parent: compound.parent || undefined,
               type: 'Compound Function Container'
             },
-            classes: 'compound'
+            classes: 'compound ' + depthClass
           });
         });
 
@@ -597,6 +628,17 @@
         return elements;
       }
 
+      // Layout configuration for Dagre hierarchy
+      const DAGRE_LAYOUT_OPTIONS = {
+        name: 'dagre',
+        rankDir: 'TB',
+        nodeDimensionsIncludeLabels: true,
+        spacingFactor: 1.15,
+        rankSep: 40,
+        nodeSep: 35,
+        padding: 30
+      };
+
       // Initialize Cytoscape
       const cy = cytoscape({
         container: document.getElementById('cy'),
@@ -692,23 +734,63 @@
             selector: 'node.compound, node:parent',
             style: {
               'shape': 'roundrectangle',
-              'background-color': '#e8f5e9',
+              'background-color': 'rgba(46, 125, 50, 0.04)',
               'border-width': 2,
               'border-color': '#2e7d32',
               'border-style': 'solid',
-              'padding': '16px',
+              'padding': '26px',
               'label': 'data(label)',
               'text-valign': 'top',
               'text-halign': 'center',
-              'text-margin-y': 6,
+              'text-margin-y': 8,
               'font-size': '12px',
               'font-weight': 'bold',
               'font-family': 'ui-monospace, monospace',
               'color': '#1b5e20',
-              'text-background-opacity': 0.85,
+              'text-background-opacity': 0.95,
               'text-background-color': '#e8f5e9',
-              'text-background-padding': '2px',
+              'text-background-padding': '3px',
               'text-background-shape': 'roundrectangle'
+            }
+          },
+          {
+            selector: 'node.compound.depth-0',
+            style: {
+              'background-color': 'rgba(46, 125, 50, 0.04)',
+              'border-color': '#2e7d32',
+              'color': '#1b5e20',
+              'text-background-color': '#e8f5e9',
+              'padding': '28px'
+            }
+          },
+          {
+            selector: 'node.compound.depth-1',
+            style: {
+              'background-color': 'rgba(21, 101, 192, 0.04)',
+              'border-color': '#1565c0',
+              'color': '#0d47a1',
+              'text-background-color': '#e3f2fd',
+              'padding': '24px'
+            }
+          },
+          {
+            selector: 'node.compound.depth-2',
+            style: {
+              'background-color': 'rgba(123, 31, 162, 0.04)',
+              'border-color': '#7b1fa2',
+              'color': '#4a148c',
+              'text-background-color': '#f3e5f5',
+              'padding': '20px'
+            }
+          },
+          {
+            selector: 'node.compound.depth-3',
+            style: {
+              'background-color': 'rgba(230, 81, 0, 0.04)',
+              'border-color': '#e65100',
+              'color': '#bf360c',
+              'text-background-color': '#fff3e0',
+              'padding': '18px'
             }
           },
           {
@@ -739,12 +821,7 @@
             }
           }
         ],
-        layout: {
-          name: 'dagre',
-          rankDir: 'TB',
-          nodeDimensionsIncludeLabels: true,
-          spacingFactor: 1.15
-        },
+        layout: DAGRE_LAYOUT_OPTIONS,
         minZoom: 0.2,
         maxZoom: 3.5,
         wheelSensitivity: 0.25,
@@ -754,19 +831,18 @@
       });
 
       function applyLayout(animate) {
-        const layout = cy.layout({
-          name: 'dagre',
-          rankDir: 'TB',
-          nodeDimensionsIncludeLabels: true,
-          spacingFactor: 1.15,
+        const layout = cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, {
           animate: Boolean(animate),
           animationDuration: 350,
           animationEasing: 'ease-in-out'
-        });
+        }));
         layout.run();
       }
 
       applyLayout(false);
+      if (cy.elements().length > 0) {
+        cy.fit(null, 30);
+      }
 
       // Canvas drag panning via Middle Mouse Button and Right Mouse Button
       const MOUSE_BUTTON_MIDDLE = 1;
