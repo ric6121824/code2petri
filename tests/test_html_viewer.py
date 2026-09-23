@@ -34,13 +34,24 @@ def _extract_callee_nets_data(html_content: str) -> dict:
     return json.loads(match.group(1))
 
 
-def _extract_template_net_to_elements() -> str:
-    """Helper to extract netToElements JavaScript function from template.html."""
+def _read_template_html() -> str:
+    """Helper to read template.html content."""
     template_path = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "template.html")
     )
     with open(template_path, "r", encoding="utf-8") as f:
-        html = f.read()
+        return f.read()
+
+
+def _run_node_script(script: str):
+    """Helper to run a Node.js script synchronously with captured output."""
+    import subprocess
+    return subprocess.run(["node", "-e", script], capture_output=True, text=True)
+
+
+def _extract_template_net_to_elements() -> str:
+    """Helper to extract netToElements JavaScript function from template.html."""
+    html = _read_template_html()
     match = re.search(r'function netToElements\(net\) \{(.*?)\n      \}', html, re.DOTALL)
     if not match:
         raise ValueError("Could not extract netToElements from template.html")
@@ -801,6 +812,353 @@ for (let i = 0; i < positions.length; i++) {{
 console.log('PASS');
 """
         proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_input_remapping_and_inspector_elements_in_template(self):
+        """Validates that template.html contains right/middle button pan bindings, wheel zoom, and inspector markup."""
+        html = _read_template_html()
+
+        # Input remapping: middle and right button pan, wheel zoom
+        self.assertIn("MOUSE_BUTTON_MIDDLE", html)
+        self.assertIn("MOUSE_BUTTON_RIGHT", html)
+        self.assertIn("PAN_BUTTON_MASKS", html)
+        self.assertIn("contextmenu", html)
+        self.assertIn("wheel", html)
+
+        # Inspector panel markup and key field IDs
+        self.assertIn('id="inspector-panel"', html)
+        self.assertIn('id="inspector-label"', html)
+        self.assertIn('id="inspector-tau"', html)
+        self.assertIn('id="inspector-type"', html)
+        self.assertIn('id="inspector-line"', html)
+        self.assertIn('id="inspector-close"', html)
+
+    def test_place_left_click_does_not_pan_or_inspect_headless(self):
+        """Validates that tapping a place node does not move viewport or open inspector."""
+        html = _read_template_html()
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        m_inspect = re.search(r'function getInspectorData\(node\) \{.*?\n      function closeInspector\(\) \{.*?\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_inspect, "Could not extract inspector functions from template.html")
+        inspector_js = m_inspect.group(0)
+
+        m_tap = re.search(r'cy\.on\(\'tap\', \'node\', function\(evt\) \{(.*?)\n      \}\);', html, re.DOTALL)
+        self.assertIsNotNone(m_tap, "Could not extract cy.on('tap', 'node') from template.html")
+        tap_handler_js = m_tap.group(0)
+
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{net_to_elements_js}
+
+// Mock DOM elements for inspector
+const inspectorPanel = {{ style: {{ display: 'none' }} }};
+const inspectorLabel = {{ textContent: '' }};
+const inspectorType = {{ textContent: '' }};
+const inspectorTau = {{ textContent: '' }};
+const inspectorLine = {{ textContent: '' }};
+
+{inspector_js}
+
+const net = {{
+  places: [
+    {{ id: 'p0', label: 'start' }}
+  ],
+  transitions: [
+    {{ id: 't0', label: 'step()' }}
+  ],
+  arcs: [
+    {{ source: 'p0', target: 't0' }}
+  ]
+}};
+
+const expandedNodes = new Map();
+const calleeNetsMap = {{}};
+const currentStep = 0;
+function renderStep() {{}}
+
+const cy = cytoscape({{
+  elements: netToElements(net),
+  userPanningEnabled: false
+}});
+
+{tap_handler_js}
+
+const initialPan = Object.assign({{}}, cy.pan());
+const initialZoom = cy.zoom();
+
+// Tap place node
+const p0 = cy.getElementById('p0');
+p0.emit('tap');
+
+// Verify viewport has not moved
+const panAfter = cy.pan();
+const zoomAfter = cy.zoom();
+if (panAfter.x !== initialPan.x || panAfter.y !== initialPan.y) {{
+  throw new Error('Panning changed when tapping place: ' + JSON.stringify(panAfter));
+}}
+if (zoomAfter !== initialZoom) {{
+  throw new Error('Zoom changed when tapping place');
+}}
+
+// Verify inspector panel did not open
+if (inspectorPanel.style.display !== 'none') {{
+  throw new Error('Inspector opened when tapping place');
+}}
+
+console.log('PASS');
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_transition_and_component_left_click_opens_inspector_headless(self):
+        """Validates that tapping a transition or component opens inspector with static metadata."""
+        html = _read_template_html()
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        m_inspect = re.search(r'function getInspectorData\(node\) \{.*?\n      function closeInspector\(\) \{.*?\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_inspect, "Could not extract inspector functions from template.html")
+        inspector_js = m_inspect.group(0)
+
+        m_tap = re.search(r'cy\.on\(\'tap\', \'node\', function\(evt\) \{(.*?)\n      \}\);', html, re.DOTALL)
+        self.assertIsNotNone(m_tap, "Could not extract cy.on('tap', 'node') from template.html")
+        tap_handler_js = m_tap.group(0)
+
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{net_to_elements_js}
+
+// Mock DOM elements for inspector
+const inspectorPanel = {{ style: {{ display: 'none' }} }};
+const inspectorLabel = {{ textContent: '' }};
+const inspectorType = {{ textContent: '' }};
+const inspectorTau = {{ textContent: '' }};
+const inspectorLine = {{ textContent: '' }};
+
+{inspector_js}
+
+const net = {{
+  compounds: [
+    {{ id: 'c_outer', function_name: 'outer', parent: null, file: 'test.py' }}
+  ],
+  places: [
+    {{ id: 'p0', label: 'start' }}
+  ],
+  transitions: [
+    {{ id: 't_atomic', label: 'compute()', line_number: 42, parent: 'c_outer' }},
+    {{ id: 't_C1', label: 't_C1', metadata: {{ opaque: true, component_type: 'Sequence', tau: 3.5 }} }}
+  ],
+  arcs: []
+}};
+
+const expandedNodes = new Map();
+const calleeNetsMap = {{}};
+const currentStep = 0;
+function renderStep() {{}}
+
+const cy = cytoscape({{
+  elements: netToElements(net),
+  userPanningEnabled: false
+}});
+
+{tap_handler_js}
+
+// 1. Tap atomic transition
+const tAtomic = cy.getElementById('t_atomic');
+tAtomic.emit('tap');
+
+if (inspectorPanel.style.display !== 'flex') {{
+  throw new Error('Inspector failed to open for atomic transition: ' + inspectorPanel.style.display);
+}}
+if (inspectorLabel.textContent !== 'compute()') {{
+  throw new Error('Label failed for atomic transition: ' + inspectorLabel.textContent);
+}}
+if (inspectorTau.textContent !== '1.0') {{
+  throw new Error('Tau failed for atomic transition: ' + inspectorTau.textContent);
+}}
+if (!inspectorType.textContent.includes('Transition')) {{
+  throw new Error('Type failed for atomic transition: ' + inspectorType.textContent);
+}}
+if (inspectorLine.textContent !== '42') {{
+  throw new Error('Line failed for atomic transition: ' + inspectorLine.textContent);
+}}
+
+// 2. Tap opaque component transition
+const tOpaque = cy.getElementById('t_C1');
+tOpaque.emit('tap');
+
+if (inspectorPanel.style.display !== 'flex') {{
+  throw new Error('Inspector failed to open for opaque transition');
+}}
+if (inspectorLabel.textContent !== 't_C1') {{
+  throw new Error('Label failed for opaque transition: ' + inspectorLabel.textContent);
+}}
+if (inspectorTau.textContent !== '3.5') {{
+  throw new Error('Tau failed for opaque transition: ' + inspectorTau.textContent);
+}}
+if (inspectorType.textContent !== 'Sequence') {{
+  throw new Error('Component type failed for opaque transition: ' + inspectorType.textContent);
+}}
+if (inspectorLine.textContent !== '—') {{
+  throw new Error('Line failed for opaque transition without line_number: ' + inspectorLine.textContent);
+}}
+
+// 3. Tap compound container node
+const cOuter = cy.getElementById('c_outer');
+cOuter.emit('tap');
+
+if (inspectorPanel.style.display !== 'flex') {{
+  throw new Error('Inspector failed to open for compound node');
+}}
+if (inspectorLabel.textContent !== 'outer()') {{
+  throw new Error('Label failed for compound node: ' + inspectorLabel.textContent);
+}}
+if (!inspectorType.textContent.includes('Compound')) {{
+  throw new Error('Type failed for compound node: ' + inspectorType.textContent);
+}}
+if (inspectorTau.textContent !== '—') {{
+  throw new Error('Tau failed for compound node: expected —, got ' + inspectorTau.textContent);
+}}
+
+// 4. Close inspector
+closeInspector();
+if (inspectorPanel.style.display !== 'none') {{
+  throw new Error('closeInspector failed: ' + inspectorPanel.style.display);
+}}
+
+console.log('PASS');
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_right_and_middle_mouse_drag_pan_and_wheel_zoom_headless(self):
+        """Validates right/middle drag pans canvas, left click does not pan, and wheel zooms canvas."""
+        html = _read_template_html()
+
+        # Extract canvas drag and wheel handlers
+        m_pan = re.search(r'// Canvas drag panning via Middle Mouse Button and Right Mouse Button.*?(?=// Inspector panel DOM elements)', html, re.DOTALL)
+        self.assertIsNotNone(m_pan, "Could not extract panning handlers from template.html")
+        panning_handlers_js = m_pan.group(0)
+
+        node_script = f"""
+const windowListeners = {{}};
+global.addEventListener = (event, fn) => {{
+  if (!windowListeners[event]) windowListeners[event] = [];
+  windowListeners[event].push(fn);
+}};
+global.window = global;
+
+const listeners = {{}};
+const mockContainer = {{
+  style: {{ cursor: '' }},
+  getBoundingClientRect: () => ({{ left: 0, top: 0, width: 800, height: 600 }}),
+  addEventListener: (event, fn) => {{
+    if (!listeners[event]) listeners[event] = [];
+    listeners[event].push(fn);
+  }}
+}};
+
+global.document = {{
+  getElementById: (id) => {{
+    if (id === 'cy') return mockContainer;
+    return null;
+  }}
+}};
+
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+const cy = cytoscape({{
+  elements: [
+    {{ group: 'nodes', data: {{ id: 'n1' }} }}
+  ],
+  userPanningEnabled: false
+}});
+
+{panning_handlers_js}
+
+const initialPan = Object.assign({{}}, cy.pan());
+const initialZoom = cy.zoom();
+
+// 1. Left-click mousedown + move: must NOT trigger pan
+listeners['mousedown'].forEach(fn => fn({{
+  button: 0,
+  clientX: 100,
+  clientY: 100,
+  preventDefault: () => {{}}
+}}));
+windowListeners['mousemove'].forEach(fn => fn({{
+  clientX: 150,
+  clientY: 150,
+  buttons: 1
+}}));
+
+if (cy.pan().x !== initialPan.x || cy.pan().y !== initialPan.y) {{
+  throw new Error('Left-click triggered panning: ' + JSON.stringify(cy.pan()));
+}}
+
+// 2. Right-click drag (button 2, mask 2): MUST pan by dx=50, dy=30
+listeners['mousedown'].forEach(fn => fn({{
+  button: 2,
+  clientX: 100,
+  clientY: 100,
+  preventDefault: () => {{}}
+}}));
+windowListeners['mousemove'].forEach(fn => fn({{
+  clientX: 150,
+  clientY: 130,
+  buttons: 2
+}}));
+windowListeners['mouseup'].forEach(fn => fn({{
+  button: 2,
+  buttons: 0
+}}));
+
+const panAfterRight = Object.assign({{}}, cy.pan());
+if (panAfterRight.x !== initialPan.x + 50 || panAfterRight.y !== initialPan.y + 30) {{
+  throw new Error('Right-click drag failed to pan: expected (' + (initialPan.x + 50) + ',' + (initialPan.y + 30) + '), got ' + JSON.stringify(panAfterRight));
+}}
+
+// 3. Middle-click drag (button 1, mask 4): MUST pan by dx=-20, dy=-10
+listeners['mousedown'].forEach(fn => fn({{
+  button: 1,
+  clientX: 200,
+  clientY: 200,
+  preventDefault: () => {{}}
+}}));
+windowListeners['mousemove'].forEach(fn => fn({{
+  clientX: 180,
+  clientY: 190,
+  buttons: 4
+}}));
+windowListeners['mouseup'].forEach(fn => fn({{
+  button: 1,
+  buttons: 0
+}}));
+
+const panAfterMiddle = Object.assign({{}}, cy.pan());
+if (panAfterMiddle.x !== panAfterRight.x - 20 || panAfterMiddle.y !== panAfterRight.y - 10) {{
+  throw new Error('Middle-click drag failed to pan: expected (' + (panAfterRight.x - 20) + ',' + (panAfterRight.y - 10) + '), got ' + JSON.stringify(panAfterMiddle));
+}}
+
+// 4. Wheel zoom: zooming in increases zoom level
+listeners['wheel'].forEach(fn => fn({{
+  deltaY: -100,
+  clientX: 400,
+  clientY: 300,
+  preventDefault: () => {{}}
+}}));
+
+if (cy.zoom() <= initialZoom) {{
+  throw new Error('Wheel zoom failed: initial=' + initialZoom + ', after=' + cy.zoom());
+}}
+
+console.log('PASS');
+"""
+        proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 

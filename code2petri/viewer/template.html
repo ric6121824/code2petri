@@ -128,6 +128,104 @@
       z-index: 5;
       backdrop-filter: blur(4px);
     }
+    #inspector-panel {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 290px;
+      background: rgba(255, 255, 255, 0.98);
+      border: 1px solid #dee2e6;
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+      backdrop-filter: blur(8px);
+      z-index: 15;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      font-size: 12px;
+      color: #24292e;
+    }
+    .inspector-header {
+      padding: 10px 14px;
+      background: #f6f8fa;
+      border-bottom: 1px solid #e1e4e8;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .inspector-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: #24292e;
+    }
+    .inspector-close-btn {
+      background: none;
+      border: none;
+      color: #586069;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 4px;
+      line-height: 1;
+    }
+    .inspector-close-btn:hover {
+      background: #e1e4e8;
+      color: #24292e;
+    }
+    .inspector-body {
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .inspector-row {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .inspector-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #6a737d;
+    }
+    .inspector-val {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: #24292e;
+      word-break: break-all;
+    }
+    .inspector-stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 2px;
+    }
+    .inspector-stat-card {
+      background: #f6f8fa;
+      border: 1px solid #e1e4e8;
+      border-radius: 6px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .inspector-stat-card .key {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: #6a737d;
+    }
+    .inspector-stat-card .val {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      font-weight: 700;
+      color: #0366d6;
+    }
     .info-file-box {
       display: flex;
       align-items: center;
@@ -247,6 +345,33 @@
         <div class="legend-item"><div class="legend-swatch resolved"></div>Resolved</div>
         <div class="legend-item"><div class="legend-swatch unresolved"></div>Unresolved</div>
         <div class="legend-item"><div class="legend-swatch compound"></div>Expanded Callee</div>
+      </div>
+    </div>
+
+    <div id="inspector-panel" class="inspector-panel" style="display: none;">
+      <div class="inspector-header">
+        <span class="inspector-title">Node Inspector</span>
+        <button id="inspector-close" class="inspector-close-btn" title="Close inspector">✕</button>
+      </div>
+      <div class="inspector-body">
+        <div class="inspector-row">
+          <span class="inspector-label">Label:</span>
+          <span id="inspector-label" class="inspector-val"></span>
+        </div>
+        <div class="inspector-row">
+          <span class="inspector-label">Component Type:</span>
+          <span id="inspector-type" class="inspector-val"></span>
+        </div>
+        <div class="inspector-stat-grid">
+          <div class="inspector-stat-card">
+            <span class="key">Tau (τ):</span>
+            <span id="inspector-tau" class="val">1.0</span>
+          </div>
+          <div class="inspector-stat-card">
+            <span class="key">Line:</span>
+            <span id="inspector-line" class="val">—</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -931,11 +1056,83 @@
         }
       });
 
+      // Inspector panel DOM elements and functions
+      const inspectorPanel = document.getElementById('inspector-panel');
+      const inspectorLabel = document.getElementById('inspector-label');
+      const inspectorType = document.getElementById('inspector-type');
+      const inspectorTau = document.getElementById('inspector-tau');
+      const inspectorLine = document.getElementById('inspector-line');
+      const inspectorCloseBtn = document.getElementById('inspector-close');
+
+      function getInspectorData(node) {
+        const rawLabel = node.data('raw_label') || node.data('label') || node.id();
+        const isCompound = node.hasClass('compound') || node.data('is_compound') === true;
+        const isOpaque = node.data('is_opaque') === true;
+
+        let compType = node.data('component_type');
+        if (!compType) {
+          if (isOpaque) {
+            compType = 'Opaque Transition';
+          } else if (isCompound) {
+            compType = 'Compound Container';
+          } else {
+            compType = 'Atomic Transition';
+          }
+        }
+
+        // Transitions carry a tau weight; compound function containers do not
+        let tauStr = '—';
+        if (!isCompound) {
+          const rawTau = node.data('tau');
+          const tauVal = (rawTau !== undefined && rawTau !== null) ? Number(rawTau) : 1.0;
+          tauStr = Number.isInteger(tauVal) ? tauVal.toFixed(1) : String(tauVal);
+        }
+
+        const lineNo = node.data('line_number');
+        const lineStr = (lineNo !== null && lineNo !== undefined && lineNo !== '') ? String(lineNo) : '—';
+
+        return {
+          label: rawLabel,
+          componentType: compType,
+          tau: tauStr,
+          lineNumber: lineStr
+        };
+      }
+
+      function openInspector(node) {
+        if (!inspectorPanel) return;
+        const data = getInspectorData(node);
+
+        if (inspectorLabel) inspectorLabel.textContent = data.label;
+        if (inspectorTau) inspectorTau.textContent = data.tau;
+        if (inspectorType) inspectorType.textContent = data.componentType;
+        if (inspectorLine) inspectorLine.textContent = data.lineNumber;
+
+        inspectorPanel.style.display = 'flex';
+      }
+
+      function closeInspector() {
+        if (inspectorPanel) {
+          inspectorPanel.style.display = 'none';
+        }
+      }
+
+      if (inspectorCloseBtn) {
+        inspectorCloseBtn.addEventListener('click', closeInspector);
+      }
+
+      // Close inspector on canvas background tap
+      cy.on('tap', function(evt) {
+        if (evt.target === cy) {
+          closeInspector();
+        }
+      });
+
       // Cursor feedback on hover
       cy.on('mouseover', 'node', function(evt) {
         if (isPanningDrag) return;
         const n = evt.target;
-        if ((n.data('resolved') === true || expandedNodes.has(n.id()) || n.hasClass('compound')) && n.data('composite_preassembled') !== true) {
+        if (n.hasClass('transition') || n.hasClass('compound') || n.data('resolved') === true || expandedNodes.has(n.id())) {
           if (cyContainer) cyContainer.style.cursor = 'pointer';
         }
       });
@@ -944,14 +1141,27 @@
         if (cyContainer) cyContainer.style.cursor = '';
       });
 
-      // Interactive compound expansion / collapse on tap
+      // Interactive compound expansion / collapse and inspection on tap
       cy.on('tap', 'node', function(evt) {
         const targetNode = evt.target;
         const targetId = targetNode.id();
 
+        // 1. Left-clicking a place node does not trigger panning or viewport movement
+        if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
+          return;
+        }
+
+        // 2. Left-clicking a transition or component node opens inspector panel
+        const isTransition = targetNode.hasClass('transition') || targetNode.data('type') === 'Transition' || targetNode.data('type') === 'Opaque Transition';
+        const isComponent = targetNode.hasClass('compound') || targetNode.data('is_compound') === true || targetNode.data('is_opaque') === true;
+
+        if (isTransition || isComponent) {
+          openInspector(targetNode);
+        }
+
         if (targetNode.data('composite_preassembled') === true) return;
 
-        // 1. If clicked node is an expanded compound node, collapse it
+        // 3. (Single-function mode only) If clicked node is an expanded compound node, collapse it
         if (expandedNodes.has(targetId) || targetNode.hasClass('compound')) {
           const prefix = targetId + '__';
           Array.from(expandedNodes.keys()).forEach(function(id) {
@@ -964,7 +1174,7 @@
           return;
         }
 
-        // 2. If clicked node is a resolved call transition, expand it
+        // 4. (Single-function mode only) If clicked node is a resolved call transition, expand it
         if (targetNode.data('resolved') === true) {
           const resolvedTo = targetNode.data('resolved_to');
           const rawLabel = targetNode.data('raw_label');
