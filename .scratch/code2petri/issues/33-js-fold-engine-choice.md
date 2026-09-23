@@ -4,11 +4,12 @@
 
 **Blocked by:** 32 — JS Fold Engine: Sequence (Single-Place Contraction)
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Place nodes eligible for Choice reduction are visually coloured amber
-- [ ] Left-clicking an eligible place fuses its parallel outgoing transitions into a single opaque component
-- [ ] The split and join places remain on the canvas after the fold
-- [ ] The resulting component displays its updated tau weight with 1.5x multiplier applied
-- [ ] The JS tau and omega values for a choice fold match the Python fold engine for the same topology
-- [ ] The new component stores enough information to restore the original transitions on demand
+- [x] Place nodes eligible for Choice reduction are visually coloured amber
+- [x] Left-clicking an eligible place fuses its parallel outgoing transitions into a single opaque component
+- [x] The split and join places remain on the canvas after the fold
+- [x] The resulting component displays its updated tau weight with 1.5x multiplier applied
+- [x] The JS tau and omega values for a choice fold match the Python fold engine for the same topology
+- [x] The new component stores enough information to restore the original transitions on demand
+

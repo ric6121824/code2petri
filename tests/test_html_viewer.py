@@ -1477,8 +1477,335 @@ console.log(JSON.stringify(result));
         self.assertEqual(js_data["omega"], expected_omega)
         self.assertEqual(js_data["running_sm"], expected_sm)
 
+    def test_place_contractible_choice_styling_in_template(self):
+        """Verifies template.html contains CSS rules styling choice-contractible places in amber (#d29922)."""
+        html = _read_template_html()
+        self.assertIn("node.place.contractible-choice", html)
+        self.assertIn("#d29922", html)
+
+    def test_place_nodes_eligible_for_choice_reduction_colored_amber_headless(self):
+        """Validates that a place fanning out to parallel transitions is assigned the amber contractible-choice class."""
+        html = _read_template_html()
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        m_engine = re.search(r'class LiveFoldReductionEngine \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_engine, "Could not extract LiveFoldReductionEngine from template.html")
+        engine_js = m_engine.group(0)
+
+        m_update = re.search(r'function updateFoldableHighlights\(\) \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_update, "Could not extract updateFoldableHighlights from template.html")
+        update_highlights_js = m_update.group(0)
+
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{net_to_elements_js}
+{engine_js}
+
+const net = {{
+  places: [
+    {{ id: 'p_split', label: 'branch', initial_tokens: 0 }},
+    {{ id: 'p_join', label: 'merge', initial_tokens: 0 }}
+  ],
+  transitions: [
+    {{ id: 't1', label: 'branch_a()' }},
+    {{ id: 't2', label: 'branch_b()' }}
+  ],
+  arcs: [
+    {{ source: 'p_split', target: 't1' }},
+    {{ source: 't1', target: 'p_join' }},
+    {{ source: 'p_split', target: 't2' }},
+    {{ source: 't2', target: 'p_join' }}
+  ]
+}};
+
+const cy = cytoscape({{
+  elements: netToElements(net),
+  userPanningEnabled: false
+}});
+
+const foldEngine = new LiveFoldReductionEngine(cy);
+
+{update_highlights_js}
+updateFoldableHighlights();
+
+const pSplit = cy.getElementById('p_split');
+const pJoin = cy.getElementById('p_join');
+
+if (!pSplit.hasClass('contractible-choice')) {{
+  throw new Error('p_split was not assigned contractible-choice class');
+}}
+if (!pSplit.hasClass('contractible')) {{
+  throw new Error('p_split was not assigned contractible class');
+}}
+if (pSplit.hasClass('contractible-sequence')) {{
+  throw new Error('p_split should not have contractible-sequence class');
+}}
+
+if (pJoin.hasClass('contractible') || pJoin.hasClass('contractible-choice')) {{
+  throw new Error('p_join should not be marked contractible');
+}}
+
+console.log('PASS');
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_left_click_eligible_place_contracts_choice_headless(self):
+        """Validates that left-clicking an eligible choice place fuses parallel transitions into c_01, preserving split and join places."""
+        html = _read_template_html()
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        m_engine = re.search(r'class LiveFoldReductionEngine \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_engine, "Could not extract LiveFoldReductionEngine from template.html")
+        engine_js = m_engine.group(0)
+
+        m_inspect = re.search(r'function getInspectorData\(node\) \{.*?\n      function closeInspector\(\) \{.*?\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_inspect, "Could not extract inspector functions from template.html")
+        inspector_js = m_inspect.group(0)
+
+        m_tap = re.search(r"cy\.on\('tap', 'node', function\(evt\) \{(.*?)\n      \}\);", html, re.DOTALL)
+        self.assertIsNotNone(m_tap, "Could not extract cy.on('tap', 'node') from template.html")
+        tap_handler_js = m_tap.group(0)
+
+        m_update = re.search(r'function updateFoldableHighlights\(\) \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_update, "Could not extract updateFoldableHighlights from template.html")
+        update_highlights_js = m_update.group(0)
+
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{net_to_elements_js}
+{engine_js}
+
+// Mock DOM elements for inspector
+const inspectorPanel = {{ style: {{ display: 'none' }} }};
+const inspectorLabel = {{ textContent: '' }};
+const inspectorType = {{ textContent: '' }};
+const inspectorTau = {{ textContent: '' }};
+const inspectorLine = {{ textContent: '' }};
+
+{inspector_js}
+
+const net = {{
+  places: [
+    {{ id: 'p_split', label: 'split_pt', initial_tokens: 0 }},
+    {{ id: 'p_merge', label: 'merge_pt', initial_tokens: 0 }}
+  ],
+  transitions: [
+    {{ id: 't_left', label: 'take_left()' }},
+    {{ id: 't_right', label: 'take_right()' }}
+  ],
+  arcs: [
+    {{ source: 'p_split', target: 't_left' }},
+    {{ source: 't_left', target: 'p_merge' }},
+    {{ source: 'p_split', target: 't_right' }},
+    {{ source: 't_right', target: 'p_merge' }}
+  ]
+}};
+
+const expandedNodes = new Map();
+const calleeNetsMap = {{}};
+const currentStep = 0;
+function renderStep() {{}}
+
+const cy = cytoscape({{
+  elements: netToElements(net),
+  userPanningEnabled: false
+}});
+
+const foldEngine = new LiveFoldReductionEngine(cy);
+
+{update_highlights_js}
+updateFoldableHighlights();
+
+{tap_handler_js}
+
+// Tap eligible place p_split
+const pSplit = cy.getElementById('p_split');
+if (!pSplit.hasClass('contractible-choice')) {{
+  throw new Error('p_split was not marked contractible-choice before tap');
+}}
+
+pSplit.emit('tap');
+
+// Verify parallel transitions were removed
+if (cy.getElementById('t_left').length !== 0) {{
+  throw new Error('t_left was not removed after contraction');
+}}
+if (cy.getElementById('t_right').length !== 0) {{
+  throw new Error('t_right was not removed after contraction');
+}}
+
+// Verify split and join places REMAINDER on the canvas
+if (cy.getElementById('p_split').length !== 1) {{
+  throw new Error('p_split should remain on canvas after choice fold');
+}}
+if (cy.getElementById('p_merge').length !== 1) {{
+  throw new Error('p_merge should remain on canvas after choice fold');
+}}
+
+// Verify opaque component created
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) {{
+  throw new Error('Opaque component c_01 was not created');
+}}
+// Default tau = 1.0 each -> sum = 2.0 -> tau = 1.5 * 2.0 = 3.0
+if (c01.data('tau') !== 3.0) {{
+  throw new Error('Expected tau 3.0, got ' + c01.data('tau'));
+}}
+// omega = 1.0 * (2.0 * 0.5) = 1.0
+if (c01.data('omega') !== 1.0) {{
+  throw new Error('Expected omega 1.0, got ' + c01.data('omega'));
+}}
+if (c01.data('component_type') !== 'Choice') {{
+  throw new Error('Expected component_type Choice, got ' + c01.data('component_type'));
+}}
+if (c01.data('is_opaque') !== true) {{
+  throw new Error('Expected is_opaque true');
+}}
+
+// Verify boundary arcs between p_split -> c_01 -> p_merge
+const inEdges = c01.incomers('edge');
+if (inEdges.length !== 1 || inEdges[0].source().id() !== 'p_split') {{
+  throw new Error('Incomer to c_01 not from p_split');
+}}
+const outEdges = c01.outgoers('edge');
+if (outEdges.length !== 1 || outEdges[0].target().id() !== 'p_merge') {{
+  throw new Error('Outgoer from c_01 not to p_merge');
+}}
+
+// Verify consumed subgraph storage for local unfold
+const sub = c01.data('consumedSubgraph');
+if (!sub) {{
+  throw new Error('c_01 missing consumedSubgraph');
+}}
+if (sub.sourcePlaceId !== 'p_split' || sub.targetPlaceId !== 'p_merge') {{
+  throw new Error('consumedSubgraph wrong source/target place: ' + sub.sourcePlaceId + ' -> ' + sub.targetPlaceId);
+}}
+if (sub.consumedTransIds[0] !== 't_left' || sub.consumedTransIds[1] !== 't_right') {{
+  throw new Error('consumedSubgraph wrong transIds: ' + JSON.stringify(sub.consumedTransIds));
+}}
+if (sub.nodes.length !== 2) {{
+  throw new Error('consumedSubgraph nodes length expected 2, got ' + sub.nodes.length);
+}}
+if (sub.internalEdges.length !== 4) {{
+  throw new Error('consumedSubgraph internalEdges length expected 4, got ' + sub.internalEdges.length);
+}}
+
+// Verify inspector panel opened on newly created choice component
+if (inspectorPanel.style.display !== 'flex') {{
+  throw new Error('Inspector panel did not open for c_01');
+}}
+if (inspectorTau.textContent !== '3.0') {{
+  throw new Error('Inspector tau expected 3.0, got ' + inspectorTau.textContent);
+}}
+if (inspectorType.textContent !== 'Choice') {{
+  throw new Error('Inspector type expected Choice, got ' + inspectorType.textContent);
+}}
+
+console.log('PASS');
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_choice_contraction_tau_and_omega_match_python_fold_engine(self):
+        """Validates that JS choice fold calculations match Python fold_choice."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import fold_choice, FoldConfig
+
+        # 1. Python calculation with custom weights
+        py_net = PetriNet()
+        p_split = py_net.add_place(id="p_split", label="split", initial_tokens=0)
+        p_merge = py_net.add_place(id="p_merge", label="merge", initial_tokens=0)
+
+        t1 = py_net.add_transition(id="t1", label="branch1", metadata={"tau": 2.5})
+        t2 = py_net.add_transition(id="t2", label="branch2", metadata={"tau": 3.5})
+
+        py_net.add_arc(p_split, t1)
+        py_net.add_arc(t1, p_merge)
+        py_net.add_arc(p_split, t2)
+        py_net.add_arc(t2, p_merge)
+
+        py_folded, py_step = fold_choice(py_net, step_number=1, config=FoldConfig(choice=1.0))
+        self.assertIsNotNone(py_step)
+        # sum_tau = 2.5 + 3.5 = 6.0
+        # omega = 1.0 * (6.0 * 0.5) = 3.0
+        # tau = 6.0 + 3.0 = 9.0 (1.5x sum_tau)
+        expected_tau = py_step.tau
+        expected_omega = py_step.omega
+        expected_sm = py_step.running_sm
+
+        self.assertEqual(expected_tau, 9.0)
+        self.assertEqual(expected_omega, 3.0)
+        self.assertEqual(expected_sm, 9.0)
+
+        # 2. JS calculation
+        html = _read_template_html()
+        net_to_elements_js = _extract_template_net_to_elements()
+
+        m_engine = re.search(r'class LiveFoldReductionEngine \{(.*?)\n      \}', html, re.DOTALL)
+        self.assertIsNotNone(m_engine, "Could not extract LiveFoldReductionEngine from template.html")
+        engine_js = m_engine.group(0)
+
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{net_to_elements_js}
+{engine_js}
+
+const net = {{
+  places: [
+    {{ id: 'p_split', label: 'split', initial_tokens: 0 }},
+    {{ id: 'p_merge', label: 'merge', initial_tokens: 0 }}
+  ],
+  transitions: [
+    {{ id: 't1', label: 'branch1', tau: 2.5, metadata: {{ tau: 2.5 }} }},
+    {{ id: 't2', label: 'branch2', tau: 3.5, metadata: {{ tau: 3.5 }} }}
+  ],
+  arcs: [
+    {{ source: 'p_split', target: 't1' }},
+    {{ source: 't1', target: 'p_merge' }},
+    {{ source: 'p_split', target: 't2' }},
+    {{ source: 't2', target: 'p_merge' }}
+  ]
+}};
+
+const cy = cytoscape({{
+  elements: netToElements(net),
+  userPanningEnabled: false
+}});
+
+const engine = new LiveFoldReductionEngine(cy);
+const pSplit = cy.getElementById('p_split');
+const res = engine.executeChoiceContraction(pSplit);
+
+if (!res.success) {{
+  throw new Error('JS choice contraction failed: ' + res.message);
+}}
+
+const c01 = cy.getElementById('c_01');
+const result = {{
+  tau: c01.data('tau'),
+  omega: c01.data('omega'),
+  running_sm: engine.calculateSMScore()
+}};
+
+console.log(JSON.stringify(result));
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
+        self.assertEqual(js_data["running_sm"], expected_sm)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
 

@@ -812,6 +812,27 @@
             }
           },
           {
+            selector: 'node.place.contractible-choice',
+            style: {
+              'border-color': '#d29922',
+              'border-width': 3,
+              'border-style': 'dashed',
+              'background-color': 'rgba(210, 153, 34, 0.18)',
+              'shadow-blur': 8,
+              'shadow-color': 'rgba(210, 153, 34, 0.5)',
+              'shadow-opacity': 0.8
+            }
+          },
+          {
+            selector: 'node.place.contractible-choice:selected',
+            style: {
+              'border-color': '#d29922',
+              'border-width': 4,
+              'shadow-blur': 12,
+              'shadow-color': 'rgba(210, 153, 34, 0.8)'
+            }
+          },
+          {
             selector: 'node.transition',
             style: {
               'shape': 'rectangle',
@@ -1464,18 +1485,257 @@
             node: opaqueNode
           };
         }
+
+        detectChoiceCandidates(placeNode) {
+          if (!placeNode || !placeNode.hasClass('place')) {
+            return { ok: false, reason: "Target is not a Petri net place." };
+          }
+
+          const tokens = parseInt(placeNode.data('initial_tokens') || 0, 10);
+          if (tokens > 0) {
+            return { ok: false, reason: "Cannot contract marked start/source places (tokens > 0)." };
+          }
+
+          const outArcs = placeNode.outgoers('edge');
+          if (outArcs.length < 2) {
+            return { ok: false, reason: `Choice reduction requires >= 2 outgoing branches (has ${outArcs.length}).` };
+          }
+
+          const self = this;
+          const targetGroups = new Map();
+
+          outArcs.forEach(function(edge) {
+            const t = edge.target();
+            if (!t.hasClass('transition')) return;
+
+            const inArcs = t.incomers('edge');
+            const outArcsT = t.outgoers('edge');
+            if (inArcs.length !== 1 || outArcsT.length !== 1) return;
+
+            const p_snk = outArcsT[0].target();
+            if (!p_snk.hasClass('place')) return;
+            if (p_snk.id() === placeNode.id()) return; // skip self-loops
+
+            // Function boundary encapsulation check:
+            const parentT = t.data('parent') || null;
+            const parentPlace = placeNode.data('parent') || null;
+            if (parentT && parentT !== parentPlace) {
+              if (!self.isFunctionFoldedIntoSingleComponent(parentT)) {
+                return;
+              }
+            }
+
+            const pSnkParent = p_snk.data('parent') || null;
+            if (parentT && parentT !== pSnkParent) {
+              if (!self.isFunctionFoldedIntoSingleComponent(parentT)) {
+                return;
+              }
+            }
+
+            const targetId = p_snk.id();
+            if (!targetGroups.has(targetId)) {
+              targetGroups.set(targetId, {
+                targetPlace: p_snk,
+                targetPlaceId: targetId,
+                transitions: []
+              });
+            }
+            targetGroups.get(targetId).transitions.push(t);
+          });
+
+          const validBundles = [];
+          targetGroups.forEach(function(group) {
+            if (group.transitions.length >= 2) {
+              validBundles.push(group);
+            }
+          });
+
+          if (validBundles.length === 0) {
+            return { ok: false, reason: "No parallel transitions converging on a shared sink place." };
+          }
+
+          return { ok: true, bundles: validBundles };
+        }
+
+        executeChoiceContraction(placeNode, bundleIndex) {
+          const check = this.detectChoiceCandidates(placeNode);
+          if (!check.ok) {
+            return { success: false, message: check.reason };
+          }
+
+          const bundle = check.bundles[bundleIndex || 0];
+          const targetPlace = bundle.targetPlace;
+          const transitions = bundle.transitions;
+
+          this.stepCounter++;
+          const stepNum = this.stepCounter;
+          const opaqueId = 'c_' + String(stepNum).padStart(2, '0');
+
+          let sumTau = 0.0;
+          transitions.forEach(function(t) {
+            const val = parseFloat(t.data('tau') !== undefined ? t.data('tau') : 1.0);
+            sumTau += isNaN(val) ? 1.0 : val;
+          });
+
+          const omega = parseFloat((this.cfg.choice * (sumTau * 0.5)).toFixed(2));
+          const accumulatedTau = parseFloat((1.5 * sumTau).toFixed(2));
+
+          const firstParent = transitions[0].data('parent') || null;
+          const allSameParent = transitions.every(function(t) {
+            return (t.data('parent') || null) === firstParent;
+          });
+          let parentId = null;
+          if (allSameParent && firstParent) {
+            parentId = firstParent;
+          } else if (placeNode.data('parent') && placeNode.data('parent') === targetPlace.data('parent')) {
+            parentId = placeNode.data('parent');
+          }
+
+          const consumedNodes = transitions.map(function(t) {
+            return {
+              group: 'nodes',
+              data: Object.assign({}, t.data()),
+              classes: t.classes().join(' '),
+              position: Object.assign({}, t.position())
+            };
+          });
+
+          const consumedInternalEdges = [];
+          transitions.forEach(function(t) {
+            const inEdge = t.incomers('edge')[0];
+            const outEdge = t.outgoers('edge')[0];
+            if (inEdge) {
+              consumedInternalEdges.push({
+                group: 'edges',
+                data: Object.assign({}, inEdge.data()),
+                classes: inEdge.classes().join(' ')
+              });
+            }
+            if (outEdge) {
+              consumedInternalEdges.push({
+                group: 'edges',
+                data: Object.assign({}, outEdge.data()),
+                classes: outEdge.classes().join(' ')
+              });
+            }
+          });
+
+          const transLabels = transitions.map(function(t) {
+            return t.data('raw_label') || t.data('label') || t.id();
+          }).join(' ⊕ ');
+
+          const consumedSubgraph = {
+            stepNumber: stepNum,
+            opaqueId: opaqueId,
+            componentType: 'Choice',
+            omega: omega,
+            tau: accumulatedTau,
+            consumedPlaceId: null,
+            sourcePlaceId: placeNode.id(),
+            targetPlaceId: targetPlace.id(),
+            consumedTransIds: transitions.map(function(t) { return t.id(); }),
+            parentCompound: parentId,
+            nodes: consumedNodes,
+            internalEdges: consumedInternalEdges,
+            boundaryInArcs: [],
+            boundaryOutArcs: []
+          };
+
+          const self = this;
+          transitions.forEach(function(t) {
+            t.connectedEdges().forEach(function(e) {
+              if (e.inside()) self.cy.remove(e);
+            });
+            if (t.inside()) self.cy.remove(t);
+          });
+
+          const newNodeData = {
+            id: opaqueId,
+            label: opaqueId,
+            raw_label: transLabels,
+            type: 'Opaque Transition',
+            component_type: 'Choice',
+            is_opaque: true,
+            opaque: true,
+            step_number: stepNum,
+            tau: accumulatedTau,
+            omega: omega,
+            badge_svg: LiveFoldReductionEngine.generateTauBadgeSvg(accumulatedTau),
+            consumedSubgraph: consumedSubgraph
+          };
+          if (parentId) {
+            newNodeData.parent = parentId;
+          }
+
+          const opaqueNode = this.cy.add({
+            group: 'nodes',
+            data: newNodeData,
+            classes: 'transition opaque component'
+          });
+
+          this.cy.add({
+            group: 'edges',
+            data: {
+              id: `arc_in_${opaqueId}`,
+              source: placeNode.id(),
+              target: opaqueId,
+              weight: 1
+            },
+            classes: 'arc'
+          });
+
+          this.cy.add({
+            group: 'edges',
+            data: {
+              id: `arc_out_${opaqueId}`,
+              source: opaqueId,
+              target: targetPlace.id(),
+              weight: 1
+            },
+            classes: 'arc'
+          });
+
+          this.history.push({
+            type: 'choice',
+            stepNumber: stepNum,
+            opaqueId: opaqueId,
+            sourcePlaceId: placeNode.id(),
+            targetPlaceId: targetPlace.id(),
+            consumedSubgraph: consumedSubgraph
+          });
+
+          if (typeof this.onStateChange === 'function') {
+            this.onStateChange({ type: 'choice', step: stepNum, node: opaqueNode });
+          }
+
+          return {
+            success: true,
+            message: `Folded choice transitions [${transLabels}] into '${opaqueId}' (ω=${omega}, τ=${accumulatedTau}).`,
+            step: consumedSubgraph,
+            node: opaqueNode
+          };
+        }
       }
 
       function updateFoldableHighlights() {
         if (!cy || typeof cy.nodes !== 'function' || !foldEngine) return;
         cy.nodes('.place').forEach(function(p) {
-          const check = foldEngine.canContractPlace(p);
-          if (check.ok) {
+          const seqCheck = foldEngine.canContractPlace(p);
+          if (seqCheck.ok) {
             p.addClass('contractible');
             p.addClass('contractible-sequence');
+            p.removeClass('contractible-choice');
           } else {
-            p.removeClass('contractible');
-            p.removeClass('contractible-sequence');
+            const choiceCheck = foldEngine.detectChoiceCandidates(p);
+            if (choiceCheck.ok) {
+              p.addClass('contractible');
+              p.addClass('contractible-choice');
+              p.removeClass('contractible-sequence');
+            } else {
+              p.removeClass('contractible');
+              p.removeClass('contractible-sequence');
+              p.removeClass('contractible-choice');
+            }
           }
         });
       }
@@ -1501,11 +1761,16 @@
         const targetNode = evt.target;
         const targetId = targetNode.id();
 
-        // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction)
+        // 1. Left-clicking an eligible place node contracts it (Choice or Single-Place Contraction)
         if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
-          if (typeof foldEngine !== 'undefined' && foldEngine && (targetNode.hasClass('contractible') || foldEngine.canContractPlace(targetNode).ok)) {
-            const res = foldEngine.executeSinglePlaceContraction(targetNode);
-            if (res.success) {
+          if (typeof foldEngine !== 'undefined' && foldEngine) {
+            let res = null;
+            if (targetNode.hasClass('contractible-choice') || foldEngine.detectChoiceCandidates(targetNode).ok) {
+              res = foldEngine.executeChoiceContraction(targetNode);
+            } else if (targetNode.hasClass('contractible') || targetNode.hasClass('contractible-sequence') || foldEngine.canContractPlace(targetNode).ok) {
+              res = foldEngine.executeSinglePlaceContraction(targetNode);
+            }
+            if (res && res.success) {
               if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
                 cy.layout(DAGRE_LAYOUT_OPTIONS).run();
               }
