@@ -1185,6 +1185,198 @@
         }
       });
 
+      // Phase 2.7 SESE Infrastructure (Bidirectional Reachability & Symmetry Multipliers)
+      class SESEInfrastructure {
+        constructor(cy) {
+          this.cy = cy;
+        }
+
+        _reachability(startNodeId, boundaryNodeId, getNeighbors) {
+          const queue = [startNodeId];
+          const nodes = new Set([startNodeId, boundaryNodeId]);
+          while (queue.length > 0) {
+            const currId = queue.shift();
+            const neighbors = getNeighbors(currId);
+            for (let i = 0; i < neighbors.length; i++) {
+              const neighborId = neighbors[i];
+              if (!nodes.has(neighborId)) {
+                nodes.add(neighborId);
+                queue.push(neighborId);
+              }
+            }
+          }
+          return nodes;
+        }
+
+        forwardReachability(sourceId, sinkId) {
+          const self = this;
+          return this._reachability(sourceId, sinkId, function(currId) {
+            const node = self.cy.getElementById(currId);
+            if (!node || node.length === 0) return [];
+            return node.outgoers('edge').map(function(edge) {
+              return edge.target().id();
+            });
+          });
+        }
+
+        backwardReachability(sinkId, sourceId) {
+          const self = this;
+          return this._reachability(sinkId, sourceId, function(currId) {
+            const node = self.cy.getElementById(currId);
+            if (!node || node.length === 0) return [];
+            return node.incomers('edge').map(function(edge) {
+              return edge.source().id();
+            });
+          });
+        }
+
+        isReachable(sourceId, sinkId) {
+          if (sourceId === sinkId) return true;
+          const queue = [sourceId];
+          const visited = new Set([sourceId]);
+          while (queue.length > 0) {
+            const currId = queue.shift();
+            const node = this.cy.getElementById(currId);
+            if (!node || node.length === 0) continue;
+            const edges = node.outgoers('edge');
+            for (let i = 0; i < edges.length; i++) {
+              const tgtId = edges[i].target().id();
+              if (tgtId === sinkId) return true;
+              if (!visited.has(tgtId)) {
+                visited.add(tgtId);
+                queue.push(tgtId);
+              }
+            }
+          }
+          return false;
+        }
+
+        findSESENodes(sourceId, sinkId, minTransitions = 2) {
+          if (sourceId === sinkId) return null;
+          const srcNode = this.cy.getElementById(sourceId);
+          const snkNode = this.cy.getElementById(sinkId);
+          if (!srcNode || srcNode.length === 0 || !snkNode || snkNode.length === 0) {
+            return null;
+          }
+
+          if (!this.isReachable(sourceId, sinkId)) {
+            return null;
+          }
+
+          const fwd = this.forwardReachability(sourceId, sinkId);
+          const bwd = this.backwardReachability(sinkId, sourceId);
+
+          if (fwd.size !== bwd.size) return null;
+          for (const nid of fwd) {
+            if (!bwd.has(nid)) return null;
+          }
+
+          let transCount = 0;
+          for (const nid of fwd) {
+            const n = this.cy.getElementById(nid);
+            if (n && n.length > 0 && n.hasClass('transition')) {
+              transCount++;
+            }
+          }
+
+          if (transCount >= minTransitions) {
+            return fwd;
+          }
+          return null;
+        }
+
+        calculateSymmetryMultiplier(componentNodeIds, targetNodeIds = null, useSubnetDegrees = false) {
+          const compSet = new Set(componentNodeIds);
+          const targetSet = targetNodeIds ? new Set(targetNodeIds) : compSet;
+
+          let splits = 0;
+          let joins = 0;
+
+          if (useSubnetDegrees) {
+            const subnetOut = new Map();
+            const subnetIn = new Map();
+
+            compSet.forEach(function(sourceId) {
+              const srcNode = this.cy.getElementById(sourceId);
+              if (srcNode && srcNode.length > 0) {
+                srcNode.outgoers('edge').forEach(function(edge) {
+                  const tgtId = edge.target().id();
+                  if (compSet.has(tgtId)) {
+                    subnetOut.set(sourceId, (subnetOut.get(sourceId) || 0) + 1);
+                    subnetIn.set(tgtId, (subnetIn.get(tgtId) || 0) + 1);
+                  }
+                });
+              }
+            }, this);
+
+            targetSet.forEach(function(nid) {
+              if ((subnetOut.get(nid) || 0) > 1) splits++;
+              if ((subnetIn.get(nid) || 0) > 1) joins++;
+            });
+          } else {
+            targetSet.forEach(function(nid) {
+              const node = this.cy.getElementById(nid);
+              if (node && node.length > 0) {
+                if (node.outgoers('edge').length > 1) splits++;
+                if (node.incomers('edge').length > 1) joins++;
+              }
+            }, this);
+          }
+
+          return Math.abs(splits - joins) + 1;
+        }
+
+        calculateSubnetSymmetry(componentNodeIds, useSubnetDegrees = false) {
+          const compSet = new Set(componentNodeIds);
+          const placeIds = [];
+          const transIds = [];
+
+          compSet.forEach(function(nid) {
+            const node = this.cy.getElementById(nid);
+            if (node && node.length > 0) {
+              if (node.hasClass('place')) {
+                placeIds.push(nid);
+              } else if (node.hasClass('transition')) {
+                transIds.push(nid);
+              }
+            }
+          }, this);
+
+          const diffP = this.calculateSymmetryMultiplier(compSet, placeIds, useSubnetDegrees);
+          const diffT = this.calculateSymmetryMultiplier(compSet, transIds, useSubnetDegrees);
+
+          return { diffP: diffP, diffT: diffT };
+        }
+
+        findAllSESECandidates(boundaryIds = null, minTransitions = 2) {
+          let candidates;
+          if (boundaryIds) {
+            candidates = Array.from(boundaryIds);
+          } else {
+            candidates = this.cy.nodes('.place').map(function(n) { return n.id(); });
+          }
+          candidates.sort();
+
+          const results = [];
+          for (let i = 0; i < candidates.length; i++) {
+            for (let j = 0; j < candidates.length; j++) {
+              if (i === j) continue;
+              const src = candidates[i];
+              const snk = candidates[j];
+              const sese = this.findSESENodes(src, snk, minTransitions);
+              if (sese) {
+                results.push({
+                  sourceId: src,
+                  sinkId: snk,
+                  nodes: sese
+                });
+              }
+            }
+          }
+          return results;
+        }
+      }
+
       // Phase 2.7 Live Fold Reduction Engine
       class LiveFoldReductionEngine {
         constructor(cy, options = {}) {
@@ -1195,6 +1387,35 @@
             choice: options.choice !== undefined ? options.choice : 1.0,
             loop: options.loop !== undefined ? options.loop : 3.0
           };
+          this.sese = new SESEInfrastructure(cy);
+        }
+
+        forwardReachability(sourceId, sinkId) {
+          return this.sese.forwardReachability(sourceId, sinkId);
+        }
+
+        backwardReachability(sinkId, sourceId) {
+          return this.sese.backwardReachability(sinkId, sourceId);
+        }
+
+        isReachable(sourceId, sinkId) {
+          return this.sese.isReachable(sourceId, sinkId);
+        }
+
+        findSESENodes(sourceId, sinkId, minTransitions = 2) {
+          return this.sese.findSESENodes(sourceId, sinkId, minTransitions);
+        }
+
+        calculateSymmetryMultiplier(componentNodeIds, targetNodeIds = null, useSubnetDegrees = false) {
+          return this.sese.calculateSymmetryMultiplier(componentNodeIds, targetNodeIds, useSubnetDegrees);
+        }
+
+        calculateSubnetSymmetry(componentNodeIds, useSubnetDegrees = false) {
+          return this.sese.calculateSubnetSymmetry(componentNodeIds, useSubnetDegrees);
+        }
+
+        findAllSESECandidates(boundaryIds = null, minTransitions = 2) {
+          return this.sese.findAllSESECandidates(boundaryIds, minTransitions);
         }
 
         static generateTauBadgeSvg(tau) {

@@ -63,6 +63,9 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     html = _read_template_html()
     net_to_elements_js = _extract_template_net_to_elements()
 
+    m_sese = re.search(r'class SESEInfrastructure \{(.*?)\n      \}', html, re.DOTALL)
+    sese_js = m_sese.group(0) if m_sese else ""
+
     m_engine = re.search(r'class LiveFoldReductionEngine \{(.*?)\n      \}', html, re.DOTALL)
     assert m_engine is not None, "Could not extract LiveFoldReductionEngine from template.html"
     engine_js = m_engine.group(0)
@@ -83,6 +86,7 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 
 {net_to_elements_js}
+{sese_js}
 {engine_js}
 
 // Mock DOM elements for inspector
@@ -1922,6 +1926,319 @@ console.log(JSON.stringify(result));
         self.assertEqual(js_data["tau"], expected_tau)
         self.assertEqual(js_data["omega"], expected_omega)
         self.assertEqual(js_data["running_sm"], expected_sm)
+
+    def test_sese_bidirectional_reachability_valid_subnet_headless(self):
+        """Verifies that SESE infrastructure computes bidirectional reachability and finds valid SESE subnets."""
+        net_literal = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 },
+    { id: 'p_src', label: 'source_place', initial_tokens: 0 },
+    { id: 'p1', label: 'branch1_place', initial_tokens: 0 },
+    { id: 'p2', label: 'branch2_place', initial_tokens: 0 },
+    { id: 'p_snk', label: 'sink_place', initial_tokens: 0 },
+    { id: 'p_out', label: 'out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't0', label: 't0' },
+    { id: 't1', label: 't1' },
+    { id: 't2', label: 't2' },
+    { id: 't3', label: 't3' },
+    { id: 't4', label: 't4' },
+    { id: 't5', label: 't5' }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't0' },
+    { source: 't0', target: 'p_src' },
+    { source: 'p_src', target: 't1' },
+    { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't3' },
+    { source: 't3', target: 'p_snk' },
+    { source: 'p_src', target: 't2' },
+    { source: 't2', target: 'p2' },
+    { source: 'p2', target: 't4' },
+    { source: 't4', target: 'p_snk' },
+    { source: 'p_snk', target: 't5' },
+    { source: 't5', target: 'p_out' }
+  ]
+}"""
+        test_logic = """
+const sese = foldEngine.sese || new SESEInfrastructure(cy);
+
+// 1. isReachable tests
+if (!sese.isReachable('p_src', 'p_snk')) {
+  throw new Error('p_snk should be reachable from p_src');
+}
+if (sese.isReachable('p_snk', 'p_src')) {
+  throw new Error('p_src should NOT be reachable from p_snk');
+}
+
+// 2. forward & backward reachability
+const fwd = sese.forwardReachability('p_src', 'p_snk');
+const bwd = sese.backwardReachability('p_snk', 'p_src');
+
+const expected = ['p_src', 't1', 'p1', 't3', 't2', 'p2', 't4', 'p_snk'];
+if (fwd.size !== expected.length || bwd.size !== expected.length) {
+  throw new Error(`Reachability size mismatch: fwd=${fwd.size}, bwd=${bwd.size}, expected=${expected.length}`);
+}
+for (const id of expected) {
+  if (!fwd.has(id)) throw new Error(`fwd missing ${id}`);
+  if (!bwd.has(id)) throw new Error(`bwd missing ${id}`);
+}
+
+// 3. findSESENodes test
+const seseNodes = sese.findSESENodes('p_src', 'p_snk');
+if (!seseNodes) {
+  throw new Error('findSESENodes should return valid node set for (p_src, p_snk)');
+}
+if (seseNodes.size !== expected.length) {
+  throw new Error(`findSESENodes returned ${seseNodes.size} nodes, expected ${expected.length}`);
+}
+
+// 4. Non-SESE pair (p_src, p1) should return null (p1 is internal branch, fwd != bwd)
+const invalidPair = sese.findSESENodes('p_src', 'p1');
+if (invalidPair !== null) {
+  throw new Error('(p_src, p1) is not SESE and should return null');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_sese_boundary_invariant_exclusion_headless(self):
+        """Verifies that nodes violating the SESE boundary invariant (external in/out leaks) are rejected."""
+        # 1. Leak INTO internal node from outside
+        net_leak_in = """{
+  places: [
+    { id: 'p_src', label: 'src', initial_tokens: 0 },
+    { id: 'p1', label: 'p1', initial_tokens: 0 },
+    { id: 'p2', label: 'p2', initial_tokens: 0 },
+    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1' },
+    { id: 't2', label: 't2' },
+    { id: 't_ext_in', label: 'external_in' }
+  ],
+  arcs: [
+    { source: 'p_src', target: 't1' },
+    { source: 't1', target: 'p_snk' },
+    { source: 'p_src', target: 't2' },
+    { source: 't2', target: 'p_snk' },
+    { source: 't_ext_in', target: 'p1' }
+  ]
+}"""
+        test_logic_in = """
+const sese = foldEngine.sese || new SESEInfrastructure(cy);
+const res = sese.findSESENodes('p_src', 'p_snk');
+// Leak in arc from t_ext_in -> p1 causes fwd != bwd
+if (res !== null && res.has('p1')) {
+  throw new Error('Subnet with external leak in should not form SESE');
+}
+console.log('PASS');
+"""
+        script1 = _setup_live_fold_test_harness(net_leak_in, test_logic_in)
+        proc1 = _run_node_script(script1)
+        self.assertEqual(proc1.returncode, 0, f"Node script failed: {proc1.stderr}")
+        self.assertIn("PASS", proc1.stdout)
+
+        # 2. Leak OUT of internal node to outside
+        net_leak_out = """{
+  places: [
+    { id: 'p_src', label: 'src', initial_tokens: 0 },
+    { id: 'p1', label: 'p1', initial_tokens: 0 },
+    { id: 'p_snk', label: 'snk', initial_tokens: 0 },
+    { id: 'p_ext_out', label: 'external_out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1' },
+    { id: 't2', label: 't2' },
+    { id: 't_leak', label: 'leak' }
+  ],
+  arcs: [
+    { source: 'p_src', target: 't1' },
+    { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't2' },
+    { source: 't2', target: 'p_snk' },
+    { source: 'p1', target: 't_leak' },
+    { source: 't_leak', target: 'p_ext_out' }
+  ]
+}"""
+        test_logic_out = """
+const sese = foldEngine.sese || new SESEInfrastructure(cy);
+const res = sese.findSESENodes('p_src', 'p_snk');
+if (res !== null) {
+  throw new Error('Subnet with external leak out should not form SESE');
+}
+console.log('PASS');
+"""
+        script2 = _setup_live_fold_test_harness(net_leak_out, test_logic_out)
+        proc2 = _run_node_script(script2)
+        self.assertEqual(proc2.returncode, 0, f"Node script failed: {proc2.stderr}")
+        self.assertIn("PASS", proc2.stdout)
+
+    def test_sese_symmetry_multiplier_matches_python_fold_engine(self):
+        """Verifies that symmetry multiplier (diffP, diffT) matches Python NetTopology.calculate_symmetry_multiplier."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import NetTopology
+
+        # 1. Python model
+        py_net = PetriNet()
+        p_src = py_net.add_place("p_src")
+        p1 = py_net.add_place("p1")
+        p2 = py_net.add_place("p2")
+        p_join = py_net.add_place("p_join")
+        p_snk = py_net.add_place("p_snk")
+
+        t1 = py_net.add_transition("t1")
+        t2 = py_net.add_transition("t2")
+        t_split = py_net.add_transition("t_split")
+        t_snk = py_net.add_transition("t_snk")
+
+        py_net.add_arc(p_src, t1)
+        py_net.add_arc(p_src, t2)
+        py_net.add_arc(t1, p1)
+        py_net.add_arc(t2, p2)
+        py_net.add_arc(p1, t_split)
+        py_net.add_arc(p2, t_split)
+        py_net.add_arc(t_split, p_join)
+        py_net.add_arc(p_join, t_snk)
+        py_net.add_arc(t_snk, p_snk)
+
+        topo = NetTopology(py_net)
+        comp_nodes = {"p_src", "p1", "p2", "p_join", "p_snk", "t1", "t2", "t_split", "t_snk"}
+        place_nodes = {"p_src", "p1", "p2", "p_join", "p_snk"}
+        trans_nodes = {"t1", "t2", "t_split", "t_snk"}
+
+        py_diff_p_full = topo.calculate_symmetry_multiplier(comp_nodes, place_nodes, use_subnet_degrees=False)
+        py_diff_t_full = topo.calculate_symmetry_multiplier(comp_nodes, trans_nodes, use_subnet_degrees=False)
+        py_diff_p_subnet = topo.calculate_symmetry_multiplier(comp_nodes, place_nodes, use_subnet_degrees=True)
+        py_diff_t_subnet = topo.calculate_symmetry_multiplier(comp_nodes, trans_nodes, use_subnet_degrees=True)
+
+        # 2. JS calculation
+        net_literal = """{
+  places: [
+    { id: 'p_src', label: 'p_src' },
+    { id: 'p1', label: 'p1' },
+    { id: 'p2', label: 'p2' },
+    { id: 'p_join', label: 'p_join' },
+    { id: 'p_snk', label: 'p_snk' }
+  ],
+  transitions: [
+    { id: 't1', label: 't1' },
+    { id: 't2', label: 't2' },
+    { id: 't_split', label: 't_split' },
+    { id: 't_snk', label: 't_snk' }
+  ],
+  arcs: [
+    { source: 'p_src', target: 't1' },
+    { source: 'p_src', target: 't2' },
+    { source: 't1', target: 'p1' },
+    { source: 't2', target: 'p2' },
+    { source: 'p1', target: 't_split' },
+    { source: 'p2', target: 't_split' },
+    { source: 't_split', target: 'p_join' },
+    { source: 'p_join', target: 't_snk' },
+    { source: 't_snk', target: 'p_snk' }
+  ]
+}"""
+        test_logic = """
+const sese = foldEngine.sese || new SESEInfrastructure(cy);
+const allNodes = ['p_src', 'p1', 'p2', 'p_join', 'p_snk', 't1', 't2', 't_split', 't_snk'];
+
+const full = sese.calculateSubnetSymmetry(allNodes, false);
+const subnet = sese.calculateSubnetSymmetry(allNodes, true);
+
+console.log(JSON.stringify({ full, subnet }));
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_res = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_res["full"]["diffP"], py_diff_p_full)
+        self.assertEqual(js_res["full"]["diffT"], py_diff_t_full)
+        self.assertEqual(js_res["subnet"]["diffP"], py_diff_p_subnet)
+        self.assertEqual(js_res["subnet"]["diffT"], py_diff_t_subnet)
+
+    def test_sese_performance_large_composite_graph_headless(self):
+        """Validates that SESE detection runs efficiently (<50ms) on a composite graph with 200+ nodes."""
+        net_literal = """{
+  places: [],
+  transitions: [],
+  arcs: []
+}"""
+        test_logic = """
+const sese = foldEngine.sese || new SESEInfrastructure(cy);
+
+// Dynamically construct a 240-node composite pipeline in Cytoscape
+// 40 sequential stages, each stage has 2 places and 4 transitions
+for (let stage = 0; stage < 40; stage++) {
+  const pIn = 'stage_' + stage + '_in';
+  const pOut = 'stage_' + stage + '_out';
+  const tA = 'stage_' + stage + '_ta';
+  const tB = 'stage_' + stage + '_tb';
+  const pMidA = 'stage_' + stage + '_pmida';
+  const pMidB = 'stage_' + stage + '_pmidb';
+
+  cy.add([
+    { group: 'nodes', data: { id: pIn }, classes: 'place' },
+    { group: 'nodes', data: { id: pOut }, classes: 'place' },
+    { group: 'nodes', data: { id: pMidA }, classes: 'place' },
+    { group: 'nodes', data: { id: pMidB }, classes: 'place' },
+    { group: 'nodes', data: { id: tA }, classes: 'transition' },
+    { group: 'nodes', data: { id: tB }, classes: 'transition' }
+  ]);
+
+  cy.add([
+    { group: 'edges', data: { id: `e_${stage}_1`, source: pIn, target: tA }, classes: 'arc' },
+    { group: 'edges', data: { id: `e_${stage}_2`, source: tA, target: pMidA }, classes: 'arc' },
+    { group: 'edges', data: { id: `e_${stage}_3`, source: pMidA, target: pOut }, classes: 'arc' },
+    { group: 'edges', data: { id: `e_${stage}_4`, source: pIn, target: tB }, classes: 'arc' },
+    { group: 'edges', data: { id: `e_${stage}_5`, source: tB, target: pMidB }, classes: 'arc' },
+    { group: 'edges', data: { id: `e_${stage}_6`, source: pMidB, target: pOut }, classes: 'arc' }
+  ]);
+
+  if (stage > 0) {
+    const prevOut = 'stage_' + (stage - 1) + '_out';
+    const linkT = 'link_' + stage;
+    cy.add({ group: 'nodes', data: { id: linkT }, classes: 'transition' });
+    cy.add([
+      { group: 'edges', data: { id: `link_e1_${stage}`, source: prevOut, target: linkT }, classes: 'arc' },
+      { group: 'edges', data: { id: `link_e2_${stage}`, source: linkT, target: pIn }, classes: 'arc' }
+    ]);
+  }
+}
+
+const totalNodes = cy.nodes().length;
+if (totalNodes < 200) {
+  throw new Error(`Graph has only ${totalNodes} nodes, expected >= 200`);
+}
+
+const start = Date.now();
+// Evaluate SESE across 40 stages
+for (let stage = 0; stage < 40; stage++) {
+  const pIn = 'stage_' + stage + '_in';
+  const pOut = 'stage_' + stage + '_out';
+  const seseSet = sese.findSESENodes(pIn, pOut);
+  if (!seseSet) {
+    throw new Error(`Failed to find SESE nodes for stage ${stage}`);
+  }
+}
+const elapsed = Date.now() - start;
+
+if (elapsed > 100) {
+  throw new Error(`Performance too slow: took ${elapsed}ms for 40 SESE evaluations on ${totalNodes} nodes`);
+}
+
+console.log(`PASS: evaluated 40 SESE subnets on ${totalNodes} nodes in ${elapsed}ms`);
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
 
 
 if __name__ == "__main__":
