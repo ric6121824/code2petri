@@ -4,10 +4,10 @@
 
 **Blocked by:** 33 — JS Fold Engine: Choice Reduction
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Place nodes eligible for while loop reduction are visually coloured purple
-- [ ] Left-clicking an eligible loop head place folds the loop into an opaque component at the entry transition
-- [ ] The resulting component displays its updated tau weight with 2.0x multiplier applied
-- [ ] The JS tau and omega values for a while loop fold match the Python fold engine for the same topology
-- [ ] The new component stores enough information to restore the original nodes on demand
+- [x] Place nodes eligible for while loop reduction are visually coloured purple
+- [x] Left-clicking an eligible loop head place folds the loop into an opaque component at the entry transition
+- [x] The resulting component displays its updated tau weight with 2.0x multiplier applied
+- [x] The JS tau and omega values for a while loop fold match the Python fold engine for the same topology
+- [x] The new component stores enough information to restore the original nodes on demand

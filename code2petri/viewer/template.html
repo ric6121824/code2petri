@@ -833,6 +833,30 @@
             }
           },
           {
+            selector: 'node.place.contractible-while',
+            style: {
+              'border-color': '#bc8cff',
+              'border-width': 3,
+              'border-style': 'double',
+              'background-color': 'rgba(188, 140, 255, 0.20)',
+              'shadow-blur': 12,
+              'shadow-color': 'rgba(188, 140, 255, 0.75)',
+              'shadow-opacity': 0.9
+            }
+          },
+          {
+            selector: 'node.place.contractible-while:selected',
+            style: {
+              'border-color': '#bc8cff',
+              'border-width': 4,
+              'border-style': 'double',
+              'background-color': 'rgba(188, 140, 255, 0.35)',
+              'shadow-blur': 16,
+              'shadow-color': 'rgba(188, 140, 255, 0.9)',
+              'shadow-opacity': 1.0
+            }
+          },
+          {
             selector: 'node.transition',
             style: {
               'shape': 'rectangle',
@@ -1184,7 +1208,7 @@
           return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
         }
 
-        _createOpaqueComponentNode(opaqueId, label, rawLabel, tau, omega, componentType, parentId, consumedSubnet) {
+        _createOpaqueComponentNode(opaqueId, label, rawLabel, tau, omega, componentType, parentId, consumedSubnet, position = null) {
           const newNodeData = {
             id: opaqueId,
             label: label || opaqueId,
@@ -1204,11 +1228,16 @@
             newNodeData.parent = parentId;
           }
 
-          return this.cy.add({
+          const nodeDef = {
             group: 'nodes',
             data: newNodeData,
             classes: 'transition opaque component'
-          });
+          };
+          if (position) {
+            nodeDef.position = Object.assign({}, position);
+          }
+
+          return this.cy.add(nodeDef);
         }
 
         calculateSMScore() {
@@ -1562,7 +1591,289 @@
           if (!placeNode || !placeNode.hasClass('place')) return null;
           if (this.canSinglePlaceContract(placeNode).ok) return 'sequence';
           if (this.detectChoiceCandidates(placeNode).ok) return 'choice';
+          if (this.detectWhileCandidates(placeNode).ok) return 'while';
           return null;
+        }
+
+        detectWhileCandidates(placeNode) {
+          if (!placeNode || !placeNode.hasClass('place')) {
+            return { ok: false, reason: "Target is not a Petri net place." };
+          }
+
+          const tokens = parseInt(placeNode.data('initial_tokens') || 0, 10);
+          if (tokens > 0) {
+            return { ok: false, reason: "Cannot contract marked start/source places (tokens > 0)." };
+          }
+
+          const inEdges = placeNode.incomers('edge');
+          const outEdges = placeNode.outgoers('edge');
+
+          if (inEdges.length !== 2 || outEdges.length !== 2) {
+            return {
+              ok: false,
+              reason: `While Loop Reduction requires a 2-in/2-out place (has ${inEdges.length} in, ${outEdges.length} out).`
+            };
+          }
+
+          const inTransitions = inEdges.sources().filter(function(n) { return n.hasClass('transition'); });
+          const outTransitions = outEdges.targets().filter(function(n) { return n.hasClass('transition'); });
+
+          if (inTransitions.length !== 2 || outTransitions.length !== 2) {
+            return { ok: false, reason: "Connected nodes must all be transitions." };
+          }
+
+          const inIds = new Set(inTransitions.map(function(t) { return t.id(); }));
+          const sharedTransitions = outTransitions.filter(function(t) { return inIds.has(t.id()); });
+
+          if (sharedTransitions.length !== 1) {
+            return {
+              ok: false,
+              reason: `While Loop requires exactly 1 self-looping transition (found ${sharedTransitions.length}).`
+            };
+          }
+
+          const t_loop = sharedTransitions[0];
+          const t_src = inTransitions.filter(function(t) { return t.id() !== t_loop.id(); })[0];
+          const t_snk = outTransitions.filter(function(t) { return t.id() !== t_loop.id(); })[0];
+
+          if (!t_src || !t_snk) {
+            return { ok: false, reason: "Could not identify distinct source and sink transitions." };
+          }
+
+          if (t_loop.incomers('edge').length !== 1 || t_loop.outgoers('edge').length !== 1) {
+            return { ok: false, reason: `Loop transition '${t_loop.data('label')}' has extra incoming or outgoing arcs.` };
+          }
+          if (t_src.outgoers('edge').length !== 1) {
+            return { ok: false, reason: `Source transition '${t_src.data('label')}' branches to multiple places (${t_src.outgoers('edge').length}).` };
+          }
+          if (t_snk.incomers('edge').length !== 1) {
+            return { ok: false, reason: `Sink transition '${t_snk.data('label')}' has multiple inputs (${t_snk.incomers('edge').length}).` };
+          }
+
+          const parentPlace = placeNode.data('parent') || null;
+          const parentLoop = t_loop.data('parent') || null;
+          const parentSrc = t_src.data('parent') || null;
+          const parentSnk = t_snk.data('parent') || null;
+
+          const parents = [parentPlace, parentLoop, parentSrc, parentSnk].filter(function(p) { return p !== null; });
+          const uniqueParents = Array.from(new Set(parents));
+
+          const self = this;
+          if (uniqueParents.length > 1 || (parentPlace === null && uniqueParents.length > 0) || (parentPlace !== null && uniqueParents.some(function(p) { return p !== parentPlace; }))) {
+            for (let i = 0; i < uniqueParents.length; i++) {
+              const pId = uniqueParents[i];
+              if (pId !== parentPlace && !self.isFunctionFoldedIntoSingleComponent(pId)) {
+                const fnNode = self.cy.getElementById(pId);
+                const fnName = (fnNode && fnNode.length > 0)
+                  ? (fnNode.data('function_name') || fnNode.data('label') || pId)
+                  : pId;
+                return {
+                  ok: false,
+                  reason: `Loop involves function '${fnName}', which is not yet folded into a single component node.`
+                };
+              }
+            }
+          }
+
+          const tau_loop = parseFloat(t_loop.data('tau') !== undefined ? t_loop.data('tau') : 1.0);
+          const tau_src = parseFloat(t_src.data('tau') !== undefined ? t_src.data('tau') : 1.0);
+          const tau_snk = parseFloat(t_snk.data('tau') !== undefined ? t_snk.data('tau') : 1.0);
+
+          const omega = parseFloat(((this.cfg.loop / 3.0) * tau_loop).toFixed(2));
+          const tau_new = parseFloat((omega + tau_src + tau_snk + tau_loop).toFixed(2));
+
+          return {
+            ok: true,
+            place: placeNode,
+            t_loop: t_loop,
+            t_src: t_src,
+            t_snk: t_snk,
+            tau_loop: tau_loop,
+            tau_src: tau_src,
+            tau_snk: tau_snk,
+            omega: omega,
+            tau_new: tau_new
+          };
+        }
+
+        executeWhileContraction(placeNode) {
+          const check = this.detectWhileCandidates(placeNode);
+          if (!check.ok) {
+            return { success: false, message: check.reason };
+          }
+
+          const t_loop = check.t_loop;
+          const t_src = check.t_src;
+          const t_snk = check.t_snk;
+          const omega = check.omega;
+          const tau_new = check.tau_new;
+
+          this.stepCounter++;
+          const stepNum = this.stepCounter;
+          const opaqueId = 'c_' + String(stepNum).padStart(2, '0');
+
+          const parentPlace = placeNode.data('parent') || null;
+          const parentLoop = t_loop.data('parent') || null;
+          const parentSrc = t_src.data('parent') || null;
+          const parentSnk = t_snk.data('parent') || null;
+
+          let parentId = null;
+          if (parentSrc && parentSrc === parentSnk && parentSrc === parentLoop) {
+            parentId = parentSrc;
+          } else if (parentPlace) {
+            parentId = parentPlace;
+          }
+
+          const boundaryInArcs = [];
+          t_src.incomers('edge').forEach(function(edge) {
+            const srcNode = edge.source();
+            if (srcNode.id() !== placeNode.id() && srcNode.id() !== t_loop.id()) {
+              boundaryInArcs.push({
+                edgeId: edge.id(),
+                sourceId: srcNode.id(),
+                targetId: opaqueId,
+                originalTargetId: t_src.id(),
+                weight: edge.data('weight') || 1,
+                classes: edge.classes().join(' ')
+              });
+            }
+          });
+
+          const boundaryOutArcs = [];
+          t_snk.outgoers('edge').forEach(function(edge) {
+            const tgtNode = edge.target();
+            if (tgtNode.id() !== placeNode.id() && tgtNode.id() !== t_loop.id()) {
+              boundaryOutArcs.push({
+                edgeId: edge.id(),
+                sourceId: opaqueId,
+                originalSourceId: t_snk.id(),
+                targetId: tgtNode.id(),
+                weight: edge.data('weight') || 1,
+                classes: edge.classes().join(' ')
+              });
+            }
+          });
+
+          const consumedNodes = [
+            { group: 'nodes', data: Object.assign({}, placeNode.data()), classes: placeNode.classes().join(' '), position: Object.assign({}, placeNode.position()) },
+            { group: 'nodes', data: Object.assign({}, t_loop.data()), classes: t_loop.classes().join(' '), position: Object.assign({}, t_loop.position()) },
+            { group: 'nodes', data: Object.assign({}, t_src.data()), classes: t_src.classes().join(' '), position: Object.assign({}, t_src.position()) },
+            { group: 'nodes', data: Object.assign({}, t_snk.data()), classes: t_snk.classes().join(' '), position: Object.assign({}, t_snk.position()) }
+          ];
+
+          const consumedInternalEdges = [];
+          const consumedNodeIdSet = new Set([placeNode.id(), t_loop.id(), t_src.id(), t_snk.id()]);
+          [placeNode, t_loop, t_src, t_snk].forEach(function(n) {
+            n.connectedEdges().forEach(function(e) {
+              if (consumedNodeIdSet.has(e.source().id()) && consumedNodeIdSet.has(e.target().id())) {
+                if (!consumedInternalEdges.some(function(x) { return x.data.id === e.id(); })) {
+                  consumedInternalEdges.push({
+                    group: 'edges',
+                    data: Object.assign({}, e.data()),
+                    classes: e.classes().join(' ')
+                  });
+                }
+              }
+            });
+          });
+
+          const consumedCompounds = [];
+          const self = this;
+          [parentSrc, parentSnk, parentLoop, parentPlace].forEach(function(pCompId) {
+            if (pCompId && pCompId !== parentId && !consumedCompounds.some(function(c) { return c.data.id === pCompId; })) {
+              const pNode = self.cy.getElementById(pCompId);
+              const remaining = self.cy.nodes().filter(function(n) {
+                return n.data('parent') === pCompId && !consumedNodeIdSet.has(n.id());
+              });
+              if (remaining.length === 0 && pNode.length > 0) {
+                consumedCompounds.push({
+                  group: 'nodes',
+                  data: Object.assign({}, pNode.data()),
+                  classes: pNode.classes().join(' '),
+                  position: Object.assign({}, pNode.position())
+                });
+              }
+            }
+          });
+
+          const loopLabel = t_loop.data('raw_label') || t_loop.data('label') || t_loop.id();
+          const rawLabel = `while (${loopLabel})`;
+
+          const consumedSubnet = {
+            stepNumber: stepNum,
+            opaqueId: opaqueId,
+            componentType: 'While',
+            omega: omega,
+            tau: tau_new,
+            consumedPlaceId: placeNode.id(),
+            consumedTransIds: [t_src.id(), t_loop.id(), t_snk.id()],
+            t_loop_id: t_loop.id(),
+            t_src_id: t_src.id(),
+            t_snk_id: t_snk.id(),
+            parentCompound: parentId,
+            consumedCompounds: consumedCompounds,
+            nodes: consumedNodes,
+            internalEdges: consumedInternalEdges,
+            boundaryInArcs: boundaryInArcs,
+            boundaryOutArcs: boundaryOutArcs
+          };
+
+          consumedCompounds.forEach(function(c) {
+            const pNode = self.cy.getElementById(c.data.id);
+            if (pNode.inside()) self.cy.remove(pNode);
+          });
+          [placeNode, t_loop, t_src, t_snk].forEach(function(n) {
+            n.connectedEdges().forEach(function(e) {
+              if (e.inside()) self.cy.remove(e);
+            });
+            if (n.inside()) self.cy.remove(n);
+          });
+
+          const entryPos = (consumedNodes.find(function(n) { return n.data.id === t_src.id(); }) || {}).position;
+          const opaqueNode = this._createOpaqueComponentNode(
+            opaqueId,
+            opaqueId,
+            rawLabel,
+            tau_new,
+            omega,
+            'While',
+            parentId,
+            consumedSubnet,
+            entryPos
+          );
+
+          boundaryInArcs.forEach(function(bArc, idx) {
+            self.cy.add({
+              group: 'edges',
+              data: {
+                id: `arc_while_in_${opaqueId}_${idx}`,
+                source: bArc.sourceId,
+                target: opaqueId,
+                weight: bArc.weight
+              },
+              classes: bArc.classes || 'arc'
+            });
+          });
+
+          boundaryOutArcs.forEach(function(bArc, idx) {
+            self.cy.add({
+              group: 'edges',
+              data: {
+                id: `arc_while_out_${opaqueId}_${idx}`,
+                source: opaqueId,
+                target: bArc.targetId,
+                weight: bArc.weight
+              },
+              classes: bArc.classes || 'arc'
+            });
+          });
+
+          return {
+            success: true,
+            message: `Folded while loop around '${placeNode.data('label') || placeNode.id()}' into '${opaqueId}' (ω=${omega}, τ=${tau_new}).`,
+            step: consumedSubnet,
+            node: opaqueNode
+          };
         }
 
         executeChoiceContraction(placeNode, bundleIndex = 0) {
@@ -1700,14 +2011,22 @@
             p.addClass('contractible');
             p.addClass('contractible-sequence');
             p.removeClass('contractible-choice');
+            p.removeClass('contractible-while');
           } else if (foldType === 'choice') {
             p.addClass('contractible');
             p.addClass('contractible-choice');
             p.removeClass('contractible-sequence');
+            p.removeClass('contractible-while');
+          } else if (foldType === 'while') {
+            p.addClass('contractible');
+            p.addClass('contractible-while');
+            p.removeClass('contractible-sequence');
+            p.removeClass('contractible-choice');
           } else {
             p.removeClass('contractible');
             p.removeClass('contractible-sequence');
             p.removeClass('contractible-choice');
+            p.removeClass('contractible-while');
           }
         });
       }
@@ -1733,7 +2052,7 @@
         const targetNode = evt.target;
         const targetId = targetNode.id();
 
-        // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction or Choice)
+        // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction, Choice, or While Loop)
         if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
           if (typeof foldEngine !== 'undefined' && foldEngine) {
             const foldType = foldEngine.getFoldType(targetNode);
@@ -1742,6 +2061,8 @@
               res = foldEngine.executeChoiceContraction(targetNode);
             } else if (foldType === 'sequence') {
               res = foldEngine.executeSinglePlaceContraction(targetNode);
+            } else if (foldType === 'while') {
+              res = foldEngine.executeWhileContraction(targetNode);
             }
             if (res && res.success) {
               if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {

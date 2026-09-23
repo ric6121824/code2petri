@@ -1670,6 +1670,259 @@ console.log(JSON.stringify(result));
         self.assertEqual(js_data["omega"], expected_omega)
         self.assertEqual(js_data["running_sm"], expected_sm)
 
+    def test_place_contractible_while_styling_in_template(self):
+        """Verifies template.html includes contractible place CSS styling in purple for while loops."""
+        html = _read_template_html()
+        self.assertIn("node.place.contractible-while", html)
+        self.assertIn("#bc8cff", html)
+        self.assertIn("double", html)
+
+    def test_place_nodes_eligible_for_while_loop_reduction_colored_purple_headless(self):
+        """Validates that while loop head places receive .contractible-while class on load via Live Fold Reduction."""
+        net_literal = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 },
+    { id: 'p_loop', label: 'loop_head', initial_tokens: 0 },
+    { id: 'p_out', label: 'out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_src', label: 'enter', tau: 2.0 },
+    { id: 't_loop', label: 'body', tau: 3.0 },
+    { id: 't_snk', label: 'exit', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_src' },
+    { source: 't_src', target: 'p_loop' },
+    { source: 'p_loop', target: 't_loop' },
+    { source: 't_loop', target: 'p_loop' },
+    { source: 'p_loop', target: 't_snk' },
+    { source: 't_snk', target: 'p_out' }
+  ]
+}"""
+        test_logic = """
+const pLoop = cy.getElementById('p_loop');
+const pIn = cy.getElementById('p_in');
+const pOut = cy.getElementById('p_out');
+
+if (!pLoop.hasClass('contractible')) {
+  throw new Error('p_loop should have contractible class');
+}
+if (!pLoop.hasClass('contractible-while')) {
+  throw new Error('p_loop should have contractible-while class');
+}
+if (pLoop.hasClass('contractible-sequence')) {
+  throw new Error('p_loop should not have contractible-sequence class');
+}
+if (pLoop.hasClass('contractible-choice')) {
+  throw new Error('p_loop should not have contractible-choice class');
+}
+if (pIn.hasClass('contractible') || pOut.hasClass('contractible')) {
+  throw new Error('p_in or p_out should not be contractible');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_left_click_eligible_place_contracts_while_headless(self):
+        """Validates that left-clicking a while loop head place executes Live Fold Reduction (While Loop)."""
+        net_literal = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 },
+    { id: 'p_loop', label: 'loop_head', initial_tokens: 0 },
+    { id: 'p_out', label: 'out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_src', label: 'enter', tau: 2.0 },
+    { id: 't_loop', label: 'body', tau: 3.0 },
+    { id: 't_snk', label: 'exit', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_src' },
+    { source: 't_src', target: 'p_loop' },
+    { source: 'p_loop', target: 't_loop' },
+    { source: 't_loop', target: 'p_loop' },
+    { source: 'p_loop', target: 't_snk' },
+    { source: 't_snk', target: 'p_out' }
+  ]
+}"""
+        test_logic = """
+const pLoop = cy.getElementById('p_loop');
+
+// Simulate left-click on p_loop
+pLoop.emit('tap');
+
+// Verify consumed nodes removed: p_loop, t_loop, t_src, t_snk
+if (cy.getElementById('p_loop').length !== 0) {
+  throw new Error('p_loop should have been removed after Live Fold Reduction (While Loop)');
+}
+if (cy.getElementById('t_loop').length !== 0) {
+  throw new Error('t_loop should have been removed after Live Fold Reduction (While Loop)');
+}
+if (cy.getElementById('t_src').length !== 0) {
+  throw new Error('t_src should have been removed after Live Fold Reduction (While Loop)');
+}
+if (cy.getElementById('t_snk').length !== 0) {
+  throw new Error('t_snk should have been removed after Live Fold Reduction (While Loop)');
+}
+
+// Verify boundary places remain
+if (cy.getElementById('p_in').length !== 1) {
+  throw new Error('p_in should remain on canvas after while fold');
+}
+if (cy.getElementById('p_out').length !== 1) {
+  throw new Error('p_out should remain on canvas after while fold');
+}
+
+// Verify opaque component created
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) {
+  throw new Error('Opaque component c_01 was not created');
+}
+
+// ProM formula: tau_new = tau(t_src) + tau(t_snk) + 2.0 * tau(t_loop) = 2.0 + 1.0 + 2.0 * 3.0 = 9.0
+if (c01.data('tau') !== 9.0) {
+  throw new Error('Expected tau 9.0, got ' + c01.data('tau'));
+}
+// omega = (cfg.loop / 3.0) * tau(t_loop) = 1.0 * 3.0 = 3.0
+if (c01.data('omega') !== 3.0) {
+  throw new Error('Expected omega 3.0, got ' + c01.data('omega'));
+}
+if (c01.data('component_type') !== 'While') {
+  throw new Error('Expected component_type While, got ' + c01.data('component_type'));
+}
+if (c01.data('is_opaque') !== true) {
+  throw new Error('Expected is_opaque true');
+}
+
+// Verify boundary arcs between p_in -> c_01 -> p_out
+const inEdges = c01.incomers('edge');
+if (inEdges.length !== 1 || inEdges[0].source().id() !== 'p_in') {
+  throw new Error('Incomer to c_01 not from p_in');
+}
+const outEdges = c01.outgoers('edge');
+if (outEdges.length !== 1 || outEdges[0].target().id() !== 'p_out') {
+  throw new Error('Outgoer from c_01 not to p_out');
+}
+
+// Verify consumed subnet storage for local unfold
+const sub = c01.data('consumedSubnet') || c01.data('consumedSubgraph');
+if (!sub) {
+  throw new Error('c_01 missing consumedSubnet');
+}
+if (sub.consumedPlaceId !== 'p_loop') {
+  throw new Error('consumedSubnet wrong placeId: ' + sub.consumedPlaceId);
+}
+if (sub.t_loop_id !== 't_loop' || sub.t_src_id !== 't_src' || sub.t_snk_id !== 't_snk') {
+  throw new Error('consumedSubnet wrong transition IDs: ' + JSON.stringify(sub));
+}
+if (sub.nodes.length !== 4) {
+  throw new Error('consumedSubnet nodes length expected 4, got ' + sub.nodes.length);
+}
+if (sub.internalEdges.length !== 4) {
+  throw new Error('consumedSubnet internalEdges length expected 4, got ' + sub.internalEdges.length);
+}
+
+// Verify inspector panel opened on newly created while component
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('Inspector panel did not open for c_01');
+}
+if (inspectorTau.textContent !== '9.0') {
+  throw new Error('Inspector tau expected 9.0, got ' + inspectorTau.textContent);
+}
+if (inspectorType.textContent !== 'While') {
+  throw new Error('Inspector type expected While, got ' + inspectorType.textContent);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_while_contraction_tau_and_omega_match_python_fold_engine(self):
+        """Validates that Live Fold Reduction (While Loop) calculations match Python fold_while."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import fold_while, FoldConfig
+
+        # 1. Python calculation
+        py_net = PetriNet()
+        p_in = py_net.add_place("p_in", initial_tokens=1)
+        p_loop = py_net.add_place("p_loop", initial_tokens=0)
+        p_out = py_net.add_place("p_out", initial_tokens=0)
+
+        t_src = py_net.add_transition("t_src", metadata={"tau": 1.5})
+        t_loop = py_net.add_transition("t_loop", metadata={"tau": 2.5})
+        t_snk = py_net.add_transition("t_snk", metadata={"tau": 3.5})
+
+        py_net.add_arc(p_in, t_src)
+        py_net.add_arc(t_src, p_loop)
+        py_net.add_arc(p_loop, t_loop)
+        py_net.add_arc(t_loop, p_loop)
+        py_net.add_arc(p_loop, t_snk)
+        py_net.add_arc(t_snk, p_out)
+
+        py_folded, py_step = fold_while(py_net, step_number=1, config=FoldConfig())
+        self.assertIsNotNone(py_step)
+        expected_tau = py_step.tau
+        expected_omega = py_step.omega
+        expected_sm = py_step.running_sm
+
+        self.assertEqual(expected_tau, 10.0)  # 1.5 + 3.5 + 2.0 * 2.5 = 10.0
+        self.assertEqual(expected_omega, 2.5)  # (3.0 / 3.0) * 2.5 = 2.5
+        self.assertEqual(expected_sm, 10.0)
+
+        # 2. JS calculation
+        net_literal = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 },
+    { id: 'p_loop', label: 'loop_head', initial_tokens: 0 },
+    { id: 'p_out', label: 'out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_src', label: 'enter', tau: 1.5, metadata: { tau: 1.5 } },
+    { id: 't_loop', label: 'body', tau: 2.5, metadata: { tau: 2.5 } },
+    { id: 't_snk', label: 'exit', tau: 3.5, metadata: { tau: 3.5 } }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_src' },
+    { source: 't_src', target: 'p_loop' },
+    { source: 'p_loop', target: 't_loop' },
+    { source: 't_loop', target: 'p_loop' },
+    { source: 'p_loop', target: 't_snk' },
+    { source: 't_snk', target: 'p_out' }
+  ]
+}"""
+        test_logic = """
+const pLoop = cy.getElementById('p_loop');
+const res = foldEngine.executeWhileContraction(pLoop);
+
+if (!res.success) {
+  throw new Error('Live Fold Reduction (While Loop) failed: ' + res.message);
+}
+
+const c01 = cy.getElementById('c_01');
+const result = {
+  tau: c01.data('tau'),
+  omega: c01.data('omega'),
+  running_sm: foldEngine.calculateSMScore()
+};
+
+console.log(JSON.stringify(result));
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
+        self.assertEqual(js_data["running_sm"], expected_sm)
+
 
 if __name__ == "__main__":
     unittest.main()
