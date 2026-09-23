@@ -82,6 +82,22 @@ def _get_callee_net(
 
 
 
+def _decorate_node_hierarchy(
+    meta: Dict[str, Any],
+    compound_id: str,
+    fn_name: str,
+    prefix: str,
+) -> None:
+    """Decorates a node's metadata dictionary with parent compound and enclosing function hierarchy."""
+    meta["inline_expansion"] = True
+    if "parent" not in meta or meta["parent"] is None:
+        meta["parent"] = compound_id
+    elif prefix and meta.get("parent"):
+        meta["parent"] = f"{prefix}{meta['parent']}"
+    if "enclosing_function" not in meta or meta["enclosing_function"] is None:
+        meta["enclosing_function"] = fn_name
+
+
 def _splice_callee_net(
     caller_net: PetriNet,
     call_transition: Transition,
@@ -144,7 +160,7 @@ def _splice_callee_net(
     caller_parent = call_transition.parent
 
     # Register compound container in caller_net
-    caller_net.add_compound(
+    compound = caller_net.add_compound(
         id=compound_id,
         label=f"{fn_name}()",
         function_name=fn_name,
@@ -154,33 +170,29 @@ def _splice_callee_net(
 
     # Re-parent and register any nested compounds from callee_net
     for c in callee_net.compounds:
-        c_copy = dict(c)
-        orig_id = c_copy["id"]
+        orig_id = c.id
         prefixed_id = f"{prefix}{orig_id}" if prefix else orig_id
-        c_copy["id"] = prefixed_id
-        if c_copy.get("parent") is None:
-            c_copy["parent"] = compound_id
-        elif prefix and c_copy.get("parent"):
-            c_copy["parent"] = f"{prefix}{c_copy['parent']}"
+        if c.parent is None:
+            new_parent = compound_id
+        elif prefix and c.parent:
+            new_parent = f"{prefix}{c.parent}"
+        else:
+            new_parent = c.parent
+        nested_node_ids = {f"{prefix}{nid}" if prefix else nid for nid in (c.node_ids or set())}
         caller_net.add_compound(
-            id=c_copy["id"],
-            label=c_copy.get("label", c_copy["id"]),
-            function_name=c_copy.get("function_name", ""),
-            file=c_copy.get("file", ""),
-            parent=c_copy.get("parent"),
+            id=prefixed_id,
+            label=c.label or orig_id,
+            function_name=c.function_name or "",
+            file=c.file or "",
+            parent=new_parent,
+            node_ids=nested_node_ids,
         )
 
     cloned_transitions: Dict[str, Transition] = {}
     for ct in callee_net.transitions:
         new_id = f"{prefix}{ct.id}"
         new_meta = dict(ct.metadata) if ct.metadata is not None else {}
-        new_meta["inline_expansion"] = True
-        if "parent" not in new_meta or new_meta["parent"] is None:
-            new_meta["parent"] = compound_id
-        elif prefix and new_meta.get("parent"):
-            new_meta["parent"] = f"{prefix}{new_meta['parent']}"
-        if "enclosing_function" not in new_meta or new_meta["enclosing_function"] is None:
-            new_meta["enclosing_function"] = fn_name
+        _decorate_node_hierarchy(new_meta, compound_id, fn_name, prefix)
 
         cloned_t = caller_net.add_transition(
             id=new_id,
@@ -197,13 +209,7 @@ def _splice_callee_net(
             continue
         new_id = f"{prefix}{cp.id}"
         new_meta = dict(cp.metadata) if cp.metadata is not None else {}
-        new_meta["inline_expansion"] = True
-        if "parent" not in new_meta or new_meta["parent"] is None:
-            new_meta["parent"] = compound_id
-        elif prefix and new_meta.get("parent"):
-            new_meta["parent"] = f"{prefix}{new_meta['parent']}"
-        if "enclosing_function" not in new_meta or new_meta["enclosing_function"] is None:
-            new_meta["enclosing_function"] = fn_name
+        _decorate_node_hierarchy(new_meta, compound_id, fn_name, prefix)
 
         cloned_p = caller_net.add_place(
             id=new_id,
@@ -213,6 +219,9 @@ def _splice_callee_net(
             metadata=new_meta,
         )
         cloned_places[cp.id] = cloned_p
+
+    compound.node_ids.update(t.id for t in cloned_transitions.values())
+    compound.node_ids.update(p.id for p in cloned_places.values())
 
     for a in callee_net.arcs:
         if a.source.id == callee_source_place.id:
@@ -289,17 +298,11 @@ def _inline_expand_recursive(
         caller_function = next((cs.caller_function for cs in call_sites if cs.caller_function), None)
 
     # Ensure caller net root nodes have enclosing_function and parent initialized
-    for p in composite_net.places:
-        if p.metadata is None or "parent" not in p.metadata:
-            p.parent = None
-        if p.enclosing_function is None and caller_function:
-            p.enclosing_function = caller_function
-
-    for t in composite_net.transitions:
-        if t.metadata is None or "parent" not in t.metadata:
-            t.parent = None
-        if t.enclosing_function is None and caller_function:
-            t.enclosing_function = caller_function
+    for node in list(composite_net.places) + list(composite_net.transitions):
+        if node.metadata is None or "parent" not in node.metadata:
+            node.parent = None
+        if node.enclosing_function is None and caller_function:
+            node.enclosing_function = caller_function
 
     if max_depth <= 0:
         return composite_net

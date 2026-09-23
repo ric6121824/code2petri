@@ -707,6 +707,62 @@ class TestHierarchyMetadata(unittest.TestCase):
         self.assertEqual(cloned_t.parent, "compound_a")
         self.assertEqual(cloned_t.enclosing_function, "func_a")
 
+    def test_node_base_inheritance_and_properties(self):
+        """Validates that Place and Transition inherit from NodeBase and share property accessors."""
+        from code2petri.model import NodeBase
+        p = Place("p_test", "test place", parent="comp1", enclosing_function="test_fn")
+        t = Transition("t_test", "test trans", parent="comp1", enclosing_function="test_fn")
+
+        self.assertIsInstance(p, NodeBase)
+        self.assertIsInstance(t, NodeBase)
+        self.assertEqual(p.parent, "comp1")
+        self.assertEqual(p.enclosing_function, "test_fn")
+        self.assertEqual(t.parent, "comp1")
+        self.assertEqual(t.enclosing_function, "test_fn")
+
+        # Mutate properties
+        p.parent = "comp2"
+        p.enclosing_function = "other_fn"
+        self.assertEqual(p.parent, "comp2")
+        self.assertEqual(p.enclosing_function, "other_fn")
+        self.assertEqual(p.to_dict()["parent"], "comp2")
+        self.assertEqual(p.to_dict()["enclosing_function"], "other_fn")
+
+    def test_compound_container_dataclass_and_dict_compatibility(self):
+        """Validates CompoundContainer type, attribute access, and dict-like compatibility."""
+        from code2petri.model import CompoundContainer
+        comp = CompoundContainer(
+            id="c_worker",
+            label="worker()",
+            function_name="worker",
+            file="worker.py",
+            parent="c_main",
+            node_ids={"p0", "t0"},
+        )
+        self.assertEqual(comp.id, "c_worker")
+        self.assertEqual(comp.label, "worker()")
+        self.assertEqual(comp.function_name, "worker")
+        self.assertEqual(comp.file, "worker.py")
+        self.assertEqual(comp.parent, "c_main")
+        self.assertEqual(comp.node_ids, {"p0", "t0"})
+
+        # Dict compatibility
+        self.assertEqual(comp["id"], "c_worker")
+        self.assertEqual(comp["function_name"], "worker")
+        self.assertEqual(comp.get("file"), "worker.py")
+        self.assertEqual(comp.get("nonexistent", "fallback"), "fallback")
+        d = dict(comp)
+        self.assertEqual(d["id"], "c_worker")
+        self.assertEqual(d["function_name"], "worker")
+
+        # Integration in PetriNet
+        net = PetriNet()
+        c = net.add_compound("c1", "fn()", "fn", file="a.py", parent=None, node_ids={"p1"})
+        self.assertIsInstance(c, CompoundContainer)
+        self.assertIn("p1", c.node_ids)
+        self.assertIs(net.compounds[0], c)
+
 
 if __name__ == '__main__':
     unittest.main()
+

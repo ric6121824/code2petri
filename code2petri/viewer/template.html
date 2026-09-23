@@ -238,8 +238,8 @@
         <span class="info-file-label">File:</span>
         <span id="info-filename" class="info-filename" title="{{SOURCE_FILE}}">{{FILENAME}}</span>
       </div>
-      <h4 id="info-step-title">Petri Net View</h4>
-      <p id="info-step-desc">Interactive Petri net graph representation.</p>
+      <h4 id="info-step-title">{{MODE_LABEL}}</h4>
+      <p id="info-step-desc">{{MODE_DESC}}</p>
       <div class="legend">
         <div class="legend-item"><div class="legend-swatch place"></div>Place</div>
         <div class="legend-item"><div class="legend-swatch trans"></div>Transition</div>
@@ -350,6 +350,7 @@
               function_name: c.function_name,
               file: c.file,
               is_compound: true,
+              composite_preassembled: true,
               parent: c.parent || undefined,
               type: 'Compound Function Container'
             },
@@ -858,7 +859,7 @@
       cy.on('mouseover', 'node', function(evt) {
         if (isPanningDrag) return;
         const n = evt.target;
-        if (n.data('resolved') === true || expandedNodes.has(n.id()) || n.hasClass('compound')) {
+        if ((n.data('resolved') === true || expandedNodes.has(n.id()) || n.hasClass('compound')) && n.data('composite_preassembled') !== true) {
           if (cyContainer) cyContainer.style.cursor = 'pointer';
         }
       });
@@ -871,6 +872,8 @@
       cy.on('tap', 'node', function(evt) {
         const targetNode = evt.target;
         const targetId = targetNode.id();
+
+        if (targetNode.data('composite_preassembled') === true) return;
 
         // 1. If clicked node is an expanded compound node, collapse it
         if (expandedNodes.has(targetId) || targetNode.hasClass('compound')) {
@@ -934,8 +937,6 @@
           if (foldControls.parentNode) {
             foldControls.remove();
           }
-          infoTitle.textContent = 'Composite Petri Net View';
-          infoDesc.textContent = 'Fully expanded composite Petri net with inlined function subnets and parent hierarchy.';
         }
       }
 

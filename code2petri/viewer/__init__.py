@@ -56,18 +56,14 @@ def generate_html(
     title: Optional[str] = None,
     callee_nets: Optional[Dict[str, Any]] = None,
     source_file: Optional[str] = None,
-    composite_net: Optional[Union[PetriNet, Dict[str, Any]]] = None,
-    mode: Optional[str] = None,
 ) -> str:
     """Generates a 100% self-contained offline HTML viewer for a PetriNet or FoldResult.
 
-    :param net_or_fold: A PetriNet instance (for static --no-fold view) or a FoldResult
-                        instance (for interactive fold playback).
+    :param net_or_fold: A PetriNet instance (for static --no-fold view or composite view)
+                        or a FoldResult instance (for interactive fold playback).
     :param title: Optional title to display in the header.
     :param callee_nets: Optional dictionary of pre-computed raw callee nets keyed by symbol name.
     :param source_file: Optional source file path or name being visualized.
-    :param composite_net: Optional fully-wired Composite Net (PetriNet or dict) to display.
-    :param mode: Optional mode override ('fold', 'no-fold', or 'composite').
     :return: Complete HTML document string with inlined Cytoscape, Dagre, and graph data.
     """
     template = _load_template()
@@ -78,28 +74,27 @@ def generate_html(
     file_display = os.path.basename(source_file) if source_file else ""
 
     is_composite = (
-        mode == "composite"
-        or composite_net is not None
-        or (
-            isinstance(net_or_fold, PetriNet)
-            and bool(getattr(net_or_fold, "compounds", None))
-            and mode is None
-        )
+        isinstance(net_or_fold, PetriNet)
+        and bool(getattr(net_or_fold, "compounds", None))
+    ) or (
+        isinstance(net_or_fold, dict)
+        and bool(net_or_fold.get("compounds"))
     )
 
     if is_composite:
-        target_comp = composite_net if composite_net is not None else net_or_fold
-        if isinstance(target_comp, PetriNet):
-            comp_dict = target_comp.to_dict()
-            compounds = [dict(c) for c in target_comp.compounds]
-        elif isinstance(target_comp, dict):
-            comp_dict = target_comp
-            compounds = list(target_comp.get("compounds", []))
+        if isinstance(net_or_fold, PetriNet):
+            comp_dict = net_or_fold.to_dict()
+            compounds = [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in net_or_fold.compounds]
+        elif isinstance(net_or_fold, dict):
+            comp_dict = net_or_fold
+            compounds = list(net_or_fold.get("compounds", []))
         else:
             comp_dict = {}
             compounds = []
 
         display_title = title if title is not None else "Composite Petri Net"
+        mode_label = "Composite Petri Net View"
+        mode_desc = "Fully expanded composite Petri net with inlined function subnets."
         payload: Dict[str, Any] = {
             "mode": "composite",
             "title": display_title,
@@ -113,16 +108,20 @@ def generate_html(
     elif isinstance(net_or_fold, FoldResult):
         fold_dict = net_or_fold.to_dict()
         display_title = title if title is not None else f"SM Score = {net_or_fold.final_sm}"
+        mode_label = "Fold Reduction View"
+        mode_desc = "Interactive step playback of ProM-aligned structural reductions."
         payload = {
-            "mode": mode or "fold",
+            "mode": "fold",
             "title": display_title,
             **fold_dict,
         }
     else:
         net_dict = net_or_fold.to_dict() if isinstance(net_or_fold, PetriNet) else (net_or_fold if isinstance(net_or_fold, dict) else {})
         display_title = title if title is not None else "Petri Net"
+        mode_label = "Petri Net View"
+        mode_desc = "Interactive Petri net graph representation."
         payload = {
-            "mode": mode or "no-fold",
+            "mode": "no-fold",
             "title": display_title,
             "initial_net": net_dict,
             "fold_steps": [],
@@ -148,6 +147,8 @@ def generate_html(
     rendered = rendered.replace("{{SOURCE_FILE}}", escaped_source_file)
     rendered = rendered.replace("{{FILENAME}}", escaped_filename)
     rendered = rendered.replace("{{FILE_BOX_STYLE}}", file_box_style)
+    rendered = rendered.replace("{{MODE_LABEL}}", html.escape(mode_label))
+    rendered = rendered.replace("{{MODE_DESC}}", html.escape(mode_desc))
 
     return rendered
 

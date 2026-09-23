@@ -321,6 +321,81 @@ class TestCLIFoldAndInlineIntegration(unittest.TestCase):
         self.assertNotIn("fold_steps", data)
         self.assertNotIn("final_sm", data)
 
+    def test_html_output_with_context_implicitly_activates_composite_mode(self):
+        """Validates that generating HTML with --context implicitly produces composite net without --inline."""
+        out_html = os.path.join(self.temp_dir.name, "implicit_comp.html")
+        main([
+            self.app_js,
+            "-t", "loop",
+            "--context", self.game_of_life_dir,
+            "-o", out_html,
+        ])
+        self.assertTrue(os.path.exists(out_html))
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        import re
+        m = re.search(r'<script id="code2petri-data" type="application/json">\s*(\{.*?\})\s*</script>', content, re.DOTALL)
+        self.assertIsNotNone(m)
+        data = json.loads(m.group(1))
+        self.assertEqual(data["mode"], "composite")
+        self.assertIn("compounds", data)
+        self.assertGreater(len(data["compounds"]), 0)
+        t_ids = [t["id"] for t in data["initial_net"]["transitions"]]
+        self.assertTrue(any("WebGLEngine.step" in tid for tid in t_ids))
+
+    def test_html_output_with_context_expands_to_maximum_depth_by_default(self):
+        """Validates that composite HTML expands to maximum depth by default without --inline-depth."""
+        code = (
+            "def leaf():\n"
+            "    z = 1\n"
+            "\n"
+            "def branch():\n"
+            "    leaf()\n"
+            "\n"
+            "def root():\n"
+            "    branch()\n"
+        )
+        src_file = os.path.join(self.temp_dir.name, "depth_test.py")
+        with open(src_file, "w", encoding="utf-8") as f:
+            f.write(code)
+
+        out_html = os.path.join(self.temp_dir.name, "max_depth.html")
+        main([
+            src_file,
+            "-t", "root",
+            "--context", self.temp_dir.name,
+            "-o", out_html,
+        ])
+        self.assertTrue(os.path.exists(out_html))
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        import re
+        m = re.search(r'<script id="code2petri-data" type="application/json">\s*(\{.*?\})\s*</script>', content, re.DOTALL)
+        self.assertIsNotNone(m)
+        data = json.loads(m.group(1))
+        self.assertEqual(data["mode"], "composite")
+        # Both branch and leaf must be in compounds
+        fn_names = [c["function_name"] for c in data["compounds"]]
+        self.assertIn("branch", fn_names)
+        self.assertIn("leaf", fn_names)
+
+    def test_fold_flag_with_composite_html_logs_warning(self):
+        """Validates that --fold alongside --inline with composite HTML logs a warning about incompatibility."""
+        out_html = os.path.join(self.temp_dir.name, "warning.html")
+        with self.assertLogs("code2petri", level="WARNING") as cm:
+            main([
+                self.app_js,
+                "-t", "loop",
+                "--context", self.game_of_life_dir,
+                "--inline",
+                "--fold",
+                "-o", out_html,
+            ])
+        self.assertTrue(any("--fold is not compatible with composite HTML output and will be ignored." in msg for msg in cm.output))
+
 
 if __name__ == "__main__":
     unittest.main()
+

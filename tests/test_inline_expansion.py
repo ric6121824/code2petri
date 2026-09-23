@@ -820,6 +820,24 @@ class TestInlineExpansionEngine(unittest.TestCase):
         for lc in leaf_comps:
             self.assertIn(lc["parent"], branch_ids)
 
+    def test_decorate_node_hierarchy_helper(self):
+        """Validates _decorate_node_hierarchy applies inline_expansion, parent, and enclosing_function."""
+        from code2petri.inline import _decorate_node_hierarchy
+
+        meta = {}
+        _decorate_node_hierarchy(meta, compound_id="comp_1", fn_name="my_func", prefix="")
+        self.assertTrue(meta["inline_expansion"])
+        self.assertEqual(meta["parent"], "comp_1")
+        self.assertEqual(meta["enclosing_function"], "my_func")
+
+        # With existing parent and prefix
+        nested_meta = {"parent": "inner_comp", "enclosing_function": "inner_func"}
+        _decorate_node_hierarchy(nested_meta, compound_id="comp_outer", fn_name="outer_func", prefix="pfx__")
+        self.assertTrue(nested_meta["inline_expansion"])
+        self.assertEqual(nested_meta["parent"], "pfx__inner_comp")
+        self.assertEqual(nested_meta["enclosing_function"], "inner_func")
+
 
 if __name__ == "__main__":
     unittest.main()
+

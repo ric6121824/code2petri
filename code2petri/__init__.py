@@ -1,5 +1,15 @@
-from code2petri.engine import code2petri
-from code2petri.model import Place, Transition, Arc, PetriNet, CallResolution, RenderingConfig, escape_dot
+from code2petri.engine import code2petri, UNLIMITED_DEPTH
+from code2petri.model import (
+    Place,
+    Transition,
+    Arc,
+    PetriNet,
+    CallResolution,
+    RenderingConfig,
+    escape_dot,
+    NodeBase,
+    CompoundContainer,
+)
 from code2petri.walker_protocol import WalkerProtocol, CallSite, WalkResult
 from code2petri.javascript_walker import JavascriptWalker
 from code2petri.python_walker import PythonWalker
@@ -36,6 +46,8 @@ __all__ = [
     "CallResolution",
     "RenderingConfig",
     "escape_dot",
+    "NodeBase",
+    "CompoundContainer",
     "CallSite",
     "WalkResult",
     "WalkerProtocol",
@@ -44,6 +56,7 @@ __all__ = [
     "Symbol",
     "SymbolTable",
     "code2petri",
+    "UNLIMITED_DEPTH",
     "FoldConfig",
     "Component",
     "ComponentType",

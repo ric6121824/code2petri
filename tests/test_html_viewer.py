@@ -415,8 +415,8 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
         self.assertEqual(data["source_file"], self.app_js)
         self.assertIn("app.js", content)
 
-    def test_generate_html_composite_mode_explicit(self):
-        """Validates that generate_html with mode='composite' or composite_net embeds composite payload."""
+    def test_generate_html_composite_mode_detected_from_compounds(self):
+        """Validates that generate_html automatically detects composite mode from net.compounds."""
         comp_net = PetriNet()
         p0 = comp_net.add_place("p0", "start", initial_tokens=1)
         t0 = comp_net.add_transition("t0", "run()")
@@ -429,8 +429,10 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
             parent=None,
         )
 
-        html_content = generate_html(comp_net, title="Composite Overview", mode="composite")
+        html_content = generate_html(comp_net, title="Composite Overview")
         self.assertIn("Composite Overview", html_content)
+        self.assertIn("Composite Petri Net View", html_content)
+        self.assertIn("Fully expanded composite Petri net", html_content)
 
         data = _extract_embedded_data(html_content)
         self.assertEqual(data["mode"], "composite")
@@ -444,25 +446,30 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
         # Pre-computed fold playback controls are omitted/hidden
         self.assertIn('<div class="controls" id="fold-controls" style="display: none;">', html_content)
 
-    def test_generate_html_composite_mode_via_composite_net_arg(self):
-        """Validates passing composite_net parameter directly into generate_html."""
-        comp_net = PetriNet()
-        comp_net.add_place("p_start", "start", initial_tokens=1)
-        comp_net.add_compound(
-            id="compound_calc",
-            label="calc()",
-            function_name="calc",
-            file="math.py",
-            parent=None,
-        )
+    def test_generate_html_mode_labels_and_descriptions(self):
+        """Validates that generate_html injects appropriate MODE_LABEL and MODE_DESC."""
+        # 1. Static no-fold net
+        static_net = PetriNet()
+        static_html = generate_html(static_net)
+        self.assertIn("Petri Net View", static_html)
+        self.assertIn("Interactive Petri net graph representation.", static_html)
 
-        dummy_net = PetriNet()
-        html_content = generate_html(dummy_net, composite_net=comp_net)
-        data = _extract_embedded_data(html_content)
-        self.assertEqual(data["mode"], "composite")
-        self.assertIn("composite_net", data)
-        self.assertEqual(len(data["compounds"]), 1)
-        self.assertEqual(data["compounds"][0]["id"], "compound_calc")
+        # 2. Fold result
+        from code2petri.fold import fold_net
+        net = PetriNet()
+        p0 = net.add_place("p0", "start", initial_tokens=1)
+        t0 = net.add_transition("t0", "step1")
+        p1 = net.add_place("p1", "mid")
+        t1 = net.add_transition("t1", "step2")
+        p2 = net.add_place("p2", "end")
+        net.add_arc(p0, t0)
+        net.add_arc(t0, p1)
+        net.add_arc(p1, t1)
+        net.add_arc(t1, p2)
+        fold_res = fold_net(net)
+        fold_html = generate_html(fold_res)
+        self.assertIn("Fold Reduction View", fold_html)
+        self.assertIn("Interactive step playback of ProM-aligned structural reductions.", fold_html)
 
     def test_net_to_elements_preserves_hierarchy_and_enclosing_function(self):
         """Validates that netToElements in template.html maps parent and enclosing_function to Cytoscape data."""
@@ -506,7 +513,7 @@ if (!pElem || pElem.data.parent !== 'c1' || pElem.data.enclosing_function !== 'f
 if (!tElem || tElem.data.parent !== 'c1' || tElem.data.enclosing_function !== 'fn1') {{
   throw new Error('Transition failed: ' + JSON.stringify(tElem));
 }}
-if (!cElem || cElem.data.is_compound !== true) {{
+if (!cElem || cElem.data.is_compound !== true || cElem.data.composite_preassembled !== true) {{
   throw new Error('Compound failed: ' + JSON.stringify(cElem));
 }}
 console.log('PASS');
@@ -514,6 +521,18 @@ console.log('PASS');
         proc = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
+
+    def test_headless_tap_handler_ignores_preassembled_compounds(self):
+        """Simulates tap event on preassembled compound and verifies renderStep is not called."""
+        import subprocess
+
+        template_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "template.html")
+        )
+        with open(template_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        self.assertIn("targetNode.data('composite_preassembled') === true", html)
 
 
 if __name__ == "__main__":

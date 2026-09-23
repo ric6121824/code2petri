@@ -50,6 +50,8 @@ def discover_context_files(context_paths: Sequence[str]) -> List[str]:
     return discovered
 
 
+UNLIMITED_DEPTH: int = 999
+
 IMAGE_EXTENSIONS = {"png", "svg"}
 TEXT_SERIALIZERS = {
     "pnml": lambda model, **_: model.to_pnml(),
@@ -104,7 +106,7 @@ def code2petri(
     no_fold: bool = False,
     weights: Optional[Union[str, FoldConfig]] = None,
     inline: bool = False,
-    inline_depth: int = 1,
+    inline_depth: Optional[int] = None,
 ) -> Union[PetriNet, FoldResult, None]:
     """Generates a Petri net from a source file and writes the serialized output.
 
@@ -118,7 +120,7 @@ def code2petri(
     :param no_fold: If True, explicitly disables fold analysis.
     :param weights: Path or JSON string overriding default FoldConfig penalty weights.
     :param inline: If True, activates inline expansion of resolved call transitions (requires context).
-    :param inline_depth: Maximum recursion depth for inline expansion (default: 1).
+    :param inline_depth: Maximum recursion depth for inline expansion (default: unlimited for composite HTML, 1 otherwise).
     :return: The generated PetriNet instance (or FoldResult if fold is active), or None if list_functions is True.
     """
     logger = logging.getLogger("code2petri")
@@ -201,18 +203,33 @@ def code2petri(
         logger.debug("Resolving %d call site(s) against symbol table...", len(call_sites))
         symbol_table.resolve_call_sites(net, call_sites)
 
+    # Determine execution modes
+    is_html = (ext == "html")
+    effective_inline = inline or (is_html and bool(context) and not fold)
+    is_composite_html = is_html and (inline or effective_inline)
+
+    if is_composite_html and fold:
+        logger.warning("--fold is not compatible with composite HTML output and will be ignored.")
+
+    fold_active = (fold or (is_html and not effective_inline)) and not no_fold and not is_composite_html
+
+    if inline_depth is None:
+        actual_inline_depth = UNLIMITED_DEPTH if is_composite_html else 1
+    else:
+        actual_inline_depth = inline_depth
+
     # Inline Expansion (runs first if active)
-    if inline:
+    if effective_inline:
         if not context:
             raise AssertionError("Inline expansion requires --context to be provided.")
         if symbol_table is None:
             symbol_table = SymbolTable()
-        logger.info("Executing inline expansion with depth %d...", inline_depth)
+        logger.info("Executing inline expansion with depth %d...", actual_inline_depth)
         net = inline_expand(
             net,
             call_sites,
             symbol_table,
-            max_depth=inline_depth,
+            max_depth=actual_inline_depth,
             caller_function=target_function,
         )
 
@@ -222,11 +239,6 @@ def code2petri(
         len(net.transitions),
         len(net.arcs),
     )
-
-    # Determine fold activation
-    is_html = (ext == "html")
-    is_composite_html = is_html and inline
-    fold_active = (fold or (is_html and not inline)) and not no_fold and not is_composite_html
 
     fold_result: Optional[FoldResult] = None
     if fold_active:
@@ -254,14 +266,11 @@ def code2petri(
             serializer_kwargs = {}
             if ext == "html":
                 serializer_kwargs["source_file"] = source_path
-                if is_composite_html:
-                    serializer_kwargs["composite_net"] = net
-                    serializer_kwargs["mode"] = "composite"
-                elif symbol_table is not None:
+                if symbol_table is not None:
                     serializer_kwargs["callee_nets"] = precompute_callee_nets(
                         call_sites=call_sites,
                         symbol_table=symbol_table,
-                        max_depth=inline_depth,
+                        max_depth=actual_inline_depth,
                     )
             content = TEXT_SERIALIZERS[ext](model_to_serialize, **serializer_kwargs)
 
@@ -331,8 +340,8 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
     parser.add_argument(
         "--inline-depth",
         type=int,
-        default=1,
-        help="Maximum depth for inline expansion of nested callee calls (default: 1).",
+        default=None,
+        help="Maximum depth for inline expansion of nested callee calls (default: unlimited for composite HTML, 1 otherwise).",
     )
     parser.add_argument(
         "--quiet", "-q",
