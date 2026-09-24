@@ -121,6 +121,41 @@ updateFoldableHighlights();
 """
 
 
+def _make_sese_test_net(leak_in: bool = False, leak_out: bool = False) -> str:
+    """Generates a synthetic Petri Net JSON literal for SESE testing with optional boundary leaks."""
+    places = [
+        "{ id: 'p_src', label: 'src', initial_tokens: 0 }",
+        "{ id: 'p1', label: 'p1', initial_tokens: 0 }",
+        "{ id: 'p_snk', label: 'snk', initial_tokens: 0 }",
+    ]
+    transitions = [
+        "{ id: 't1', label: 't1' }",
+        "{ id: 't2', label: 't2' }",
+    ]
+    arcs = [
+        "{ source: 'p_src', target: 't1' }",
+        "{ source: 't1', target: 'p1' }",
+        "{ source: 'p1', target: 't2' }",
+        "{ source: 't2', target: 'p_snk' }",
+    ]
+    if leak_in:
+        places.append("{ id: 'p_ext_in', label: 'ext_in', initial_tokens: 0 }")
+        transitions.append("{ id: 't_leak_in', label: 'leak_in' }")
+        arcs.append("{ source: 'p_ext_in', target: 't_leak_in' }")
+        arcs.append("{ source: 't_leak_in', target: 'p1' }")
+    if leak_out:
+        places.append("{ id: 'p_ext_out', label: 'ext_out', initial_tokens: 0 }")
+        transitions.append("{ id: 't_leak_out', label: 'leak_out' }")
+        arcs.append("{ source: 'p1', target: 't_leak_out' }")
+        arcs.append("{ source: 't_leak_out', target: 'p_ext_out' }")
+
+    places_str = ",\n    ".join(places)
+    transitions_str = ",\n    ".join(transitions)
+    arcs_str = ",\n    ".join(arcs)
+
+    return f"""{{\n  places: [\n    {places_str}\n  ],\n  transitions: [\n    {transitions_str}\n  ],\n  arcs: [\n    {arcs_str}\n  ]\n}}"""
+
+
 class TestHTMLViewerGenerator(unittest.TestCase):
     def setUp(self):
         self.net = PetriNet()
@@ -2009,32 +2044,28 @@ console.log('PASS');
 
     def test_sese_boundary_invariant_exclusion_headless(self):
         """Verifies that nodes violating the SESE boundary invariant (external in/out leaks) are rejected."""
+        # 0. Baseline: without leaks, forms valid SESE
+        net_valid = _make_sese_test_net()
+        test_logic_valid = """
+const sese = foldEngine.sese || new SESEInfrastructure(cy);
+const res = sese.findSESENodes('p_src', 'p_snk');
+if (!res || res.size !== 5) {
+  throw new Error('Valid base subnet should form SESE of size 5');
+}
+console.log('PASS');
+"""
+        script0 = _setup_live_fold_test_harness(net_valid, test_logic_valid)
+        proc0 = _run_node_script(script0)
+        self.assertEqual(proc0.returncode, 0, f"Node script failed: {proc0.stderr}")
+        self.assertIn("PASS", proc0.stdout)
+
         # 1. Leak INTO internal node from outside
-        net_leak_in = """{
-  places: [
-    { id: 'p_src', label: 'src', initial_tokens: 0 },
-    { id: 'p1', label: 'p1', initial_tokens: 0 },
-    { id: 'p2', label: 'p2', initial_tokens: 0 },
-    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
-  ],
-  transitions: [
-    { id: 't1', label: 't1' },
-    { id: 't2', label: 't2' },
-    { id: 't_ext_in', label: 'external_in' }
-  ],
-  arcs: [
-    { source: 'p_src', target: 't1' },
-    { source: 't1', target: 'p_snk' },
-    { source: 'p_src', target: 't2' },
-    { source: 't2', target: 'p_snk' },
-    { source: 't_ext_in', target: 'p1' }
-  ]
-}"""
+        net_leak_in = _make_sese_test_net(leak_in=True)
         test_logic_in = """
 const sese = foldEngine.sese || new SESEInfrastructure(cy);
 const res = sese.findSESENodes('p_src', 'p_snk');
-// Leak in arc from t_ext_in -> p1 causes fwd != bwd
-if (res !== null && res.has('p1')) {
+// Leak-in arc from t_leak_in -> p1 causes bwd to expand to external nodes, so fwd != bwd
+if (res !== null) {
   throw new Error('Subnet with external leak in should not form SESE');
 }
 console.log('PASS');
@@ -2045,27 +2076,7 @@ console.log('PASS');
         self.assertIn("PASS", proc1.stdout)
 
         # 2. Leak OUT of internal node to outside
-        net_leak_out = """{
-  places: [
-    { id: 'p_src', label: 'src', initial_tokens: 0 },
-    { id: 'p1', label: 'p1', initial_tokens: 0 },
-    { id: 'p_snk', label: 'snk', initial_tokens: 0 },
-    { id: 'p_ext_out', label: 'external_out', initial_tokens: 0 }
-  ],
-  transitions: [
-    { id: 't1', label: 't1' },
-    { id: 't2', label: 't2' },
-    { id: 't_leak', label: 'leak' }
-  ],
-  arcs: [
-    { source: 'p_src', target: 't1' },
-    { source: 't1', target: 'p1' },
-    { source: 'p1', target: 't2' },
-    { source: 't2', target: 'p_snk' },
-    { source: 'p1', target: 't_leak' },
-    { source: 't_leak', target: 'p_ext_out' }
-  ]
-}"""
+        net_leak_out = _make_sese_test_net(leak_out=True)
         test_logic_out = """
 const sese = foldEngine.sese || new SESEInfrastructure(cy);
 const res = sese.findSESENodes('p_src', 'p_snk');
@@ -2150,8 +2161,9 @@ const allNodes = ['p_src', 'p1', 'p2', 'p_join', 'p_snk', 't1', 't2', 't_split',
 
 const full = sese.calculateSubnetSymmetry(allNodes, false);
 const subnet = sese.calculateSubnetSymmetry(allNodes, true);
+const defSubnet = sese.calculateSubnetSymmetry(allNodes);
 
-console.log(JSON.stringify({ full, subnet }));
+console.log(JSON.stringify({ full, subnet, defSubnet }));
 """
         node_script = _setup_live_fold_test_harness(net_literal, test_logic)
         proc = _run_node_script(node_script)
@@ -2162,9 +2174,11 @@ console.log(JSON.stringify({ full, subnet }));
         self.assertEqual(js_res["full"]["diffT"], py_diff_t_full)
         self.assertEqual(js_res["subnet"]["diffP"], py_diff_p_subnet)
         self.assertEqual(js_res["subnet"]["diffT"], py_diff_t_subnet)
+        self.assertEqual(js_res["defSubnet"]["diffP"], py_diff_p_subnet)
+        self.assertEqual(js_res["defSubnet"]["diffT"], py_diff_t_subnet)
 
-    def test_sese_performance_large_composite_graph_headless(self):
-        """Validates that SESE detection runs efficiently (<50ms) on a composite graph with 200+ nodes."""
+    def test_sese_performance_large_composite_net_headless(self):
+        """Validates that SESE detection runs efficiently (<50ms) on a Composite Net with 200+ nodes."""
         net_literal = """{
   places: [],
   transitions: [],

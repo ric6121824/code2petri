@@ -1193,7 +1193,10 @@
 
         _reachability(startNodeId, boundaryNodeId, getNeighbors) {
           const queue = [startNodeId];
-          const nodes = new Set([startNodeId, boundaryNodeId]);
+          const nodes = new Set([startNodeId]);
+          if (boundaryNodeId !== null && boundaryNodeId !== undefined) {
+            nodes.add(boundaryNodeId);
+          }
           while (queue.length > 0) {
             const currId = queue.shift();
             const neighbors = getNeighbors(currId);
@@ -1208,47 +1211,42 @@
           return nodes;
         }
 
+        _forwardNeighbors(currId) {
+          const node = this.cy.getElementById(currId);
+          if (!node || node.length === 0) return [];
+          return node.outgoers('edge').map(function(edge) {
+            return edge.target().id();
+          });
+        }
+
+        _backwardNeighbors(currId) {
+          const node = this.cy.getElementById(currId);
+          if (!node || node.length === 0) return [];
+          return node.incomers('edge').map(function(edge) {
+            return edge.source().id();
+          });
+        }
+
         forwardReachability(sourceId, sinkId) {
           const self = this;
           return this._reachability(sourceId, sinkId, function(currId) {
-            const node = self.cy.getElementById(currId);
-            if (!node || node.length === 0) return [];
-            return node.outgoers('edge').map(function(edge) {
-              return edge.target().id();
-            });
+            return self._forwardNeighbors(currId);
           });
         }
 
         backwardReachability(sinkId, sourceId) {
           const self = this;
           return this._reachability(sinkId, sourceId, function(currId) {
-            const node = self.cy.getElementById(currId);
-            if (!node || node.length === 0) return [];
-            return node.incomers('edge').map(function(edge) {
-              return edge.source().id();
-            });
+            return self._backwardNeighbors(currId);
           });
         }
 
         isReachable(sourceId, sinkId) {
           if (sourceId === sinkId) return true;
-          const queue = [sourceId];
-          const visited = new Set([sourceId]);
-          while (queue.length > 0) {
-            const currId = queue.shift();
-            const node = this.cy.getElementById(currId);
-            if (!node || node.length === 0) continue;
-            const edges = node.outgoers('edge');
-            for (let i = 0; i < edges.length; i++) {
-              const tgtId = edges[i].target().id();
-              if (tgtId === sinkId) return true;
-              if (!visited.has(tgtId)) {
-                visited.add(tgtId);
-                queue.push(tgtId);
-              }
-            }
-          }
-          return false;
+          const self = this;
+          return this._reachability(sourceId, null, function(currId) {
+            return self._forwardNeighbors(currId);
+          }).has(sinkId);
         }
 
         findSESENodes(sourceId, sinkId, minTransitions = 2) {
@@ -1285,7 +1283,7 @@
           return null;
         }
 
-        calculateSymmetryMultiplier(componentNodeIds, targetNodeIds = null, useSubnetDegrees = false) {
+        calculateSymmetryMultiplier(componentNodeIds, targetNodeIds = null, useSubnetDegrees = true) {
           const compSet = new Set(componentNodeIds);
           const targetSet = targetNodeIds ? new Set(targetNodeIds) : compSet;
 
@@ -1326,7 +1324,7 @@
           return Math.abs(splits - joins) + 1;
         }
 
-        calculateSubnetSymmetry(componentNodeIds, useSubnetDegrees = false) {
+        calculateSubnetSymmetry(componentNodeIds, useSubnetDegrees = true) {
           const compSet = new Set(componentNodeIds);
           const placeIds = [];
           const transIds = [];
@@ -1388,34 +1386,6 @@
             loop: options.loop !== undefined ? options.loop : 3.0
           };
           this.sese = new SESEInfrastructure(cy);
-        }
-
-        forwardReachability(sourceId, sinkId) {
-          return this.sese.forwardReachability(sourceId, sinkId);
-        }
-
-        backwardReachability(sinkId, sourceId) {
-          return this.sese.backwardReachability(sinkId, sourceId);
-        }
-
-        isReachable(sourceId, sinkId) {
-          return this.sese.isReachable(sourceId, sinkId);
-        }
-
-        findSESENodes(sourceId, sinkId, minTransitions = 2) {
-          return this.sese.findSESENodes(sourceId, sinkId, minTransitions);
-        }
-
-        calculateSymmetryMultiplier(componentNodeIds, targetNodeIds = null, useSubnetDegrees = false) {
-          return this.sese.calculateSymmetryMultiplier(componentNodeIds, targetNodeIds, useSubnetDegrees);
-        }
-
-        calculateSubnetSymmetry(componentNodeIds, useSubnetDegrees = false) {
-          return this.sese.calculateSubnetSymmetry(componentNodeIds, useSubnetDegrees);
-        }
-
-        findAllSESECandidates(boundaryIds = null, minTransitions = 2) {
-          return this.sese.findAllSESECandidates(boundaryIds, minTransitions);
         }
 
         static generateTauBadgeSvg(tau) {
