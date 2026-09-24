@@ -3667,6 +3667,9 @@ console.log('PASS');
 """
         node_script = _setup_live_fold_test_harness(net_literal, test_logic)
         proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_unfold_opaque_component_right_click_headless(self):
         """Ticket 40 Acceptance Criteria 1: Right-clicking an opaque component restores the nodes and edges it consumed."""
         net_literal = """{
@@ -3694,8 +3697,15 @@ if (!foldRes.success) throw new Error('Initial fold failed');
 const c01 = cy.getElementById('c_01');
 if (!c01 || c01.length === 0) throw new Error('c_01 not found after fold');
 
-// Simulate right-click (cxttap event)
-c01.emit('cxttap');
+// Test executeComponentLocalUnfold directly to verify domain vocabulary
+const unfoldRes = foldEngine.executeComponentLocalUnfold(c01);
+if (!unfoldRes.success) throw new Error('executeComponentLocalUnfold failed: ' + unfoldRes.reason);
+if (unfoldRes.type !== 'opaque_transition') {
+  throw new Error('Expected domain type opaque_transition, got ' + unfoldRes.type);
+}
+if (unfoldRes.opaqueId !== 'c_01' || unfoldRes.unfoldedOpaqueId !== 'c_01') {
+  throw new Error('Expected opaqueId c_01, got ' + unfoldRes.opaqueId);
+}
 
 // c_01 should be removed
 if (cy.getElementById('c_01').inside()) {
@@ -3712,6 +3722,15 @@ if (cy.getElementById('c_01').inside()) {
 const sm = foldEngine.calculateSMScore();
 if (sm !== 2.0) {
   throw new Error('Expected SM score 2.0 after unfold, got ' + sm);
+}
+
+// Re-fold and test cxttap (right-click) triggering
+const refoldRes = foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
+if (!refoldRes.success) throw new Error('Refold failed');
+const c01_again = cy.getElementById('c_01');
+c01_again.emit('cxttap');
+if (cy.getElementById('c_01').inside()) {
+  throw new Error('c_01 should be removed after cxttap right click');
 }
 
 console.log('PASS');
@@ -3841,6 +3860,12 @@ const restoredMidOut = edgesAfterUnfold.filter(e => e.source().id() === 'p_mid' 
 
 if (restoredIn.length !== 1) throw new Error('Boundary in-arc p_pre -> t_src not restored');
 if (restoredOut.length !== 1) throw new Error('Boundary out-arc t_snk -> p_post not restored');
+if (restoredIn[0].id() !== 'arc_in') {
+  throw new Error('Expected restored boundary in-arc ID arc_in, got ' + restoredIn[0].id());
+}
+if (restoredOut[0].id() !== 'arc_out') {
+  throw new Error('Expected restored boundary out-arc ID arc_out, got ' + restoredOut[0].id());
+}
 if (restoredMidIn.length !== 1) throw new Error('Internal arc t_src -> p_mid not restored');
 if (restoredMidOut.length !== 1) throw new Error('Internal arc p_mid -> t_snk not restored');
 
@@ -4026,6 +4051,136 @@ c01.emit('cxttap');
 // Now c_01 should unfold
 if (cy.getElementById('c_01').inside()) {
   throw new Error('c_01 should unfold when hasDragged is false');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unfold_nested_compound_isolation_headless(self):
+        """Ticket 40 Review Finding: Unfolding an outer compound does not cascade into nested sub-compounds."""
+        net_literal = """{
+  compounds: [
+    { id: 'compound_outer', function_name: 'outer', label: 'outer()' },
+    { id: 'compound_inner', function_name: 'inner', label: 'inner()', parent: 'compound_outer' }
+  ],
+  places: [
+    { id: 'p_out0', label: 'out0', initial_tokens: 1, parent: 'compound_outer' },
+    { id: 'p_out1', label: 'out1', initial_tokens: 0, parent: 'compound_outer' },
+    { id: 'p_out2', label: 'out2', initial_tokens: 0, parent: 'compound_outer' },
+    { id: 'p_in0', label: 'in0', initial_tokens: 0, parent: 'compound_inner' },
+    { id: 'p_in1', label: 'in1', initial_tokens: 0, parent: 'compound_inner' },
+    { id: 'p_in2', label: 'in2', initial_tokens: 0, parent: 'compound_inner' }
+  ],
+  transitions: [
+    { id: 't_out1', label: 'tout1', tau: 1.0, parent: 'compound_outer' },
+    { id: 't_out2', label: 'tout2', tau: 1.0, parent: 'compound_outer' },
+    { id: 't_in1', label: 'tin1', tau: 1.0, parent: 'compound_inner' },
+    { id: 't_in2', label: 'tin2', tau: 1.0, parent: 'compound_inner' }
+  ],
+  arcs: [
+    { source: 'p_out0', target: 't_out1' },
+    { source: 't_out1', target: 'p_out1' },
+    { source: 'p_out1', target: 't_out2' },
+    { source: 't_out2', target: 'p_out2' },
+    { source: 'p_in0', target: 't_in1' },
+    { source: 't_in1', target: 'p_in1' },
+    { source: 'p_in1', target: 't_in2' },
+    { source: 't_in2', target: 'p_in2' }
+  ]
+}"""
+        test_logic = """
+// 1. Fold inside inner compound
+const foldIn = foldEngine.executeSinglePlaceContraction(cy.getElementById('p_in1'));
+if (!foldIn.success) throw new Error('Inner fold failed: ' + foldIn.message);
+
+const compInner = cy.getElementById('compound_inner');
+const c01 = cy.getElementById('c_01');
+if (!c01 || !c01.inside()) throw new Error('c_01 missing in inner compound');
+
+// 2. Fold inside outer compound
+const foldOut = foldEngine.executeSinglePlaceContraction(cy.getElementById('p_out1'));
+if (!foldOut.success) throw new Error('Outer fold failed: ' + foldOut.message);
+
+const c02 = cy.getElementById('c_02');
+if (!c02 || !c02.inside()) throw new Error('c_02 missing in outer compound');
+
+// 3. Unfold the outer compound specifically (simulating a collapsed compound state with nested compound)
+const compOuter = cy.getElementById('compound_outer');
+compOuter.addClass('collapsed-compound');
+compOuter.data('collapsed_opaque_id', 'c_02');
+const unfoldOuterRes = foldEngine.executeComponentLocalUnfold(compOuter);
+if (!unfoldOuterRes.success) throw new Error('Unfolding outer compound failed: ' + unfoldOuterRes.reason);
+
+// 4. Verify outer compound direct elements are restored
+['p_out1', 't_out1', 't_out2'].forEach(function(id) {
+  const n = cy.getElementById(id);
+  if (!n || !n.inside()) throw new Error('Expected node ' + id + ' to be restored in outer compound');
+  if (n.data('parent') !== 'compound_outer') {
+    throw new Error('Expected ' + id + ' parent to be compound_outer, got ' + n.data('parent'));
+  }
+});
+if (cy.getElementById('c_02').inside()) {
+  throw new Error('c_02 should be removed after unfolding outer compound');
+}
+
+// 5. CRITICAL: Inner compound MUST NOT have cascaded - c_01 must remain folded!
+if (!cy.getElementById('c_01').inside()) {
+  throw new Error('c_01 in inner compound was erroneously unfolded by outer unfold!');
+}
+if (cy.getElementById('p_in1').inside() || cy.getElementById('t_in1').inside() || cy.getElementById('t_in2').inside()) {
+  throw new Error('Inner compound internal elements should NOT have been restored');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unfold_corrupt_opaque_node_fails_safely_headless(self):
+        """Ticket 40 Review Finding: Corrupt opaque nodes without consumedSubnet fail safely without infinite loop."""
+        net_literal = """{
+  places: [{ id: 'p0', label: 'start', initial_tokens: 1 }],
+  transitions: [{ id: 't0', label: 't0', tau: 1.0 }],
+  arcs: [{ source: 'p0', target: 't0' }]
+}"""
+        test_logic = """
+// 1. Standalone corrupt opaque node
+cy.add({
+  group: 'nodes',
+  data: { id: 'c_corrupt', is_opaque: true }
+});
+
+const res1 = foldEngine.executeComponentLocalUnfold('c_corrupt');
+if (res1.success) {
+  throw new Error('Expected corrupt opaque unfold to fail, but succeeded');
+}
+if (!res1.reason || !res1.reason.includes('Failed to unfold opaque transition')) {
+  throw new Error('Unexpected failure reason: ' + res1.reason);
+}
+
+// 2. Corrupt opaque child inside a collapsed compound
+cy.add({
+  group: 'nodes',
+  data: { id: 'comp_corrupt', is_collapsed_compound: true },
+  classes: 'compound collapsed-compound'
+});
+cy.add({
+  group: 'nodes',
+  data: { id: 'c_corrupt_child', parent: 'comp_corrupt', is_opaque: true }
+});
+
+const res2 = foldEngine.executeComponentLocalUnfold('comp_corrupt');
+if (res2.success) {
+  throw new Error('Expected corrupt compound child unfold to fail, but succeeded');
+}
+if (!res2.reason || !res2.reason.includes('Failed to unfold internal opaque transition')) {
+  throw new Error('Unexpected failure reason for compound: ' + res2.reason);
 }
 
 console.log('PASS');

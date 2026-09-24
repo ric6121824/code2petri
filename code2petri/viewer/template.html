@@ -622,7 +622,7 @@
           elements.push({
             group: 'edges',
             data: {
-              id: 'arc_' + idx + '_' + src + '_' + tgt,
+              id: a.id || ('arc_' + idx + '_' + src + '_' + tgt),
               source: src,
               target: tgt
             },
@@ -1629,6 +1629,26 @@
           return parseFloat(sm.toFixed(2));
         }
 
+        isCollapsedCompound(node) {
+          if (!node || typeof node.hasClass !== 'function') return false;
+          return node.hasClass('collapsed-compound') ||
+            node.data('is_collapsed_compound') === true ||
+            Boolean(node.data('collapsed_opaque_id'));
+        }
+
+        isOpaqueTransition(node) {
+          if (!node || typeof node.hasClass !== 'function') return false;
+          return node.data('is_opaque') === true ||
+            node.data('opaque') === true ||
+            node.hasClass('component') ||
+            node.hasClass('opaque');
+        }
+
+        isCollapsedChild(node) {
+          if (!node || typeof node.hasClass !== 'function') return false;
+          return node.hasClass('collapsed-child') || node.data('is_collapsed_child') === true;
+        }
+
         _getCompoundFunctionName(compoundNode) {
           if (!compoundNode) return '';
           let fnName = compoundNode.data('function_name');
@@ -1660,7 +1680,7 @@
 
             if (children.length === 1) {
               const onlyChild = children[0];
-              if (onlyChild.data('is_opaque') === true || onlyChild.data('opaque') === true || onlyChild.hasClass('component') || onlyChild.hasClass('opaque')) {
+              if (self.isOpaqueTransition(onlyChild)) {
                 // Transition to Collapsed Compound State automatically
                 compoundNode.addClass('collapsed-compound');
                 const opaqueId = onlyChild.id();
@@ -1688,7 +1708,7 @@
             }
 
             // If not meeting criteria and was collapsed, uncollapse (e.g. after unfold or reset)
-            if (compoundNode.hasClass('collapsed-compound')) {
+            if (self.isCollapsedCompound(compoundNode)) {
               compoundNode.removeClass('collapsed-compound');
               compoundNode.removeData('collapsed_opaque_id');
               compoundNode.removeData('is_collapsed_compound');
@@ -1707,7 +1727,7 @@
             // Restore any children that might have collapsed-child class if > 1 children
             if (children.length > 1) {
               children.forEach(function(child) {
-                if (child.hasClass('collapsed-child')) {
+                if (self.isCollapsedChild(child)) {
                   child.removeClass('collapsed-child');
                   child.removeData('is_collapsed_child');
                   if (child.data('original_label')) {
@@ -1733,7 +1753,7 @@
           const parentId = node.data('parent');
           if (parentId) {
             const parentNode = this.cy.getElementById(parentId);
-            if (parentNode && parentNode.length > 0 && parentNode.hasClass('collapsed-compound')) {
+            if (parentNode && parentNode.length > 0 && this.isCollapsedCompound(parentNode)) {
               const fnName = this._getCompoundFunctionName(parentNode);
               const newCollapsedLabel = `${fnName} (${trimmed})`;
               parentNode.data('collapsed_label', newCollapsedLabel);
@@ -1752,16 +1772,17 @@
           const compoundNode = this.cy.getElementById(compoundId);
           if (!compoundNode || compoundNode.length === 0) return false;
 
-          if (compoundNode.hasClass('collapsed-compound') || compoundNode.data('collapsed_opaque_id')) {
+          if (this.isCollapsedCompound(compoundNode)) {
             return true;
           }
 
+          const self = this;
           const children = this.cy.nodes().filter(function(n) {
             return n.data('parent') === compoundId;
           });
           if (children.length === 1) {
             const child = children[0];
-            if (child.data('is_opaque') === true || child.data('opaque') === true || child.hasClass('component') || child.hasClass('opaque')) {
+            if (self.isOpaqueTransition(child)) {
               return true;
             }
           }
@@ -1771,27 +1792,37 @@
 
         _findInternalOpaqueChild(compoundId) {
           const self = this;
-          const descendantIds = new Set();
-          function collectDescendants(pId) {
-            self.cy.nodes().forEach(function(n) {
-              if (n.data('parent') === pId) {
-                descendantIds.add(n.id());
-                if (n.hasClass('compound')) {
-                  collectDescendants(n.id());
-                }
-              }
-            });
-          }
-          collectDescendants(compoundId);
-
-          const opaqueChildren = this.cy.nodes().filter(function(n) {
-            return descendantIds.has(n.id()) &&
-              (n.data('is_opaque') === true || n.data('opaque') === true || n.hasClass('component') || n.hasClass('opaque'));
+          const directOpaqueChildren = this.cy.nodes().filter(function(n) {
+            return n.data('parent') === compoundId && self.isOpaqueTransition(n);
           });
-          return opaqueChildren.length > 0 ? opaqueChildren[0] : null;
+          return directOpaqueChildren.length > 0 ? directOpaqueChildren[0] : null;
         }
 
-        _unfoldSingleComponent(opaqueNodeOrId) {
+        _reinjectBoundaryArc(sourceId, targetId, bArc, idx) {
+          const src = this.cy.getElementById(sourceId);
+          const tgt = this.cy.getElementById(targetId);
+          if (src.length === 0 || tgt.length === 0) return;
+
+          const baseEdgeId = bArc.edgeId || bArc.id || `arc_restore_${sourceId}_${targetId}_${idx}`;
+          let edgeId = baseEdgeId;
+          let counter = 0;
+          while (this.cy.getElementById(edgeId).length > 0) {
+            edgeId = `${baseEdgeId}_${++counter}`;
+          }
+
+          this.cy.add({
+            group: 'edges',
+            data: {
+              id: edgeId,
+              source: sourceId,
+              target: targetId,
+              weight: bArc.weight || 1
+            },
+            classes: bArc.classes || 'arc'
+          });
+        }
+
+        _unfoldSingleOpaqueTransition(opaqueNodeOrId) {
           const opaqueNode = typeof opaqueNodeOrId === 'string'
             ? this.cy.getElementById(opaqueNodeOrId)
             : opaqueNodeOrId;
@@ -1859,24 +1890,7 @@
             consumedSubnet.boundaryInArcs.forEach(function(bArc, idx) {
               const origTarget = bArc.originalTargetId || (bArc.targetId !== opaqueId ? bArc.targetId : null);
               if (!origTarget) return;
-              const src = self.cy.getElementById(bArc.sourceId);
-              const tgt = self.cy.getElementById(origTarget);
-              if (src.length > 0 && tgt.length > 0) {
-                let edgeId = bArc.edgeId || bArc.id || (`arc_restore_${bArc.sourceId}_${origTarget}_${idx}`);
-                if (self.cy.getElementById(edgeId).length > 0) {
-                  edgeId = `arc_restore_${bArc.sourceId}_${origTarget}_${Date.now()}_${idx}`;
-                }
-                self.cy.add({
-                  group: 'edges',
-                  data: {
-                    id: edgeId,
-                    source: bArc.sourceId,
-                    target: origTarget,
-                    weight: bArc.weight || 1
-                  },
-                  classes: bArc.classes || 'arc'
-                });
-              }
+              self._reinjectBoundaryArc(bArc.sourceId, origTarget, bArc, idx);
             });
           }
 
@@ -1885,33 +1899,15 @@
             consumedSubnet.boundaryOutArcs.forEach(function(bArc, idx) {
               const origSource = bArc.originalSourceId || (bArc.sourceId !== opaqueId ? bArc.sourceId : null);
               if (!origSource) return;
-              const src = self.cy.getElementById(origSource);
-              const tgt = self.cy.getElementById(bArc.targetId);
-              if (src.length > 0 && tgt.length > 0) {
-                let edgeId = bArc.edgeId || bArc.id || (`arc_restore_${origSource}_${bArc.targetId}_${idx}`);
-                if (self.cy.getElementById(edgeId).length > 0) {
-                  edgeId = `arc_restore_${origSource}_${bArc.targetId}_${Date.now()}_${idx}`;
-                }
-                self.cy.add({
-                  group: 'edges',
-                  data: {
-                    id: edgeId,
-                    source: origSource,
-                    target: bArc.targetId,
-                    weight: bArc.weight || 1
-                  },
-                  classes: bArc.classes || 'arc'
-                });
-              }
+              self._reinjectBoundaryArc(origSource, bArc.targetId, bArc, idx);
             });
           }
 
-          // 8. Prune step from history if present
-          this.history = this.history.filter(function(h) {
-            return h.opaqueId !== opaqueId && (!h.step || h.step.opaqueId !== opaqueId);
-          });
-
           return { opaqueId: opaqueId, restoredSubnet: consumedSubnet };
+        }
+
+        _unfoldSingleComponent(opaqueNodeOrId) {
+          return this._unfoldSingleOpaqueTransition(opaqueNodeOrId);
         }
 
         executeComponentLocalUnfold(targetNodeOrId) {
@@ -1924,18 +1920,14 @@
           }
 
           // Case A: Target is a Collapsed Compound State (or the collapsed child of one)
-          const isCollapsedCompound = targetNode.hasClass('collapsed-compound') ||
-            targetNode.data('is_collapsed_compound') === true ||
-            Boolean(targetNode.data('collapsed_opaque_id'));
-
           let targetCompoundNode = null;
-          if (isCollapsedCompound) {
+          if (this.isCollapsedCompound(targetNode)) {
             targetCompoundNode = targetNode;
-          } else if (targetNode.hasClass('collapsed-child') || targetNode.data('is_collapsed_child') === true) {
+          } else if (this.isCollapsedChild(targetNode)) {
             const pId = targetNode.data('parent');
             if (pId) {
               const pNode = this.cy.getElementById(pId);
-              if (pNode && pNode.length > 0 && (pNode.hasClass('collapsed-compound') || pNode.data('collapsed_opaque_id'))) {
+              if (pNode && pNode.length > 0 && this.isCollapsedCompound(pNode)) {
                 targetCompoundNode = pNode;
               }
             }
@@ -1945,9 +1937,14 @@
             const compoundId = targetCompoundNode.id();
             let internalOpaque = this._findInternalOpaqueChild(compoundId);
             let unfoldedCount = 0;
-            let maxPasses = 100;
-            while (internalOpaque && maxPasses-- > 0) {
-              this._unfoldSingleComponent(internalOpaque);
+            while (internalOpaque) {
+              const res = this._unfoldSingleOpaqueTransition(internalOpaque);
+              if (!res) {
+                return {
+                  success: false,
+                  reason: `Failed to unfold internal opaque transition '${internalOpaque.id()}'.`
+                };
+              }
               unfoldedCount++;
               internalOpaque = this._findInternalOpaqueChild(compoundId);
             }
@@ -1962,29 +1959,25 @@
             };
           }
 
-          // Case B: Target is an opaque component node
-          const isOpaque = targetNode.data('is_opaque') === true ||
-            targetNode.data('opaque') === true ||
-            targetNode.hasClass('component') ||
-            targetNode.hasClass('opaque');
-
-          if (isOpaque) {
+          // Case B: Target is an opaque transition node
+          if (this.isOpaqueTransition(targetNode)) {
             const opaqueId = targetNode.id();
-            const res = this._unfoldSingleComponent(targetNode);
+            const res = this._unfoldSingleOpaqueTransition(targetNode);
             if (!res) {
-              return { success: false, reason: "Failed to unfold component." };
+              return { success: false, reason: "Failed to unfold opaque transition." };
             }
             this._updateCollapsedCompoundStates();
             const newSM = this.calculateSMScore();
             return {
               success: true,
-              type: 'opaque_component',
+              type: 'opaque_transition',
               opaqueId: opaqueId,
+              unfoldedOpaqueId: opaqueId,
               sm_score: newSM
             };
           }
 
-          return { success: false, reason: "Target is neither an opaque component nor a collapsed compound." };
+          return { success: false, reason: "Target is neither an opaque transition nor a collapsed compound." };
         }
 
         canSinglePlaceContract(placeNode) {
@@ -2103,6 +2096,7 @@
           // 3. Serialize boundary arcs and consumed subnet BEFORE any mutations occur
           const boundaryInArcs = t_src.incomers('edge').map(function(edge) {
             return {
+              edgeId: edge.id(),
               sourceId: edge.source().id(),
               targetId: opaqueId,
               originalTargetId: t_src.id(),
@@ -2113,6 +2107,7 @@
 
           const boundaryOutArcs = t_snk.outgoers('edge').map(function(edge) {
             return {
+              edgeId: edge.id(),
               sourceId: opaqueId,
               originalSourceId: t_snk.id(),
               targetId: edge.target().id(),
@@ -3723,7 +3718,7 @@
 
           const res = meta.execute(foldEngine, node);
           if (res && res.success) {
-            if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined' && DAGRE_LAYOUT_OPTIONS && DAGRE_LAYOUT_OPTIONS.name) {
+            if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
               cy.layout(DAGRE_LAYOUT_OPTIONS).run();
             }
             if (typeof updateFoldableHighlights === 'function') {
@@ -3797,7 +3792,7 @@
         if (typeof foldEngine === 'undefined' || !foldEngine || !node) return false;
         const res = foldEngine.executeComponentLocalUnfold(node);
         if (res && res.success) {
-          if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined' && DAGRE_LAYOUT_OPTIONS && DAGRE_LAYOUT_OPTIONS.name) {
+          if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
             cy.layout(DAGRE_LAYOUT_OPTIONS).run();
           }
           if (typeof updateFoldableHighlights === 'function') {
@@ -3811,7 +3806,7 @@
         return false;
       }
 
-      // 5. Right-clicking an opaque component or collapsed compound triggers Component-Local Unfold
+      // 5. Right-clicking an opaque transition or collapsed compound triggers Component-Local Unfold
       cy.on('cxttap', 'node', function(evt) {
         if (typeof hasDragged !== 'undefined' && hasDragged) return;
         handleRightClickUnfold(evt.target);
