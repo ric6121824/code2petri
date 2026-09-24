@@ -2255,17 +2255,7 @@ console.log(`PASS: evaluated 40 SESE subnets on ${totalNodes} nodes in ${elapsed
         self.assertIn("PASS", proc.stdout)
 
 
-    def test_marked_graph_and_state_machine_styling_in_template(self):
-        """Verifies template.html includes contractible CSS styling for marked graph and state machine."""
-        html = _read_template_html()
-        self.assertIn("node.transition.contractible-marked-graph", html)
-        self.assertIn("#58a6ff", html)
-        self.assertIn("node.place.contractible-state-machine", html)
-        self.assertIn("#f0883e", html)
-
-    def test_marked_graph_detection_and_highlighting_headless(self):
-        """Validates that boundary transitions of marked graph SESE subnets receive .contractible-marked-graph class."""
-        net_literal = """{
+    MARKED_GRAPH_NET_JSON = """{
   places: [
     { id: 'p_in', label: 'in', initial_tokens: 1 },
     { id: 'p1', label: 'branch1', initial_tokens: 0 },
@@ -2273,8 +2263,8 @@ console.log(`PASS: evaluated 40 SESE subnets on ${totalNodes} nodes in ${elapsed
     { id: 'p_out', label: 'out', initial_tokens: 0 }
   ],
   transitions: [
-    { id: 't_src', label: 'fork()' },
-    { id: 't_snk', label: 'join()' }
+    { id: 't_src', label: 'fork()', tau: 2.0, metadata: { tau: 2.0 } },
+    { id: 't_snk', label: 'join()', tau: 3.0, metadata: { tau: 3.0 } }
   ],
   arcs: [
     { source: 'p_in', target: 't_src' },
@@ -2285,6 +2275,45 @@ console.log(`PASS: evaluated 40 SESE subnets on ${totalNodes} nodes in ${elapsed
     { source: 't_snk', target: 'p_out' }
   ]
 }"""
+
+    STATE_MACHINE_NET_JSON = """{
+  places: [
+    { id: 'p_src', label: 'src', initial_tokens: 1 },
+    { id: 'p_mid1', label: 'mid1', initial_tokens: 0 },
+    { id: 'p_mid2', label: 'mid2', initial_tokens: 0 },
+    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.5, metadata: { tau: 1.5 } },
+    { id: 't2', label: 't2', tau: 2.5, metadata: { tau: 2.5 } },
+    { id: 't3', label: 't3', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't4', label: 't4', tau: 2.0, metadata: { tau: 2.0 } },
+    { id: 't5', label: 't5', tau: 3.0, metadata: { tau: 3.0 } }
+  ],
+  arcs: [
+    { source: 'p_src', target: 't1' },
+    { source: 'p_src', target: 't3' },
+    { source: 't1', target: 'p_mid1' },
+    { source: 't3', target: 'p_mid2' },
+    { source: 'p_mid1', target: 't2' },
+    { source: 'p_mid1', target: 't5' },
+    { source: 't5', target: 'p_mid2' },
+    { source: 'p_mid2', target: 't4' },
+    { source: 't2', target: 'p_snk' },
+    { source: 't4', target: 'p_snk' }
+  ]
+}"""
+
+    def test_marked_graph_and_state_machine_styling_in_template(self):
+        """Verifies template.html includes contractible CSS styling for marked graph and state machine."""
+        html = _read_template_html()
+        self.assertIn("node.transition.contractible-marked-graph", html)
+        self.assertIn("#58a6ff", html)
+        self.assertIn("node.place.contractible-state-machine", html)
+        self.assertIn("#f0883e", html)
+
+    def test_marked_graph_detection_and_highlighting_headless(self):
+        """Validates that boundary transitions of marked graph SESE subnets receive .contractible-marked-graph class."""
         test_logic = """
 const tSrc = cy.getElementById('t_src');
 const tSnk = cy.getElementById('t_snk');
@@ -2309,7 +2338,7 @@ if (pIn.hasClass('contractible') || pOut.hasClass('contractible')) {
 
 console.log('PASS');
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        node_script = _setup_live_fold_test_harness(self.MARKED_GRAPH_NET_JSON, test_logic)
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
@@ -2342,26 +2371,6 @@ console.log('PASS');
         expected_sm = py_step.running_sm
 
         # 2. JS calculation
-        net_literal = """{
-  places: [
-    { id: 'p_in', label: 'in', initial_tokens: 1 },
-    { id: 'p1', label: 'branch1', initial_tokens: 0 },
-    { id: 'p2', label: 'branch2', initial_tokens: 0 },
-    { id: 'p_out', label: 'out', initial_tokens: 0 }
-  ],
-  transitions: [
-    { id: 't_src', label: 'fork()', tau: 2.0, metadata: { tau: 2.0 } },
-    { id: 't_snk', label: 'join()', tau: 3.0, metadata: { tau: 3.0 } }
-  ],
-  arcs: [
-    { source: 'p_in', target: 't_src' },
-    { source: 't_src', target: 'p1' },
-    { source: 't_src', target: 'p2' },
-    { source: 'p1', target: 't_snk' },
-    { source: 'p2', target: 't_snk' },
-    { source: 't_snk', target: 'p_out' }
-  ]
-}"""
         test_logic = """
 const tSrc = cy.getElementById('t_src');
 const res = foldEngine.executeMarkedGraphContraction(tSrc);
@@ -2424,7 +2433,7 @@ const result = {
 };
 console.log(JSON.stringify(result));
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        node_script = _setup_live_fold_test_harness(self.MARKED_GRAPH_NET_JSON, test_logic)
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         js_data = json.loads(proc.stdout.strip())
@@ -2435,33 +2444,6 @@ console.log(JSON.stringify(result));
 
     def test_state_machine_detection_and_highlighting_headless(self):
         """Validates that boundary places of State Machine SESE subnets receive .contractible-state-machine class."""
-        net_literal = """{
-  places: [
-    { id: 'p_src', label: 'src', initial_tokens: 1 },
-    { id: 'p_mid1', label: 'mid1', initial_tokens: 0 },
-    { id: 'p_mid2', label: 'mid2', initial_tokens: 0 },
-    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
-  ],
-  transitions: [
-    { id: 't1', label: 't1' },
-    { id: 't2', label: 't2' },
-    { id: 't3', label: 't3' },
-    { id: 't4', label: 't4' },
-    { id: 't5', label: 't5' }
-  ],
-  arcs: [
-    { source: 'p_src', target: 't1' },
-    { source: 'p_src', target: 't3' },
-    { source: 't1', target: 'p_mid1' },
-    { source: 't3', target: 'p_mid2' },
-    { source: 'p_mid1', target: 't2' },
-    { source: 'p_mid1', target: 't5' },
-    { source: 't5', target: 'p_mid2' },
-    { source: 'p_mid2', target: 't4' },
-    { source: 't2', target: 'p_snk' },
-    { source: 't4', target: 'p_snk' }
-  ]
-}"""
         test_logic = """
 const pSrc = cy.getElementById('p_src');
 const pSnk = cy.getElementById('p_snk');
@@ -2487,7 +2469,7 @@ cy.nodes('.transition').forEach(function(t) {
 
 console.log('PASS');
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        node_script = _setup_live_fold_test_harness(self.STATE_MACHINE_NET_JSON, test_logic)
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
@@ -2527,33 +2509,6 @@ console.log('PASS');
         expected_sm = py_step.running_sm
 
         # 2. JS model
-        net_literal = """{
-  places: [
-    { id: 'p_src', label: 'src', initial_tokens: 1 },
-    { id: 'p_mid1', label: 'mid1', initial_tokens: 0 },
-    { id: 'p_mid2', label: 'mid2', initial_tokens: 0 },
-    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
-  ],
-  transitions: [
-    { id: 't1', label: 't1', tau: 1.5, metadata: { tau: 1.5 } },
-    { id: 't2', label: 't2', tau: 2.5, metadata: { tau: 2.5 } },
-    { id: 't3', label: 't3', tau: 1.0, metadata: { tau: 1.0 } },
-    { id: 't4', label: 't4', tau: 2.0, metadata: { tau: 2.0 } },
-    { id: 't5', label: 't5', tau: 3.0, metadata: { tau: 3.0 } }
-  ],
-  arcs: [
-    { source: 'p_src', target: 't1' },
-    { source: 'p_src', target: 't3' },
-    { source: 't1', target: 'p_mid1' },
-    { source: 't3', target: 'p_mid2' },
-    { source: 'p_mid1', target: 't2' },
-    { source: 'p_mid1', target: 't5' },
-    { source: 't5', target: 'p_mid2' },
-    { source: 'p_mid2', target: 't4' },
-    { source: 't2', target: 'p_snk' },
-    { source: 't4', target: 'p_snk' }
-  ]
-}"""
         test_logic = """
 const pSrc = cy.getElementById('p_src');
 const res = foldEngine.executeStateMachineContraction(pSrc);
@@ -2613,7 +2568,7 @@ const result = {
 };
 console.log(JSON.stringify(result));
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        node_script = _setup_live_fold_test_harness(self.STATE_MACHINE_NET_JSON, test_logic)
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         js_data = json.loads(proc.stdout.strip())
@@ -2625,26 +2580,6 @@ console.log(JSON.stringify(result));
     def test_marked_graph_and_state_machine_tap_interaction_headless(self):
         """Validates that left-clicking boundary nodes triggers marked graph or state machine reduction and inspector."""
         # 1. Tap on marked graph boundary transition
-        net_literal_mg = """{
-  places: [
-    { id: 'p_in', label: 'in', initial_tokens: 1 },
-    { id: 'p1', label: 'branch1', initial_tokens: 0 },
-    { id: 'p2', label: 'branch2', initial_tokens: 0 },
-    { id: 'p_out', label: 'out', initial_tokens: 0 }
-  ],
-  transitions: [
-    { id: 't_src', label: 'fork()', tau: 2.0 },
-    { id: 't_snk', label: 'join()', tau: 3.0 }
-  ],
-  arcs: [
-    { source: 'p_in', target: 't_src' },
-    { source: 't_src', target: 'p1' },
-    { source: 't_src', target: 'p2' },
-    { source: 'p1', target: 't_snk' },
-    { source: 'p2', target: 't_snk' },
-    { source: 't_snk', target: 'p_out' }
-  ]
-}"""
         test_logic_mg = """
 const tSrc = cy.getElementById('t_src');
 tSrc.emit('tap');
@@ -2662,39 +2597,12 @@ if (inspectorType.textContent !== 'MarkedGraph') {
 
 console.log('PASS');
 """
-        node_script_mg = _setup_live_fold_test_harness(net_literal_mg, test_logic_mg)
+        node_script_mg = _setup_live_fold_test_harness(self.MARKED_GRAPH_NET_JSON, test_logic_mg)
         proc_mg = _run_node_script(node_script_mg)
         self.assertEqual(proc_mg.returncode, 0, f"Node script failed: {proc_mg.stderr}")
         self.assertIn("PASS", proc_mg.stdout)
 
         # 2. Tap on state machine boundary place
-        net_literal_sm = """{
-  places: [
-    { id: 'p_src', label: 'src', initial_tokens: 1 },
-    { id: 'p_mid1', label: 'mid1', initial_tokens: 0 },
-    { id: 'p_mid2', label: 'mid2', initial_tokens: 0 },
-    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
-  ],
-  transitions: [
-    { id: 't1', label: 't1', tau: 1.0 },
-    { id: 't2', label: 't2', tau: 1.0 },
-    { id: 't3', label: 't3', tau: 1.0 },
-    { id: 't4', label: 't4', tau: 1.0 },
-    { id: 't5', label: 't5', tau: 1.0 }
-  ],
-  arcs: [
-    { source: 'p_src', target: 't1' },
-    { source: 'p_src', target: 't3' },
-    { source: 't1', target: 'p_mid1' },
-    { source: 't3', target: 'p_mid2' },
-    { source: 'p_mid1', target: 't2' },
-    { source: 'p_mid1', target: 't5' },
-    { source: 't5', target: 'p_mid2' },
-    { source: 'p_mid2', target: 't4' },
-    { source: 't2', target: 'p_snk' },
-    { source: 't4', target: 'p_snk' }
-  ]
-}"""
         test_logic_sm = """
 const pSrc = cy.getElementById('p_src');
 pSrc.emit('tap');
@@ -2712,7 +2620,7 @@ if (inspectorType.textContent !== 'StateMachine') {
 
 console.log('PASS');
 """
-        node_script_sm = _setup_live_fold_test_harness(net_literal_sm, test_logic_sm)
+        node_script_sm = _setup_live_fold_test_harness(self.STATE_MACHINE_NET_JSON, test_logic_sm)
         proc_sm = _run_node_script(node_script_sm)
         self.assertEqual(proc_sm.returncode, 0, f"Node script failed: {proc_sm.stderr}")
         self.assertIn("PASS", proc_sm.stdout)

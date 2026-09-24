@@ -12,3 +12,8 @@
 - [x] Triggering a State Machine reduction collapses the subnet into a single opaque component with the correct tau and omega values
 - [x] JS tau and omega values match the Python fold engine for the same topologies
 - [x] Each resulting component stores enough information to restore the original subnet on demand
+
+## Implementation Notes
+- **Priority Gating (Lassen Def. 21)**: Structural SESE folds (Marked Graph & State Machine) are gated behind exhaustion of elementary reductions (`!this.hasElementaryReductions()`). This strictly adheres to Lassen & van der Aalst (2008) Definition 21 (Order of Reductions) to ensure sequences, choices, and loops are fully reduced before broader SESE components are contracted.
+- **Token Emptiness Requirement**: Internal places of SESE candidate subnets must have `initial_tokens === 0`. In workflow nets, marked internal places represent active concurrent state; folding over them would violate token conservation.
+- **Shared SESE Reduction Mechanics**: Both Marked Graph and State Machine contractions delegate to `_executeSESEReduction(candidate, boundaryConfigFn)`, unifying step indexing, node/edge extraction, compound pruning, and opaque node generation while cleanly isolating boundary arc reconnection semantics.

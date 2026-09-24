@@ -1445,10 +1445,36 @@
           return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
         }
 
-        _createOpaqueComponentNode(opaqueId, label, rawLabel, tau, omega, componentType, parentId, consumedSubnet, position = null) {
+        _createOpaqueComponentNode(optionsOrId, ...legacyArgs) {
+          let opts = {};
+          if (typeof optionsOrId === 'object' && optionsOrId !== null) {
+            opts = optionsOrId;
+          } else {
+            opts = {
+              opaqueId: optionsOrId,
+              label: legacyArgs[0],
+              rawLabel: legacyArgs[1],
+              tau: legacyArgs[2],
+              omega: legacyArgs[3],
+              componentType: legacyArgs[4],
+              parentId: legacyArgs[5],
+              consumedSubnet: legacyArgs[6],
+              position: legacyArgs[7] || null
+            };
+          }
+          const consumedSubnet = opts.consumedSubnet || {};
+          const opaqueId = opts.opaqueId || consumedSubnet.opaqueId;
+          const tau = opts.tau !== undefined ? opts.tau : consumedSubnet.tau;
+          const omega = opts.omega !== undefined ? opts.omega : consumedSubnet.omega;
+          const componentType = opts.componentType || consumedSubnet.componentType;
+          const parentId = opts.parentId !== undefined ? opts.parentId : (consumedSubnet.parentCompound || null);
+          const rawLabel = opts.rawLabel || opts.label || opaqueId;
+          const label = opts.label || opaqueId;
+          const position = opts.position || null;
+
           const newNodeData = {
             id: opaqueId,
-            label: label || opaqueId,
+            label: label,
             raw_label: rawLabel,
             type: 'Opaque Transition',
             component_type: componentType,
@@ -1824,6 +1850,9 @@
           return { ok: true, bundles: validBundles };
         }
 
+        // Adheres to Lassen & van der Aalst (2008) Definition 21 (Order of Reductions):
+        // Elementary reductions (Sequence -> Choice -> Loop) take precedence and must be
+        // exhausted before evaluating macro/SESE structural fold reductions.
         hasElementaryReductions() {
           const self = this;
           let found = false;
@@ -1843,6 +1872,8 @@
             if (this.canSinglePlaceContract(node).ok) return 'sequence';
             if (this.detectChoiceCandidates(node).ok) return 'choice';
             if (this.detectWhileCandidates(node).ok) return 'while';
+            // SESE structural reductions are gated behind exhaustion of elementary reductions
+            // per Lassen & van der Aalst (2008) Def. 21 to prevent premature macro folding.
             if (!this.hasElementaryReductions()) {
               const smCands = this.detectStateMachines();
               if (smCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
@@ -1852,6 +1883,8 @@
             return null;
           }
           if (node.hasClass('transition')) {
+            // SESE structural reductions are gated behind exhaustion of elementary reductions
+            // per Lassen & van der Aalst (2008) Def. 21.
             if (!this.hasElementaryReductions()) {
               const mgCands = this.detectMarkedGraphs();
               if (mgCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
@@ -2330,7 +2363,10 @@
           return true;
         }
 
-        _detectMacroCandidates(isMarkedGraph) {
+        // Detects SESE Subnets for structural folding (Marked Graph or State Machine).
+        // Internal places must have initial_tokens === 0 to preserve workflow net
+        // token conservation during live SESE structural folding.
+        _detectSESESubnetCandidates(isMarkedGraph) {
           const boundaryElements = isMarkedGraph
             ? this.cy.nodes('.transition')
             : this.cy.nodes('.place');
@@ -2434,11 +2470,11 @@
         }
 
         detectMarkedGraphs() {
-          return this._detectMacroCandidates(true);
+          return this._detectSESESubnetCandidates(true);
         }
 
         detectStateMachines() {
-          return this._detectMacroCandidates(false);
+          return this._detectSESESubnetCandidates(false);
         }
 
         _findCandidateForNode(candidates, nodeOrSrc, snk = null) {
@@ -2462,6 +2498,107 @@
           return null;
         }
 
+        _executeSESEReduction(candidate, boundaryConfigFn) {
+          this.stepCounter++;
+          const stepNum = this.stepCounter;
+          const opaqueId = 'c_' + String(stepNum).padStart(2, '0');
+
+          const config = boundaryConfigFn(candidate, opaqueId);
+
+          const consumedNodes = [];
+          config.consumedNodeIds.forEach(function(nid) {
+            const n = this.cy.getElementById(nid);
+            if (n && n.length > 0) {
+              consumedNodes.push({
+                group: 'nodes',
+                data: Object.assign({}, n.data()),
+                classes: n.classes().join(' '),
+                position: Object.assign({}, n.position())
+              });
+            }
+          }, this);
+
+          const consumedInternalEdges = [];
+          config.consumedNodeIds.forEach(function(nid) {
+            const n = this.cy.getElementById(nid);
+            if (n && n.length > 0) {
+              n.connectedEdges().forEach(function(e) {
+                if (config.isInternalEdge(e)) {
+                  if (!consumedInternalEdges.some(function(x) { return x.data.id === e.id(); })) {
+                    consumedInternalEdges.push({
+                      group: 'edges',
+                      data: Object.assign({}, e.data()),
+                      classes: e.classes().join(' ')
+                    });
+                  }
+                }
+              });
+            }
+          }, this);
+
+          const consumedCompounds = this._pruneConsumedCompounds(
+            config.consumedNodeIds,
+            config.parentCandidateIds,
+            config.parentId
+          );
+
+          const consumedSubnet = {
+            stepNumber: stepNum,
+            opaqueId: opaqueId,
+            componentType: candidate.componentType,
+            omega: candidate.omega,
+            tau: candidate.tauNew,
+            sourceId: candidate.sourceId,
+            sinkId: candidate.sinkId,
+            consumedNodeIds: Array.from(config.consumedNodeIds),
+            parentCompound: config.parentId,
+            consumedCompounds: consumedCompounds,
+            nodes: consumedNodes,
+            internalEdges: consumedInternalEdges,
+            boundaryInArcs: config.boundaryInArcs,
+            boundaryOutArcs: config.boundaryOutArcs
+          };
+
+          const self = this;
+          consumedCompounds.forEach(function(c) {
+            const pNode = self.cy.getElementById(c.data.id);
+            if (pNode.inside()) self.cy.remove(pNode);
+          });
+          config.consumedNodeIds.forEach(function(nid) {
+            const n = self.cy.getElementById(nid);
+            if (n && n.inside()) {
+              n.connectedEdges().forEach(function(e) {
+                if (e.inside()) self.cy.remove(e);
+              });
+              self.cy.remove(n);
+            }
+          });
+
+          const entryPos = config.entryPos || (consumedNodes.find(function(n) { return n.data.id === candidate.sourceId; }) || consumedNodes[0] || {}).position;
+          const opaqueNode = this._createOpaqueComponentNode({
+            opaqueId: opaqueId,
+            label: opaqueId,
+            rawLabel: config.rawLabel,
+            tau: candidate.tauNew,
+            omega: candidate.omega,
+            componentType: candidate.componentType,
+            parentId: config.parentId,
+            consumedSubnet: consumedSubnet,
+            position: entryPos
+          });
+
+          if (typeof config.addBoundaryArcs === 'function') {
+            config.addBoundaryArcs(opaqueId, self.cy);
+          }
+
+          return {
+            success: true,
+            message: `Folded ${candidate.componentType} (${config.rawSrc}..${config.rawSnk}) into '${opaqueId}' (ω=${candidate.omega}, τ=${candidate.tauNew}).`,
+            step: consumedSubnet,
+            node: opaqueNode
+          };
+        }
+
         executeMarkedGraphContraction(nodeOrSrc, snk = null) {
           const candidates = this.detectMarkedGraphs();
           const cand = this._findCandidateForNode(candidates, nodeOrSrc, snk);
@@ -2475,168 +2612,95 @@
             return { success: false, message: "Marked Graph boundary transitions not found on canvas." };
           }
 
-          this.stepCounter++;
-          const stepNum = this.stepCounter;
-          const opaqueId = 'c_' + String(stepNum).padStart(2, '0');
-
-          const parentCandidateIds = [];
-          cand.nodes.forEach(function(nid) {
-            const n = this.cy.getElementById(nid);
-            if (n && n.length > 0) {
-              const p = n.data('parent') || null;
-              if (p && !parentCandidateIds.includes(p)) parentCandidateIds.push(p);
-            }
-          }, this);
-
-          let parentId = null;
-          if (parentCandidateIds.length === 1) {
-            parentId = parentCandidateIds[0];
-          }
-
-          const boundaryInArcs = [];
-          t_src.incomers('edge').forEach(function(edge) {
-            const srcNode = edge.source();
-            if (!cand.nodes.has(srcNode.id())) {
-              boundaryInArcs.push({
-                edgeId: edge.id(),
-                sourceId: srcNode.id(),
-                targetId: opaqueId,
-                originalTargetId: t_src.id(),
-                weight: edge.data('weight') || 1,
-                classes: edge.classes().join(' ')
-              });
-            }
-          });
-
-          const boundaryOutArcs = [];
-          t_snk.outgoers('edge').forEach(function(edge) {
-            const tgtNode = edge.target();
-            if (!cand.nodes.has(tgtNode.id())) {
-              boundaryOutArcs.push({
-                edgeId: edge.id(),
-                sourceId: opaqueId,
-                originalSourceId: t_snk.id(),
-                targetId: tgtNode.id(),
-                weight: edge.data('weight') || 1,
-                classes: edge.classes().join(' ')
-              });
-            }
-          });
-
-          const consumedNodes = [];
-          cand.nodes.forEach(function(nid) {
-            const n = this.cy.getElementById(nid);
-            if (n && n.length > 0) {
-              consumedNodes.push({
-                group: 'nodes',
-                data: Object.assign({}, n.data()),
-                classes: n.classes().join(' '),
-                position: Object.assign({}, n.position())
-              });
-            }
-          }, this);
-
-          const consumedInternalEdges = [];
-          cand.nodes.forEach(function(nid) {
-            const n = this.cy.getElementById(nid);
-            if (n && n.length > 0) {
-              n.connectedEdges().forEach(function(e) {
-                if (cand.nodes.has(e.source().id()) && cand.nodes.has(e.target().id())) {
-                  if (!consumedInternalEdges.some(function(x) { return x.data.id === e.id(); })) {
-                    consumedInternalEdges.push({
-                      group: 'edges',
-                      data: Object.assign({}, e.data()),
-                      classes: e.classes().join(' ')
-                    });
-                  }
-                }
-              });
-            }
-          }, this);
-
-          const consumedCompounds = this._pruneConsumedCompounds(cand.nodes, parentCandidateIds, parentId);
-
-          const rawSrc = t_src.data('raw_label') || t_src.data('label') || t_src.id();
-          const rawSnk = t_snk.data('raw_label') || t_snk.data('label') || t_snk.id();
-          const rawLabel = `MarkedGraph(${rawSrc}..${rawSnk})`;
-
-          const consumedSubnet = {
-            stepNumber: stepNum,
-            opaqueId: opaqueId,
-            componentType: 'MarkedGraph',
-            omega: cand.omega,
-            tau: cand.tauNew,
-            sourceId: cand.sourceId,
-            sinkId: cand.sinkId,
-            consumedNodeIds: Array.from(cand.nodes),
-            parentCompound: parentId,
-            consumedCompounds: consumedCompounds,
-            nodes: consumedNodes,
-            internalEdges: consumedInternalEdges,
-            boundaryInArcs: boundaryInArcs,
-            boundaryOutArcs: boundaryOutArcs
-          };
-
           const self = this;
-          consumedCompounds.forEach(function(c) {
-            const pNode = self.cy.getElementById(c.data.id);
-            if (pNode.inside()) self.cy.remove(pNode);
-          });
-          cand.nodes.forEach(function(nid) {
-            const n = self.cy.getElementById(nid);
-            if (n && n.inside()) {
-              n.connectedEdges().forEach(function(e) {
-                if (e.inside()) self.cy.remove(e);
-              });
-              self.cy.remove(n);
-            }
-          });
-
-          const entryPos = (consumedNodes.find(function(n) { return n.data.id === cand.sourceId; }) || {}).position;
-          const opaqueNode = this._createOpaqueComponentNode(
-            opaqueId,
-            opaqueId,
-            rawLabel,
-            cand.tauNew,
-            cand.omega,
-            'MarkedGraph',
-            parentId,
-            consumedSubnet,
-            entryPos
-          );
-
-          boundaryInArcs.forEach(function(bArc, idx) {
-            self.cy.add({
-              group: 'edges',
-              data: {
-                id: `arc_mg_in_${opaqueId}_${idx}`,
-                source: bArc.sourceId,
-                target: opaqueId,
-                weight: bArc.weight
-              },
-              classes: bArc.classes || 'arc'
+          return this._executeSESEReduction(cand, function(candidate, opaqueId) {
+            const parentCandidateIds = [];
+            candidate.nodes.forEach(function(nid) {
+              const n = self.cy.getElementById(nid);
+              if (n && n.length > 0) {
+                const p = n.data('parent') || null;
+                if (p && !parentCandidateIds.includes(p)) parentCandidateIds.push(p);
+              }
             });
-          });
+            const parentId = parentCandidateIds.length === 1 ? parentCandidateIds[0] : null;
 
-          boundaryOutArcs.forEach(function(bArc, idx) {
-            self.cy.add({
-              group: 'edges',
-              data: {
-                id: `arc_mg_out_${opaqueId}_${idx}`,
-                source: opaqueId,
-                target: bArc.targetId,
-                weight: bArc.weight
-              },
-              classes: bArc.classes || 'arc'
+            const boundaryInArcs = [];
+            t_src.incomers('edge').forEach(function(edge) {
+              const srcNode = edge.source();
+              if (!candidate.nodes.has(srcNode.id())) {
+                boundaryInArcs.push({
+                  edgeId: edge.id(),
+                  sourceId: srcNode.id(),
+                  targetId: opaqueId,
+                  originalTargetId: t_src.id(),
+                  weight: edge.data('weight') || 1,
+                  classes: edge.classes().join(' ')
+                });
+              }
             });
-          });
 
-          return {
-            success: true,
-            message: `Folded Marked Graph (${rawSrc}..${rawSnk}) into '${opaqueId}' (ω=${cand.omega}, τ=${cand.tauNew}).`,
-            step: consumedSubnet,
-            node: opaqueNode
-          };
+            const boundaryOutArcs = [];
+            t_snk.outgoers('edge').forEach(function(edge) {
+              const tgtNode = edge.target();
+              if (!candidate.nodes.has(tgtNode.id())) {
+                boundaryOutArcs.push({
+                  edgeId: edge.id(),
+                  sourceId: opaqueId,
+                  originalSourceId: t_snk.id(),
+                  targetId: tgtNode.id(),
+                  weight: edge.data('weight') || 1,
+                  classes: edge.classes().join(' ')
+                });
+              }
+            });
+
+            const rawSrc = t_src.data('raw_label') || t_src.data('label') || t_src.id();
+            const rawSnk = t_snk.data('raw_label') || t_snk.data('label') || t_snk.id();
+            const rawLabel = `MarkedGraph(${rawSrc}..${rawSnk})`;
+            const srcNode = self.cy.getElementById(candidate.sourceId);
+            const entryPos = srcNode && srcNode.length > 0 ? Object.assign({}, srcNode.position()) : null;
+
+            return {
+              consumedNodeIds: candidate.nodes,
+              parentCandidateIds: parentCandidateIds,
+              parentId: parentId,
+              boundaryInArcs: boundaryInArcs,
+              boundaryOutArcs: boundaryOutArcs,
+              rawSrc: rawSrc,
+              rawSnk: rawSnk,
+              rawLabel: rawLabel,
+              entryPos: entryPos,
+              isInternalEdge: function(e) {
+                return candidate.nodes.has(e.source().id()) && candidate.nodes.has(e.target().id());
+              },
+              addBoundaryArcs: function(newId, cy) {
+                boundaryInArcs.forEach(function(bArc, idx) {
+                  cy.add({
+                    group: 'edges',
+                    data: {
+                      id: `arc_mg_in_${newId}_${idx}`,
+                      source: bArc.sourceId,
+                      target: newId,
+                      weight: bArc.weight
+                    },
+                    classes: bArc.classes || 'arc'
+                  });
+                });
+                boundaryOutArcs.forEach(function(bArc, idx) {
+                  cy.add({
+                    group: 'edges',
+                    data: {
+                      id: `arc_mg_out_${newId}_${idx}`,
+                      source: newId,
+                      target: bArc.targetId,
+                      weight: bArc.weight
+                    },
+                    classes: bArc.classes || 'arc'
+                  });
+                });
+              }
+            };
+          });
         }
 
         executeStateMachineContraction(nodeOrSrc, snk = null) {
@@ -2652,157 +2716,131 @@
             return { success: false, message: "State Machine boundary places not found on canvas." };
           }
 
-          this.stepCounter++;
-          const stepNum = this.stepCounter;
-          const opaqueId = 'c_' + String(stepNum).padStart(2, '0');
-
-          const internalNodeIds = new Set();
-          cand.nodes.forEach(function(nid) {
-            if (nid !== cand.sourceId && nid !== cand.sinkId) {
-              internalNodeIds.add(nid);
-            }
-          });
-
-          const parentCandidateIds = [];
-          internalNodeIds.forEach(function(nid) {
-            const n = this.cy.getElementById(nid);
-            if (n && n.length > 0) {
-              const p = n.data('parent') || null;
-              if (p && !parentCandidateIds.includes(p)) parentCandidateIds.push(p);
-            }
-          }, this);
-          const srcParent = p_src.data('parent') || null;
-          const snkParent = p_snk.data('parent') || null;
-          let parentId = null;
-          if (srcParent && srcParent === snkParent) {
-            parentId = srcParent;
-          } else if (parentCandidateIds.length === 1) {
-            parentId = parentCandidateIds[0];
-          }
-
-          const consumedNodes = [];
-          internalNodeIds.forEach(function(nid) {
-            const n = this.cy.getElementById(nid);
-            if (n && n.length > 0) {
-              consumedNodes.push({
-                group: 'nodes',
-                data: Object.assign({}, n.data()),
-                classes: n.classes().join(' '),
-                position: Object.assign({}, n.position())
-              });
-            }
-          }, this);
-
-          const consumedInternalEdges = [];
-          internalNodeIds.forEach(function(nid) {
-            const n = this.cy.getElementById(nid);
-            if (n && n.length > 0) {
-              n.connectedEdges().forEach(function(e) {
-                if (!consumedInternalEdges.some(function(x) { return x.data.id === e.id(); })) {
-                  consumedInternalEdges.push({
-                    group: 'edges',
-                    data: Object.assign({}, e.data()),
-                    classes: e.classes().join(' ')
-                  });
-                }
-              });
-            }
-          }, this);
-
-          const consumedCompounds = this._pruneConsumedCompounds(internalNodeIds, parentCandidateIds, parentId);
-
-          const rawSrc = p_src.data('raw_label') || p_src.data('label') || p_src.id();
-          const rawSnk = p_snk.data('raw_label') || p_snk.data('label') || p_snk.id();
-          const rawLabel = `StateMachine(${rawSrc}..${rawSnk})`;
-
-          const boundaryInArcs = [{
-            sourceId: cand.sourceId,
-            targetId: opaqueId,
-            weight: 1,
-            classes: 'arc'
-          }];
-          const boundaryOutArcs = [{
-            sourceId: opaqueId,
-            targetId: cand.sinkId,
-            weight: 1,
-            classes: 'arc'
-          }];
-
-          const consumedSubnet = {
-            stepNumber: stepNum,
-            opaqueId: opaqueId,
-            componentType: 'StateMachine',
-            omega: cand.omega,
-            tau: cand.tauNew,
-            sourceId: cand.sourceId,
-            sinkId: cand.sinkId,
-            consumedNodeIds: Array.from(internalNodeIds),
-            parentCompound: parentId,
-            consumedCompounds: consumedCompounds,
-            nodes: consumedNodes,
-            internalEdges: consumedInternalEdges,
-            boundaryInArcs: boundaryInArcs,
-            boundaryOutArcs: boundaryOutArcs
-          };
-
           const self = this;
-          consumedCompounds.forEach(function(c) {
-            const pNode = self.cy.getElementById(c.data.id);
-            if (pNode.inside()) self.cy.remove(pNode);
-          });
-          internalNodeIds.forEach(function(nid) {
-            const n = self.cy.getElementById(nid);
-            if (n && n.inside()) {
-              n.connectedEdges().forEach(function(e) {
-                if (e.inside()) self.cy.remove(e);
-              });
-              self.cy.remove(n);
+          return this._executeSESEReduction(cand, function(candidate, opaqueId) {
+            const internalNodeIds = new Set();
+            candidate.nodes.forEach(function(nid) {
+              if (nid !== candidate.sourceId && nid !== candidate.sinkId) {
+                internalNodeIds.add(nid);
+              }
+            });
+
+            const parentCandidateIds = [];
+            internalNodeIds.forEach(function(nid) {
+              const n = self.cy.getElementById(nid);
+              if (n && n.length > 0) {
+                const p = n.data('parent') || null;
+                if (p && !parentCandidateIds.includes(p)) parentCandidateIds.push(p);
+              }
+            });
+
+            const srcParent = p_src.data('parent') || null;
+            const snkParent = p_snk.data('parent') || null;
+            let parentId = null;
+            if (srcParent && srcParent === snkParent) {
+              parentId = srcParent;
+            } else if (parentCandidateIds.length === 1) {
+              parentId = parentCandidateIds[0];
             }
+
+            const boundaryInArcs = [{
+              sourceId: candidate.sourceId,
+              targetId: opaqueId,
+              weight: 1,
+              classes: 'arc'
+            }];
+            const boundaryOutArcs = [{
+              sourceId: opaqueId,
+              targetId: candidate.sinkId,
+              weight: 1,
+              classes: 'arc'
+            }];
+
+            const rawSrc = p_src.data('raw_label') || p_src.data('label') || p_src.id();
+            const rawSnk = p_snk.data('raw_label') || p_snk.data('label') || p_snk.id();
+            const rawLabel = `StateMachine(${rawSrc}..${rawSnk})`;
+            const firstInternalId = Array.from(internalNodeIds)[0];
+            const firstInternalNode = firstInternalId ? self.cy.getElementById(firstInternalId) : null;
+            const entryPos = firstInternalNode && firstInternalNode.length > 0 ? Object.assign({}, firstInternalNode.position()) : null;
+
+            return {
+              consumedNodeIds: internalNodeIds,
+              parentCandidateIds: parentCandidateIds,
+              parentId: parentId,
+              boundaryInArcs: boundaryInArcs,
+              boundaryOutArcs: boundaryOutArcs,
+              rawSrc: rawSrc,
+              rawSnk: rawSnk,
+              rawLabel: rawLabel,
+              entryPos: entryPos,
+              isInternalEdge: function(e) {
+                return true;
+              },
+              addBoundaryArcs: function(newId, cy) {
+                cy.add({
+                  group: 'edges',
+                  data: {
+                    id: `arc_sm_in_${newId}`,
+                    source: candidate.sourceId,
+                    target: newId,
+                    weight: 1
+                  },
+                  classes: 'arc'
+                });
+                cy.add({
+                  group: 'edges',
+                  data: {
+                    id: `arc_sm_out_${newId}`,
+                    source: newId,
+                    target: candidate.sinkId,
+                    weight: 1
+                  },
+                  classes: 'arc'
+                });
+              }
+            };
           });
+        }
 
-          const entryPos = (consumedNodes[0] || {}).position;
-          const opaqueNode = this._createOpaqueComponentNode(
-            opaqueId,
-            opaqueId,
-            rawLabel,
-            cand.tauNew,
-            cand.omega,
-            'StateMachine',
-            parentId,
-            consumedSubnet,
-            entryPos
-          );
-
-          this.cy.add({
-            group: 'edges',
-            data: {
-              id: `arc_sm_in_${opaqueId}`,
-              source: cand.sourceId,
-              target: opaqueId,
-              weight: 1
-            },
-            classes: 'arc'
-          });
-
-          this.cy.add({
-            group: 'edges',
-            data: {
-              id: `arc_sm_out_${opaqueId}`,
-              source: opaqueId,
-              target: cand.sinkId,
-              weight: 1
-            },
-            classes: 'arc'
-          });
-
+        static get FOLD_TYPE_REGISTRY() {
           return {
-            success: true,
-            message: `Folded State Machine (${rawSrc}..${rawSnk}) into '${opaqueId}' (ω=${cand.omega}, τ=${cand.tauNew}).`,
-            step: consumedSubnet,
-            node: opaqueNode
+            sequence: {
+              targetGroup: 'place',
+              className: 'contractible-sequence',
+              execute: function(engine, node) { return engine.executeSinglePlaceContraction(node); }
+            },
+            choice: {
+              targetGroup: 'place',
+              className: 'contractible-choice',
+              execute: function(engine, node) { return engine.executeChoiceContraction(node); }
+            },
+            while: {
+              targetGroup: 'place',
+              className: 'contractible-while',
+              execute: function(engine, node) { return engine.executeWhileContraction(node); }
+            },
+            state_machine: {
+              targetGroup: 'place',
+              className: 'contractible-state-machine',
+              execute: function(engine, node) { return engine.executeStateMachineContraction(node); }
+            },
+            marked_graph: {
+              targetGroup: 'transition',
+              className: 'contractible-marked-graph',
+              execute: function(engine, node) { return engine.executeMarkedGraphContraction(node); }
+            }
           };
         }
+
+        static get ALL_PLACE_CONTRACTIBLE_CLASSES() {
+          return Object.values(LiveFoldReductionEngine.FOLD_TYPE_REGISTRY)
+            .filter(function(def) { return def.targetGroup === 'place'; })
+            .map(function(def) { return def.className; });
+        }
       }
+
+      const FOLD_TYPE_REGISTRY = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY;
+      const ALL_PLACE_CONTRACTIBLE_CLASSES = LiveFoldReductionEngine.ALL_PLACE_CONTRACTIBLE_CLASSES;
 
       function updateFoldableHighlights() {
         if (!cy || typeof cy.nodes !== 'function' || !foldEngine) return;
@@ -2824,47 +2862,34 @@
         });
 
         cy.nodes('.place').forEach(function(p) {
-          const foldType = foldEngine.getFoldType(p);
-          if (foldType === 'sequence') {
+          let foldType = foldEngine.getFoldType(p);
+          if (!foldType && smBoundaryIds.has(p.id())) {
+            foldType = 'state_machine';
+          }
+          const meta = foldType ? LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType] : null;
+          const targetClass = meta ? meta.className : null;
+
+          LiveFoldReductionEngine.ALL_PLACE_CONTRACTIBLE_CLASSES.forEach(function(cls) {
+            if (cls === targetClass) {
+              p.addClass(cls);
+            } else {
+              p.removeClass(cls);
+            }
+          });
+          if (targetClass) {
             p.addClass('contractible');
-            p.addClass('contractible-sequence');
-            p.removeClass('contractible-choice');
-            p.removeClass('contractible-while');
-            p.removeClass('contractible-state-machine');
-          } else if (foldType === 'choice') {
-            p.addClass('contractible');
-            p.addClass('contractible-choice');
-            p.removeClass('contractible-sequence');
-            p.removeClass('contractible-while');
-            p.removeClass('contractible-state-machine');
-          } else if (foldType === 'while') {
-            p.addClass('contractible');
-            p.addClass('contractible-while');
-            p.removeClass('contractible-sequence');
-            p.removeClass('contractible-choice');
-            p.removeClass('contractible-state-machine');
-          } else if (smBoundaryIds.has(p.id())) {
-            p.addClass('contractible');
-            p.addClass('contractible-state-machine');
-            p.removeClass('contractible-sequence');
-            p.removeClass('contractible-choice');
-            p.removeClass('contractible-while');
           } else {
             p.removeClass('contractible');
-            p.removeClass('contractible-sequence');
-            p.removeClass('contractible-choice');
-            p.removeClass('contractible-while');
-            p.removeClass('contractible-state-machine');
           }
         });
 
         cy.nodes('.transition').forEach(function(t) {
           if (mgBoundaryIds.has(t.id())) {
             t.addClass('contractible');
-            t.addClass('contractible-marked-graph');
+            t.addClass(LiveFoldReductionEngine.FOLD_TYPE_REGISTRY.marked_graph.className);
           } else {
             t.removeClass('contractible');
-            t.removeClass('contractible-marked-graph');
+            t.removeClass(LiveFoldReductionEngine.FOLD_TYPE_REGISTRY.marked_graph.className);
           }
         });
       }
@@ -2890,32 +2915,33 @@
         const targetNode = evt.target;
         const targetId = targetNode.id();
 
+        function handleFoldReduction(node, fallbackType) {
+          if (typeof foldEngine === 'undefined' || !foldEngine) return false;
+          const foldType = foldEngine.getFoldType(node) || fallbackType;
+          if (!foldType) return false;
+          const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
+          if (!meta || typeof meta.execute !== 'function') return false;
+
+          const res = meta.execute(foldEngine, node);
+          if (res && res.success) {
+            if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
+              cy.layout(DAGRE_LAYOUT_OPTIONS).run();
+            }
+            if (typeof updateFoldableHighlights === 'function') {
+              updateFoldableHighlights();
+            }
+            if (res.node && typeof openInspector === 'function') {
+              openInspector(res.node);
+            }
+            return true;
+          }
+          return false;
+        }
+
         // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction, Choice, While Loop, or State Machine)
         if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
-          if (typeof foldEngine !== 'undefined' && foldEngine) {
-            const foldType = foldEngine.getFoldType(targetNode);
-            let res = null;
-            if (foldType === 'choice') {
-              res = foldEngine.executeChoiceContraction(targetNode);
-            } else if (foldType === 'sequence') {
-              res = foldEngine.executeSinglePlaceContraction(targetNode);
-            } else if (foldType === 'while') {
-              res = foldEngine.executeWhileContraction(targetNode);
-            } else if (foldType === 'state_machine' || targetNode.hasClass('contractible-state-machine')) {
-              res = foldEngine.executeStateMachineContraction(targetNode);
-            }
-            if (res && res.success) {
-              if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
-                cy.layout(DAGRE_LAYOUT_OPTIONS).run();
-              }
-              if (typeof updateFoldableHighlights === 'function') {
-                updateFoldableHighlights();
-              }
-              if (res.node && typeof openInspector === 'function') {
-                openInspector(res.node);
-              }
-            }
-          }
+          const fallback = targetNode.hasClass('contractible-state-machine') ? 'state_machine' : null;
+          handleFoldReduction(targetNode, fallback);
           return;
         }
 
@@ -2924,23 +2950,9 @@
         const isComponent = targetNode.hasClass('compound') || targetNode.data('is_compound') === true || targetNode.data('is_opaque') === true;
 
         if (isTransition || isComponent) {
-          if (typeof foldEngine !== 'undefined' && foldEngine) {
-            const foldType = foldEngine.getFoldType(targetNode);
-            if (foldType === 'marked_graph' || targetNode.hasClass('contractible-marked-graph')) {
-              const res = foldEngine.executeMarkedGraphContraction(targetNode);
-              if (res && res.success) {
-                if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
-                  cy.layout(DAGRE_LAYOUT_OPTIONS).run();
-                }
-                if (typeof updateFoldableHighlights === 'function') {
-                  updateFoldableHighlights();
-                }
-                if (res.node && typeof openInspector === 'function') {
-                  openInspector(res.node);
-                }
-                return;
-              }
-            }
+          const fallback = targetNode.hasClass('contractible-marked-graph') ? 'marked_graph' : null;
+          if (handleFoldReduction(targetNode, fallback)) {
+            return;
           }
           openInspector(targetNode);
         }
