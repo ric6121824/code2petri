@@ -2304,6 +2304,33 @@ console.log(`PASS: evaluated 40 SESE subnets on ${totalNodes} nodes in ${elapsed
   ]
 }"""
 
+    WELL_STRUCTURED_NET_JSON = """{
+  places: [
+    { id: 'pw1', label: 'pw1', initial_tokens: 1 },
+    { id: 'pw2', label: 'pw2', initial_tokens: 0 },
+    { id: 'pw3', label: 'pw3', initial_tokens: 0 },
+    { id: 'pw4', label: 'pw4', initial_tokens: 0 },
+    { id: 'pw5', label: 'pw5', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 'tw1', label: 'tw1', tau: 1.5, metadata: { tau: 1.5 } },
+    { id: 'tw2', label: 'tw2', tau: 2.5, metadata: { tau: 2.5 } },
+    { id: 'tw3', label: 'tw3', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 'tw4', label: 'tw4', tau: 2.0, metadata: { tau: 2.0 } }
+  ],
+  arcs: [
+    { source: 'pw1', target: 'tw1' },
+    { source: 'tw1', target: 'pw2' },
+    { source: 'pw2', target: 'tw2' },
+    { source: 'pw2', target: 'tw3' },
+    { source: 'tw2', target: 'pw3' },
+    { source: 'tw3', target: 'pw4' },
+    { source: 'pw3', target: 'tw4' },
+    { source: 'pw4', target: 'tw4' },
+    { source: 'tw4', target: 'pw5' }
+  ]
+}"""
+
     def test_marked_graph_and_state_machine_styling_in_template(self):
         """Verifies template.html includes contractible CSS styling for marked graph and state machine."""
         html = _read_template_html()
@@ -2624,6 +2651,248 @@ console.log('PASS');
         proc_sm = _run_node_script(node_script_sm)
         self.assertEqual(proc_sm.returncode, 0, f"Node script failed: {proc_sm.stderr}")
         self.assertIn("PASS", proc_sm.stdout)
+
+    def test_well_structured_styling_in_template(self):
+        """Verifies template.html includes contractible CSS styling for well-structured SESE."""
+        html = _read_template_html()
+        self.assertIn("node.place.contractible-well-structured", html)
+        self.assertIn("#26a69a", html)
+
+    def test_well_structured_detection_and_highlighting_headless(self):
+        """Validates that boundary places of Well-Structured SESE subnets receive .contractible-well-structured class."""
+        test_logic = """
+const pw1 = cy.getElementById('pw1');
+const pw5 = cy.getElementById('pw5');
+const pw2 = cy.getElementById('pw2');
+const pw3 = cy.getElementById('pw3');
+const pw4 = cy.getElementById('pw4');
+
+if (!pw1.hasClass('contractible') || !pw1.hasClass('contractible-well-structured')) {
+  throw new Error('pw1 should have contractible and contractible-well-structured classes');
+}
+if (!pw5.hasClass('contractible') || !pw5.hasClass('contractible-well-structured')) {
+  throw new Error('pw5 should have contractible and contractible-well-structured classes');
+}
+
+if (pw2.hasClass('contractible') || pw3.hasClass('contractible') || pw4.hasClass('contractible')) {
+  throw new Error('Internal places pw2/pw3/pw4 should not be contractible');
+}
+
+cy.nodes('.transition').forEach(function(t) {
+  if (t.hasClass('contractible')) {
+    throw new Error('Transition ' + t.id() + ' should not be marked contractible');
+  }
+});
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(self.WELL_STRUCTURED_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_well_structured_reduction_and_python_parity_headless(self):
+        """Validates that Live Fold Reduction (Well-Structured SESE) preserves boundary places with tau/omega matching Python."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import fold_well_structured, FoldConfig
+
+        # 1. Python model
+        py_net = PetriNet()
+        pw1 = py_net.add_place("pw1", initial_tokens=1)
+        pw2 = py_net.add_place("pw2", initial_tokens=0)
+        pw3 = py_net.add_place("pw3", initial_tokens=0)
+        pw4 = py_net.add_place("pw4", initial_tokens=0)
+        pw5 = py_net.add_place("pw5", initial_tokens=0)
+        tw1 = py_net.add_transition("tw1", metadata={"tau": 1.5})
+        tw2 = py_net.add_transition("tw2", metadata={"tau": 2.5})
+        tw3 = py_net.add_transition("tw3", metadata={"tau": 1.0})
+        tw4 = py_net.add_transition("tw4", metadata={"tau": 2.0})
+
+        py_net.add_arc(pw1, tw1)
+        py_net.add_arc(tw1, pw2)
+        py_net.add_arc(pw2, tw2)
+        py_net.add_arc(pw2, tw3)
+        py_net.add_arc(tw2, pw3)
+        py_net.add_arc(tw3, pw4)
+        py_net.add_arc(pw3, tw4)
+        py_net.add_arc(pw4, tw4)
+        py_net.add_arc(tw4, pw5)
+
+        py_folded, py_step = fold_well_structured(py_net, step_number=1, config=FoldConfig(well_structured=2.0))
+        self.assertIsNotNone(py_step)
+        expected_tau = py_step.tau
+        expected_omega = py_step.omega
+        expected_sm = py_step.running_sm
+
+        # 2. JS model
+        test_logic = """
+const pw1 = cy.getElementById('pw1');
+const res = foldEngine.executeWellStructuredContraction(pw1);
+
+if (!res.success) {
+  throw new Error('Well-Structured contraction failed: ' + res.message);
+}
+
+// Verify boundary places REMAINDER on canvas
+if (cy.getElementById('pw1').length !== 1 || cy.getElementById('pw5').length !== 1) {
+  throw new Error('Boundary places pw1 / pw5 should remain on canvas');
+}
+
+// Verify internal nodes removed: tw1..tw4, pw2..pw4
+['tw1', 'tw2', 'tw3', 'tw4', 'pw2', 'pw3', 'pw4'].forEach(function(id) {
+  if (cy.getElementById(id).length !== 0) {
+    throw new Error(`Internal node ${id} was not removed after Well-Structured contraction`);
+  }
+});
+
+// Verify opaque component created
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) {
+  throw new Error('Opaque component c_01 was not created');
+}
+if (c01.data('component_type') !== 'WellStructured') {
+  throw new Error('Expected component_type WellStructured, got ' + c01.data('component_type'));
+}
+if (c01.data('is_opaque') !== true) {
+  throw new Error('Expected is_opaque true');
+}
+
+// Verify boundary arcs between pw1 -> c_01 -> pw5
+const inEdges = c01.incomers('edge');
+if (inEdges.length !== 1 || inEdges[0].source().id() !== 'pw1') {
+  throw new Error('Incomer to c_01 not from pw1');
+}
+const outEdges = c01.outgoers('edge');
+if (outEdges.length !== 1 || outEdges[0].target().id() !== 'pw5') {
+  throw new Error('Outgoer from c_01 not to pw5');
+}
+
+// Verify consumed subnet storage
+const sub = c01.data('consumedSubnet');
+if (!sub) throw new Error('Missing consumedSubnet on c_01');
+if (sub.sourceId !== 'pw1' || sub.sinkId !== 'pw5') {
+  throw new Error(`consumedSubnet invalid source/sink: ${sub.sourceId}..${sub.sinkId}`);
+}
+if (sub.nodes.length !== 7) {
+  throw new Error(`consumedSubnet nodes length expected 7, got ${sub.nodes.length}`);
+}
+
+const result = {
+  tau: c01.data('tau'),
+  omega: c01.data('omega'),
+  running_sm: foldEngine.calculateSMScore()
+};
+console.log(JSON.stringify(result));
+"""
+        node_script = _setup_live_fold_test_harness(self.WELL_STRUCTURED_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
+        self.assertEqual(js_data["running_sm"], expected_sm)
+
+    def test_well_structured_tap_interaction_headless(self):
+        """Validates that left-clicking boundary place triggers well-structured reduction and inspector."""
+        test_logic_ws = """
+const pw1 = cy.getElementById('pw1');
+pw1.emit('tap');
+
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) throw new Error('c_01 was not created upon tapping pw1');
+if (c01.data('component_type') !== 'WellStructured') throw new Error('Expected WellStructured component');
+
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('Inspector panel did not open for WellStructured');
+}
+if (inspectorType.textContent !== 'WellStructured') {
+  throw new Error('Inspector type expected WellStructured, got ' + inspectorType.textContent);
+}
+
+console.log('PASS');
+"""
+        node_script_ws = _setup_live_fold_test_harness(self.WELL_STRUCTURED_NET_JSON, test_logic_ws)
+        proc_ws = _run_node_script(node_script_ws)
+        self.assertEqual(proc_ws.returncode, 0, f"Node script failed: {proc_ws.stderr}")
+        self.assertIn("PASS", proc_ws.stdout)
+
+    def test_well_structured_rejects_pt_handle_and_internal_cycle_headless(self):
+        """Validates that SESE subnets with PT/TP handles or internal cycles are rejected from well-structured reduction."""
+        # 1. Net with PT handle confusion: pw2 -> tw4 directly while pw2 -> tw2 -> pw3 -> tw4
+        pt_handle_net_json = """{
+  places: [
+    { id: 'pw1', label: 'pw1', initial_tokens: 1 },
+    { id: 'pw2', label: 'pw2', initial_tokens: 0 },
+    { id: 'pw3', label: 'pw3', initial_tokens: 0 },
+    { id: 'pw5', label: 'pw5', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 'tw1', label: 'tw1', tau: 1.0 },
+    { id: 'tw2', label: 'tw2', tau: 1.0 },
+    { id: 'tw4', label: 'tw4', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'pw1', target: 'tw1' },
+    { source: 'tw1', target: 'pw2' },
+    { source: 'pw2', target: 'tw2' },
+    { source: 'pw2', target: 'tw4' },
+    { source: 'tw2', target: 'pw3' },
+    { source: 'pw3', target: 'tw4' },
+    { source: 'tw4', target: 'pw5' }
+  ]
+}"""
+        test_logic_handle = """
+const cands = foldEngine.detectWellStructured();
+if (cands.length !== 0) {
+  throw new Error('Expected 0 well-structured candidates on PT handle net, got ' + cands.length);
+}
+console.log('PASS');
+"""
+        node_script_handle = _setup_live_fold_test_harness(pt_handle_net_json, test_logic_handle)
+        proc_handle = _run_node_script(node_script_handle)
+        self.assertEqual(proc_handle.returncode, 0, f"Node script failed: {proc_handle.stderr}")
+        self.assertIn("PASS", proc_handle.stdout)
+
+        # 2. Net with internal cycle: tw4 -> pw2
+        cycle_net_json = """{
+  places: [
+    { id: 'pw1', label: 'pw1', initial_tokens: 1 },
+    { id: 'pw2', label: 'pw2', initial_tokens: 0 },
+    { id: 'pw3', label: 'pw3', initial_tokens: 0 },
+    { id: 'pw4', label: 'pw4', initial_tokens: 0 },
+    { id: 'pw5', label: 'pw5', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 'tw1', label: 'tw1', tau: 1.0 },
+    { id: 'tw2', label: 'tw2', tau: 1.0 },
+    { id: 'tw3', label: 'tw3', tau: 1.0 },
+    { id: 'tw4', label: 'tw4', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'pw1', target: 'tw1' },
+    { source: 'tw1', target: 'pw2' },
+    { source: 'pw2', target: 'tw2' },
+    { source: 'pw2', target: 'tw3' },
+    { source: 'tw2', target: 'pw3' },
+    { source: 'tw3', target: 'pw4' },
+    { source: 'pw3', target: 'tw4' },
+    { source: 'pw4', target: 'tw4' },
+    { source: 'tw4', target: 'pw5' },
+    { source: 'tw4', target: 'pw2' }
+  ]
+}"""
+        test_logic_cycle = """
+const cands = foldEngine.detectWellStructured();
+if (cands.length !== 0) {
+  throw new Error('Expected 0 well-structured candidates on cycle net, got ' + cands.length);
+}
+console.log('PASS');
+"""
+        node_script_cycle = _setup_live_fold_test_harness(cycle_net_json, test_logic_cycle)
+        proc_cycle = _run_node_script(node_script_cycle)
+        self.assertEqual(proc_cycle.returncode, 0, f"Node script failed: {proc_cycle.stderr}")
+        self.assertIn("PASS", proc_cycle.stdout)
 
 
 if __name__ == "__main__":

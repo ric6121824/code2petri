@@ -4,9 +4,9 @@
 
 **Blocked by:** 36 — JS Fold Engine: Marked Graph + State Machine Reductions
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Well-Structured SESE subnets (free of PT/TP handles and internal cycles) are detected and their boundary nodes are visually highlighted
-- [ ] Triggering the reduction collapses the subnet into a single opaque component
-- [ ] JS tau and omega values match the Python fold engine for the same topology
-- [ ] The resulting component stores enough information to restore the original subnet on demand
+- [x] Well-Structured SESE subnets (free of PT/TP handles and internal cycles) are detected and their boundary nodes are visually highlighted
+- [x] Triggering the reduction collapses the subnet into a single opaque component
+- [x] JS tau and omega values match the Python fold engine for the same topology
+- [x] The resulting component stores enough information to restore the original subnet on demand

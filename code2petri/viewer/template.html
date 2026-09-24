@@ -901,6 +901,28 @@
             }
           },
           {
+            selector: 'node.place.contractible-well-structured',
+            style: {
+              'border-color': '#26a69a',
+              'border-width': 3,
+              'border-style': 'solid',
+              'background-color': 'rgba(38, 166, 154, 0.20)',
+              'shadow-blur': 12,
+              'shadow-color': 'rgba(38, 166, 154, 0.75)',
+              'shadow-opacity': 0.9
+            }
+          },
+          {
+            selector: 'node.place.contractible-well-structured:selected',
+            style: {
+              'border-color': '#26a69a',
+              'border-width': 4,
+              'shadow-blur': 16,
+              'shadow-color': 'rgba(38, 166, 154, 1.0)',
+              'shadow-opacity': 1.0
+            }
+          },
+          {
             selector: 'node.transition',
             style: {
               'shape': 'rectangle',
@@ -1879,6 +1901,13 @@
               if (smCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
                 return 'state_machine';
               }
+              const mgCands = this.detectMarkedGraphs();
+              if (mgCands.length === 0 && smCands.length === 0) {
+                const wsCands = this.detectWellStructured();
+                if (wsCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
+                  return 'well_structured';
+                }
+              }
             }
             return null;
           }
@@ -2466,7 +2495,7 @@
             return a.sinkId.localeCompare(b.sinkId);
           });
 
-          return candidates;
+          return this._filterMaximalCandidates(candidates);
         }
 
         detectMarkedGraphs() {
@@ -2475,6 +2504,148 @@
 
         detectStateMachines() {
           return this._detectSESESubnetCandidates(false);
+        }
+
+        detectWellStructured() {
+          const boundaryElements = this.cy.nodes('.place');
+          const boundaryIds = boundaryElements.map(function(n) { return n.id(); });
+          boundaryIds.sort();
+
+          const candidates = [];
+          const seseCandidates = this.sese.findAllSESECandidates(boundaryIds, 2);
+          const self = this;
+
+          seseCandidates.forEach(function(cand) {
+            let valid = true;
+            for (const nid of cand.nodes) {
+              const node = self.cy.getElementById(nid);
+              if (!node || node.length === 0) {
+                valid = false;
+                break;
+              }
+              if (node.hasClass('place')) {
+                if (nid !== cand.sourceId && nid !== cand.sinkId) {
+                  if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
+                    valid = false;
+                    break;
+                  }
+                }
+              }
+            }
+            if (!valid) return;
+
+            // Invariant: no PT/TP handle confusion and no internal cycle
+            let isWS = true;
+            for (const nid of cand.nodes) {
+              if (nid !== cand.sinkId) {
+                const node = self.cy.getElementById(nid);
+                if (node && node.hasClass('place')) {
+                  const outEdges = node.outgoers('edge');
+                  for (let i = 0; i < outEdges.length; i++) {
+                    const tNode = outEdges[i].target();
+                    if (!tNode || !tNode.hasClass('transition')) continue;
+                    const tid = tNode.id();
+
+                    if (node.outgoers('edge').length > 1 && tNode.incomers('edge').length > 1) {
+                      isWS = false;
+                      break;
+                    }
+                    if (node.incomers('edge').length > 1 && tNode.incomers('edge').length > 1) {
+                      isWS = false;
+                      break;
+                    }
+                    if (self.sese.forwardReachability(tid, cand.sinkId).has(nid)) {
+                      isWS = false;
+                      break;
+                    }
+                  }
+                  if (!isWS) break;
+                }
+              }
+            }
+            if (!isWS) return;
+
+            if (!self._validateSESEFunctionBoundaries(cand.nodes)) {
+              return;
+            }
+
+            const compTrans = [];
+            cand.nodes.forEach(function(nid) {
+              const n = self.cy.getElementById(nid);
+              if (n && n.length > 0 && n.hasClass('transition')) {
+                compTrans.push(n);
+              }
+            });
+
+            const sym = self.sese.calculateSubnetSymmetry(cand.nodes, false);
+            const diffP = sym.diffP;
+            const diffT = sym.diffT;
+            const tauSum = compTrans.reduce(function(sum, t) {
+              const tau = parseFloat(t.data('tau'));
+              return sum + (isNaN(tau) ? 1.0 : tau);
+            }, 0.0);
+
+            const multiplier = (self.cfg.well_structured !== undefined ? self.cfg.well_structured : 2.0);
+
+            const tauNew = parseFloat((compTrans.reduce(function(sum, t) {
+              const tau = parseFloat(t.data('tau'));
+              const tVal = isNaN(tau) ? 1.0 : tau;
+              return sum + multiplier * tVal;
+            }, 0.0) * diffP * diffT).toFixed(2));
+            const omega = parseFloat((tauNew - tauSum).toFixed(2));
+
+            candidates.push({
+              componentType: 'WellStructured',
+              sourceId: cand.sourceId,
+              sinkId: cand.sinkId,
+              nodes: cand.nodes,
+              compTrans: compTrans,
+              diffP: diffP,
+              diffT: diffT,
+              tauSum: tauSum,
+              tauNew: tauNew,
+              omega: omega
+            });
+          });
+
+          candidates.sort(function(a, b) {
+            if (b.nodes.size !== a.nodes.size) {
+              return b.nodes.size - a.nodes.size;
+            }
+            if (a.sourceId !== b.sourceId) {
+              return a.sourceId.localeCompare(b.sourceId);
+            }
+            return a.sinkId.localeCompare(b.sinkId);
+          });
+
+          return this._filterMaximalCandidates(candidates);
+        }
+
+        // ProM selects maximal SESE components per Lassen Def. 18
+        _filterMaximalCandidates(candidates) {
+          const maximalCandidates = [];
+          for (let i = 0; i < candidates.length; i++) {
+            const c = candidates[i];
+            let isSubset = false;
+            for (let j = 0; j < maximalCandidates.length; j++) {
+              const m = maximalCandidates[j];
+              let allInM = true;
+              for (const nid of c.nodes) {
+                if (!m.nodes.has(nid)) {
+                  allInM = false;
+                  break;
+                }
+              }
+              if (allInM) {
+                isSubset = true;
+                break;
+              }
+            }
+            if (!isSubset) {
+              maximalCandidates.push(c);
+            }
+          }
+          return maximalCandidates;
         }
 
         _findCandidateForNode(candidates, nodeOrSrc, snk = null) {
@@ -2703,24 +2874,18 @@
           });
         }
 
-        executeStateMachineContraction(nodeOrSrc, snk = null) {
-          const candidates = this.detectStateMachines();
-          const cand = this._findCandidateForNode(candidates, nodeOrSrc, snk);
-          if (!cand) {
-            return { success: false, message: "No eligible State Machine candidate found for the specified node." };
-          }
-
-          const p_src = this.cy.getElementById(cand.sourceId);
-          const p_snk = this.cy.getElementById(cand.sinkId);
+        _executePlaceSESEReduction(candidate, prefix) {
+          const p_src = this.cy.getElementById(candidate.sourceId);
+          const p_snk = this.cy.getElementById(candidate.sinkId);
           if (!p_src || p_src.length === 0 || !p_snk || p_snk.length === 0) {
-            return { success: false, message: "State Machine boundary places not found on canvas." };
+            return { success: false, message: `${candidate.componentType} boundary places not found on canvas.` };
           }
 
           const self = this;
-          return this._executeSESEReduction(cand, function(candidate, opaqueId) {
+          return this._executeSESEReduction(candidate, function(cand, opaqueId) {
             const internalNodeIds = new Set();
-            candidate.nodes.forEach(function(nid) {
-              if (nid !== candidate.sourceId && nid !== candidate.sinkId) {
+            cand.nodes.forEach(function(nid) {
+              if (nid !== cand.sourceId && nid !== cand.sinkId) {
                 internalNodeIds.add(nid);
               }
             });
@@ -2744,21 +2909,21 @@
             }
 
             const boundaryInArcs = [{
-              sourceId: candidate.sourceId,
+              sourceId: cand.sourceId,
               targetId: opaqueId,
               weight: 1,
               classes: 'arc'
             }];
             const boundaryOutArcs = [{
               sourceId: opaqueId,
-              targetId: candidate.sinkId,
+              targetId: cand.sinkId,
               weight: 1,
               classes: 'arc'
             }];
 
             const rawSrc = p_src.data('raw_label') || p_src.data('label') || p_src.id();
             const rawSnk = p_snk.data('raw_label') || p_snk.data('label') || p_snk.id();
-            const rawLabel = `StateMachine(${rawSrc}..${rawSnk})`;
+            const rawLabel = `${cand.componentType}(${rawSrc}..${rawSnk})`;
             const firstInternalId = Array.from(internalNodeIds)[0];
             const firstInternalNode = firstInternalId ? self.cy.getElementById(firstInternalId) : null;
             const entryPos = firstInternalNode && firstInternalNode.length > 0 ? Object.assign({}, firstInternalNode.position()) : null;
@@ -2780,8 +2945,8 @@
                 cy.add({
                   group: 'edges',
                   data: {
-                    id: `arc_sm_in_${newId}`,
-                    source: candidate.sourceId,
+                    id: `arc_${prefix}_in_${newId}`,
+                    source: cand.sourceId,
                     target: newId,
                     weight: 1
                   },
@@ -2790,9 +2955,9 @@
                 cy.add({
                   group: 'edges',
                   data: {
-                    id: `arc_sm_out_${newId}`,
+                    id: `arc_${prefix}_out_${newId}`,
                     source: newId,
-                    target: candidate.sinkId,
+                    target: cand.sinkId,
                     weight: 1
                   },
                   classes: 'arc'
@@ -2800,6 +2965,24 @@
               }
             };
           });
+        }
+
+        executeStateMachineContraction(nodeOrSrc, snk = null) {
+          const candidates = this.detectStateMachines();
+          const cand = this._findCandidateForNode(candidates, nodeOrSrc, snk);
+          if (!cand) {
+            return { success: false, message: "No eligible State Machine candidate found for the specified node." };
+          }
+          return this._executePlaceSESEReduction(cand, 'sm');
+        }
+
+        executeWellStructuredContraction(nodeOrSrc, snk = null) {
+          const candidates = this.detectWellStructured();
+          const cand = this._findCandidateForNode(candidates, nodeOrSrc, snk);
+          if (!cand) {
+            return { success: false, message: "No eligible Well-Structured candidate found for the specified node." };
+          }
+          return this._executePlaceSESEReduction(cand, 'ws');
         }
 
         static get FOLD_TYPE_REGISTRY() {
@@ -2828,6 +3011,11 @@
               targetGroup: 'transition',
               className: 'contractible-marked-graph',
               execute: function(engine, node) { return engine.executeMarkedGraphContraction(node); }
+            },
+            well_structured: {
+              targetGroup: 'place',
+              className: 'contractible-well-structured',
+              execute: function(engine, node) { return engine.executeWellStructuredContraction(node); }
             }
           };
         }
@@ -2861,10 +3049,21 @@
           smBoundaryIds.add(c.sinkId);
         });
 
+        const hasPriorReductions = hasElementary || mgCandidates.length > 0 || smCandidates.length > 0;
+        const wsCandidates = hasPriorReductions ? [] : foldEngine.detectWellStructured();
+        const wsBoundaryIds = new Set();
+        wsCandidates.forEach(function(c) {
+          wsBoundaryIds.add(c.sourceId);
+          wsBoundaryIds.add(c.sinkId);
+        });
+
         cy.nodes('.place').forEach(function(p) {
           let foldType = foldEngine.getFoldType(p);
           if (!foldType && smBoundaryIds.has(p.id())) {
             foldType = 'state_machine';
+          }
+          if (!foldType && wsBoundaryIds.has(p.id())) {
+            foldType = 'well_structured';
           }
           const meta = foldType ? LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType] : null;
           const targetClass = meta ? meta.className : null;
@@ -2938,9 +3137,14 @@
           return false;
         }
 
-        // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction, Choice, While Loop, or State Machine)
+        // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction, Choice, While Loop, State Machine, or Well-Structured)
         if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
-          const fallback = targetNode.hasClass('contractible-state-machine') ? 'state_machine' : null;
+          let fallback = null;
+          if (targetNode.hasClass('contractible-state-machine')) {
+            fallback = 'state_machine';
+          } else if (targetNode.hasClass('contractible-well-structured')) {
+            fallback = 'well_structured';
+          }
           handleFoldReduction(targetNode, fallback);
           return;
         }
