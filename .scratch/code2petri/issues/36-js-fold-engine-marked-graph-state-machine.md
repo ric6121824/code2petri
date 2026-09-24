@@ -4,11 +4,11 @@
 
 **Blocked by:** 35 — JS Fold Engine: SESE Infrastructure (Bidirectional Reachability)
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Marked Graph subnets are detected and their boundary nodes are visually highlighted to indicate eligibility
-- [ ] Triggering a Marked Graph reduction collapses the subnet into a single opaque component with the correct tau and omega values
-- [ ] State Machine subnets are detected and their boundary nodes are visually highlighted
-- [ ] Triggering a State Machine reduction collapses the subnet into a single opaque component with the correct tau and omega values
-- [ ] JS tau and omega values match the Python fold engine for the same topologies
-- [ ] Each resulting component stores enough information to restore the original subnet on demand
+- [x] Marked Graph subnets are detected and their boundary nodes are visually highlighted to indicate eligibility
+- [x] Triggering a Marked Graph reduction collapses the subnet into a single opaque component with the correct tau and omega values
+- [x] State Machine subnets are detected and their boundary nodes are visually highlighted
+- [x] Triggering a State Machine reduction collapses the subnet into a single opaque component with the correct tau and omega values
+- [x] JS tau and omega values match the Python fold engine for the same topologies
+- [x] Each resulting component stores enough information to restore the original subnet on demand

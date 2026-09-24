@@ -2255,8 +2255,472 @@ console.log(`PASS: evaluated 40 SESE subnets on ${totalNodes} nodes in ${elapsed
         self.assertIn("PASS", proc.stdout)
 
 
+    def test_marked_graph_and_state_machine_styling_in_template(self):
+        """Verifies template.html includes contractible CSS styling for marked graph and state machine."""
+        html = _read_template_html()
+        self.assertIn("node.transition.contractible-marked-graph", html)
+        self.assertIn("#58a6ff", html)
+        self.assertIn("node.place.contractible-state-machine", html)
+        self.assertIn("#f0883e", html)
+
+    def test_marked_graph_detection_and_highlighting_headless(self):
+        """Validates that boundary transitions of marked graph SESE subnets receive .contractible-marked-graph class."""
+        net_literal = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 },
+    { id: 'p1', label: 'branch1', initial_tokens: 0 },
+    { id: 'p2', label: 'branch2', initial_tokens: 0 },
+    { id: 'p_out', label: 'out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_src', label: 'fork()' },
+    { id: 't_snk', label: 'join()' }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_src' },
+    { source: 't_src', target: 'p1' },
+    { source: 't_src', target: 'p2' },
+    { source: 'p1', target: 't_snk' },
+    { source: 'p2', target: 't_snk' },
+    { source: 't_snk', target: 'p_out' }
+  ]
+}"""
+        test_logic = """
+const tSrc = cy.getElementById('t_src');
+const tSnk = cy.getElementById('t_snk');
+const p1 = cy.getElementById('p1');
+const p2 = cy.getElementById('p2');
+const pIn = cy.getElementById('p_in');
+const pOut = cy.getElementById('p_out');
+
+if (!tSrc.hasClass('contractible') || !tSrc.hasClass('contractible-marked-graph')) {
+  throw new Error('t_src should have contractible and contractible-marked-graph classes');
+}
+if (!tSnk.hasClass('contractible') || !tSnk.hasClass('contractible-marked-graph')) {
+  throw new Error('t_snk should have contractible and contractible-marked-graph classes');
+}
+
+if (p1.hasClass('contractible') || p2.hasClass('contractible')) {
+  throw new Error('Internal places p1/p2 should not be contractible');
+}
+if (pIn.hasClass('contractible') || pOut.hasClass('contractible')) {
+  throw new Error('Boundary places p_in/p_out should not be contractible');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_marked_graph_reduction_and_python_parity_headless(self):
+        """Validates that Live Fold Reduction (Marked Graph) collapses subnet with tau/omega matching Python fold_marked_graph."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import fold_marked_graph, FoldConfig
+
+        # 1. Python calculation
+        py_net = PetriNet()
+        p_in = py_net.add_place("p_in", initial_tokens=1)
+        p1 = py_net.add_place("p1", initial_tokens=0)
+        p2 = py_net.add_place("p2", initial_tokens=0)
+        p_out = py_net.add_place("p_out", initial_tokens=0)
+        t_src = py_net.add_transition("t_src", metadata={"tau": 2.0})
+        t_snk = py_net.add_transition("t_snk", metadata={"tau": 3.0})
+
+        py_net.add_arc(p_in, t_src)
+        py_net.add_arc(t_src, p1)
+        py_net.add_arc(t_src, p2)
+        py_net.add_arc(p1, t_snk)
+        py_net.add_arc(p2, t_snk)
+        py_net.add_arc(t_snk, p_out)
+
+        py_folded, py_step = fold_marked_graph(py_net, step_number=1, config=FoldConfig(marked_graph=2.0))
+        self.assertIsNotNone(py_step)
+        expected_tau = py_step.tau
+        expected_omega = py_step.omega
+        expected_sm = py_step.running_sm
+
+        # 2. JS calculation
+        net_literal = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 },
+    { id: 'p1', label: 'branch1', initial_tokens: 0 },
+    { id: 'p2', label: 'branch2', initial_tokens: 0 },
+    { id: 'p_out', label: 'out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_src', label: 'fork()', tau: 2.0, metadata: { tau: 2.0 } },
+    { id: 't_snk', label: 'join()', tau: 3.0, metadata: { tau: 3.0 } }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_src' },
+    { source: 't_src', target: 'p1' },
+    { source: 't_src', target: 'p2' },
+    { source: 'p1', target: 't_snk' },
+    { source: 'p2', target: 't_snk' },
+    { source: 't_snk', target: 'p_out' }
+  ]
+}"""
+        test_logic = """
+const tSrc = cy.getElementById('t_src');
+const res = foldEngine.executeMarkedGraphContraction(tSrc);
+
+if (!res.success) {
+  throw new Error('Marked Graph contraction failed: ' + res.message);
+}
+
+// Verify consumed nodes removed: t_src, t_snk, p1, p2
+['t_src', 't_snk', 'p1', 'p2'].forEach(function(id) {
+  if (cy.getElementById(id).length !== 0) {
+    throw new Error(`Node ${id} was not removed after Marked Graph contraction`);
+  }
+});
+
+// Verify boundary places remain
+if (cy.getElementById('p_in').length !== 1 || cy.getElementById('p_out').length !== 1) {
+  throw new Error('Boundary places p_in / p_out should remain on canvas');
+}
+
+// Verify opaque component created
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) {
+  throw new Error('Opaque component c_01 was not created');
+}
+if (c01.data('component_type') !== 'MarkedGraph') {
+  throw new Error('Expected component_type MarkedGraph, got ' + c01.data('component_type'));
+}
+if (c01.data('is_opaque') !== true) {
+  throw new Error('Expected is_opaque true');
+}
+
+// Verify boundary arcs between p_in -> c_01 -> p_out
+const inEdges = c01.incomers('edge');
+if (inEdges.length !== 1 || inEdges[0].source().id() !== 'p_in') {
+  throw new Error('Incomer to c_01 not from p_in');
+}
+const outEdges = c01.outgoers('edge');
+if (outEdges.length !== 1 || outEdges[0].target().id() !== 'p_out') {
+  throw new Error('Outgoer from c_01 not to p_out');
+}
+
+// Verify consumed subnet storage
+const sub = c01.data('consumedSubnet');
+if (!sub) throw new Error('Missing consumedSubnet on c_01');
+if (sub.sourceId !== 't_src' || sub.sinkId !== 't_snk') {
+  throw new Error(`consumedSubnet invalid source/sink: ${sub.sourceId}..${sub.sinkId}`);
+}
+if (sub.nodes.length !== 4) {
+  throw new Error(`consumedSubnet nodes length expected 4, got ${sub.nodes.length}`);
+}
+if (sub.internalEdges.length !== 4) {
+  throw new Error(`consumedSubnet internalEdges length expected 4, got ${sub.internalEdges.length}`);
+}
+
+const result = {
+  tau: c01.data('tau'),
+  omega: c01.data('omega'),
+  running_sm: foldEngine.calculateSMScore()
+};
+console.log(JSON.stringify(result));
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
+        self.assertEqual(js_data["running_sm"], expected_sm)
+
+    def test_state_machine_detection_and_highlighting_headless(self):
+        """Validates that boundary places of State Machine SESE subnets receive .contractible-state-machine class."""
+        net_literal = """{
+  places: [
+    { id: 'p_src', label: 'src', initial_tokens: 1 },
+    { id: 'p_mid1', label: 'mid1', initial_tokens: 0 },
+    { id: 'p_mid2', label: 'mid2', initial_tokens: 0 },
+    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1' },
+    { id: 't2', label: 't2' },
+    { id: 't3', label: 't3' },
+    { id: 't4', label: 't4' },
+    { id: 't5', label: 't5' }
+  ],
+  arcs: [
+    { source: 'p_src', target: 't1' },
+    { source: 'p_src', target: 't3' },
+    { source: 't1', target: 'p_mid1' },
+    { source: 't3', target: 'p_mid2' },
+    { source: 'p_mid1', target: 't2' },
+    { source: 'p_mid1', target: 't5' },
+    { source: 't5', target: 'p_mid2' },
+    { source: 'p_mid2', target: 't4' },
+    { source: 't2', target: 'p_snk' },
+    { source: 't4', target: 'p_snk' }
+  ]
+}"""
+        test_logic = """
+const pSrc = cy.getElementById('p_src');
+const pSnk = cy.getElementById('p_snk');
+const pMid1 = cy.getElementById('p_mid1');
+const pMid2 = cy.getElementById('p_mid2');
+
+if (!pSrc.hasClass('contractible') || !pSrc.hasClass('contractible-state-machine')) {
+  throw new Error('p_src should have contractible and contractible-state-machine classes');
+}
+if (!pSnk.hasClass('contractible') || !pSnk.hasClass('contractible-state-machine')) {
+  throw new Error('p_snk should have contractible and contractible-state-machine classes');
+}
+
+if (pMid1.hasClass('contractible') || pMid2.hasClass('contractible')) {
+  throw new Error('Internal places p_mid1/p_mid2 should not be contractible');
+}
+
+cy.nodes('.transition').forEach(function(t) {
+  if (t.hasClass('contractible')) {
+    throw new Error('Transition ' + t.id() + ' should not be marked contractible');
+  }
+});
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_state_machine_reduction_and_python_parity_headless(self):
+        """Validates that Live Fold Reduction (State Machine) preserves boundary places with tau/omega matching Python."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import fold_state_machine, FoldConfig
+
+        # 1. Python model
+        py_net = PetriNet()
+        p_src = py_net.add_place("p_src", initial_tokens=1)
+        p_mid1 = py_net.add_place("p_mid1", initial_tokens=0)
+        p_mid2 = py_net.add_place("p_mid2", initial_tokens=0)
+        p_snk = py_net.add_place("p_snk", initial_tokens=0)
+        t1 = py_net.add_transition("t1", metadata={"tau": 1.5})
+        t2 = py_net.add_transition("t2", metadata={"tau": 2.5})
+        t3 = py_net.add_transition("t3", metadata={"tau": 1.0})
+        t4 = py_net.add_transition("t4", metadata={"tau": 2.0})
+        t5 = py_net.add_transition("t5", metadata={"tau": 3.0})
+
+        py_net.add_arc(p_src, t1)
+        py_net.add_arc(p_src, t3)
+        py_net.add_arc(t1, p_mid1)
+        py_net.add_arc(t3, p_mid2)
+        py_net.add_arc(p_mid1, t2)
+        py_net.add_arc(p_mid1, t5)
+        py_net.add_arc(t5, p_mid2)
+        py_net.add_arc(p_mid2, t4)
+        py_net.add_arc(t2, p_snk)
+        py_net.add_arc(t4, p_snk)
+
+        py_folded, py_step = fold_state_machine(py_net, step_number=1, config=FoldConfig(state_machine=2.0))
+        self.assertIsNotNone(py_step)
+        expected_tau = py_step.tau
+        expected_omega = py_step.omega
+        expected_sm = py_step.running_sm
+
+        # 2. JS model
+        net_literal = """{
+  places: [
+    { id: 'p_src', label: 'src', initial_tokens: 1 },
+    { id: 'p_mid1', label: 'mid1', initial_tokens: 0 },
+    { id: 'p_mid2', label: 'mid2', initial_tokens: 0 },
+    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.5, metadata: { tau: 1.5 } },
+    { id: 't2', label: 't2', tau: 2.5, metadata: { tau: 2.5 } },
+    { id: 't3', label: 't3', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't4', label: 't4', tau: 2.0, metadata: { tau: 2.0 } },
+    { id: 't5', label: 't5', tau: 3.0, metadata: { tau: 3.0 } }
+  ],
+  arcs: [
+    { source: 'p_src', target: 't1' },
+    { source: 'p_src', target: 't3' },
+    { source: 't1', target: 'p_mid1' },
+    { source: 't3', target: 'p_mid2' },
+    { source: 'p_mid1', target: 't2' },
+    { source: 'p_mid1', target: 't5' },
+    { source: 't5', target: 'p_mid2' },
+    { source: 'p_mid2', target: 't4' },
+    { source: 't2', target: 'p_snk' },
+    { source: 't4', target: 'p_snk' }
+  ]
+}"""
+        test_logic = """
+const pSrc = cy.getElementById('p_src');
+const res = foldEngine.executeStateMachineContraction(pSrc);
+
+if (!res.success) {
+  throw new Error('State Machine contraction failed: ' + res.message);
+}
+
+// Verify boundary places REMAINDER on canvas
+if (cy.getElementById('p_src').length !== 1 || cy.getElementById('p_snk').length !== 1) {
+  throw new Error('Boundary places p_src / p_snk should remain on canvas');
+}
+
+// Verify internal nodes removed: t1..t5, p_mid1, p_mid2
+['t1', 't2', 't3', 't4', 't5', 'p_mid1', 'p_mid2'].forEach(function(id) {
+  if (cy.getElementById(id).length !== 0) {
+    throw new Error(`Internal node ${id} was not removed after State Machine contraction`);
+  }
+});
+
+// Verify opaque component created
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) {
+  throw new Error('Opaque component c_01 was not created');
+}
+if (c01.data('component_type') !== 'StateMachine') {
+  throw new Error('Expected component_type StateMachine, got ' + c01.data('component_type'));
+}
+if (c01.data('is_opaque') !== true) {
+  throw new Error('Expected is_opaque true');
+}
+
+// Verify boundary arcs between p_src -> c_01 -> p_snk
+const inEdges = c01.incomers('edge');
+if (inEdges.length !== 1 || inEdges[0].source().id() !== 'p_src') {
+  throw new Error('Incomer to c_01 not from p_src');
+}
+const outEdges = c01.outgoers('edge');
+if (outEdges.length !== 1 || outEdges[0].target().id() !== 'p_snk') {
+  throw new Error('Outgoer from c_01 not to p_snk');
+}
+
+// Verify consumed subnet storage
+const sub = c01.data('consumedSubnet');
+if (!sub) throw new Error('Missing consumedSubnet on c_01');
+if (sub.sourceId !== 'p_src' || sub.sinkId !== 'p_snk') {
+  throw new Error(`consumedSubnet invalid source/sink: ${sub.sourceId}..${sub.sinkId}`);
+}
+if (sub.nodes.length !== 7) {
+  throw new Error(`consumedSubnet nodes length expected 7, got ${sub.nodes.length}`);
+}
+
+const result = {
+  tau: c01.data('tau'),
+  omega: c01.data('omega'),
+  running_sm: foldEngine.calculateSMScore()
+};
+console.log(JSON.stringify(result));
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
+        self.assertEqual(js_data["running_sm"], expected_sm)
+
+    def test_marked_graph_and_state_machine_tap_interaction_headless(self):
+        """Validates that left-clicking boundary nodes triggers marked graph or state machine reduction and inspector."""
+        # 1. Tap on marked graph boundary transition
+        net_literal_mg = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 },
+    { id: 'p1', label: 'branch1', initial_tokens: 0 },
+    { id: 'p2', label: 'branch2', initial_tokens: 0 },
+    { id: 'p_out', label: 'out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_src', label: 'fork()', tau: 2.0 },
+    { id: 't_snk', label: 'join()', tau: 3.0 }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_src' },
+    { source: 't_src', target: 'p1' },
+    { source: 't_src', target: 'p2' },
+    { source: 'p1', target: 't_snk' },
+    { source: 'p2', target: 't_snk' },
+    { source: 't_snk', target: 'p_out' }
+  ]
+}"""
+        test_logic_mg = """
+const tSrc = cy.getElementById('t_src');
+tSrc.emit('tap');
+
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) throw new Error('c_01 was not created upon tapping t_src');
+if (c01.data('component_type') !== 'MarkedGraph') throw new Error('Expected MarkedGraph component');
+
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('Inspector panel did not open for MarkedGraph');
+}
+if (inspectorType.textContent !== 'MarkedGraph') {
+  throw new Error('Inspector type expected MarkedGraph, got ' + inspectorType.textContent);
+}
+
+console.log('PASS');
+"""
+        node_script_mg = _setup_live_fold_test_harness(net_literal_mg, test_logic_mg)
+        proc_mg = _run_node_script(node_script_mg)
+        self.assertEqual(proc_mg.returncode, 0, f"Node script failed: {proc_mg.stderr}")
+        self.assertIn("PASS", proc_mg.stdout)
+
+        # 2. Tap on state machine boundary place
+        net_literal_sm = """{
+  places: [
+    { id: 'p_src', label: 'src', initial_tokens: 1 },
+    { id: 'p_mid1', label: 'mid1', initial_tokens: 0 },
+    { id: 'p_mid2', label: 'mid2', initial_tokens: 0 },
+    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0 },
+    { id: 't2', label: 't2', tau: 1.0 },
+    { id: 't3', label: 't3', tau: 1.0 },
+    { id: 't4', label: 't4', tau: 1.0 },
+    { id: 't5', label: 't5', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p_src', target: 't1' },
+    { source: 'p_src', target: 't3' },
+    { source: 't1', target: 'p_mid1' },
+    { source: 't3', target: 'p_mid2' },
+    { source: 'p_mid1', target: 't2' },
+    { source: 'p_mid1', target: 't5' },
+    { source: 't5', target: 'p_mid2' },
+    { source: 'p_mid2', target: 't4' },
+    { source: 't2', target: 'p_snk' },
+    { source: 't4', target: 'p_snk' }
+  ]
+}"""
+        test_logic_sm = """
+const pSrc = cy.getElementById('p_src');
+pSrc.emit('tap');
+
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) throw new Error('c_01 was not created upon tapping p_src');
+if (c01.data('component_type') !== 'StateMachine') throw new Error('Expected StateMachine component');
+
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('Inspector panel did not open for StateMachine');
+}
+if (inspectorType.textContent !== 'StateMachine') {
+  throw new Error('Inspector type expected StateMachine, got ' + inspectorType.textContent);
+}
+
+console.log('PASS');
+"""
+        node_script_sm = _setup_live_fold_test_harness(net_literal_sm, test_logic_sm)
+        proc_sm = _run_node_script(node_script_sm)
+        self.assertEqual(proc_sm.returncode, 0, f"Node script failed: {proc_sm.stderr}")
+        self.assertIn("PASS", proc_sm.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()
+
 
 
 
