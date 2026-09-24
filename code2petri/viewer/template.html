@@ -1912,46 +1912,76 @@
           return false;
         }
 
+        static get STRUCTURAL_DETECTORS() {
+          return [
+            {
+              foldTypes: ['marked_graph', 'state_machine'],
+              run: function(engine) {
+                return {
+                  marked_graph: engine.detectMarkedGraphs(),
+                  state_machine: engine.detectStateMachines()
+                };
+              }
+            },
+            {
+              foldTypes: ['well_structured'],
+              run: function(engine) {
+                return {
+                  well_structured: engine.detectWellStructured()
+                };
+              }
+            },
+            {
+              foldTypes: ['unstructured'],
+              run: function(engine) {
+                return {
+                  unstructured: engine.detectUnstructured()
+                };
+              }
+            }
+          ];
+        }
+
+        getActiveStructuralCandidates() {
+          if (this.hasElementaryReductions()) {
+            return {};
+          }
+          for (const tier of LiveFoldReductionEngine.STRUCTURAL_DETECTORS) {
+            const results = tier.run(this);
+            const totalCount = Object.values(results).reduce(function(sum, cands) {
+              return sum + (cands ? cands.length : 0);
+            }, 0);
+            if (totalCount > 0) {
+              return results;
+            }
+          }
+          return {};
+        }
+
         getFoldType(node) {
-          if (!node) return null;
+          if (!node || typeof node.hasClass !== 'function') return null;
+
           if (node.hasClass('place')) {
             if (this.canSinglePlaceContract(node).ok) return 'sequence';
             if (this.detectChoiceCandidates(node).ok) return 'choice';
             if (this.detectWhileCandidates(node).ok) return 'while';
-            // SESE structural reductions are gated behind exhaustion of elementary reductions
-            // per Lassen & van der Aalst (2008) Def. 21 to prevent premature structural folding.
-            if (!this.hasElementaryReductions()) {
-              const smCands = this.detectStateMachines();
-              if (smCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
-                return 'state_machine';
-              }
-              const mgCands = this.detectMarkedGraphs();
-              if (mgCands.length === 0 && smCands.length === 0) {
-                const wsCands = this.detectWellStructured();
-                if (wsCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
-                  return 'well_structured';
-                }
-                if (wsCands.length === 0) {
-                  const unCands = this.detectUnstructured();
-                  if (unCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
-                    return 'unstructured';
-                  }
-                }
+          }
+
+          // SESE structural reductions are gated behind exhaustion of elementary reductions
+          // per Lassen & van der Aalst (2008) Def. 21 to prevent premature structural folding.
+          const activeStructural = this.getActiveStructuralCandidates();
+          const targetGroup = node.hasClass('place') ? 'place' : 'transition';
+          const nodeId = node.id();
+
+          for (const [foldType, candidates] of Object.entries(activeStructural)) {
+            const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
+            if (meta && meta.targetGroup === targetGroup) {
+              if (candidates.some(function(c) { return c.sourceId === nodeId || c.sinkId === nodeId; })) {
+                return foldType;
               }
             }
-            return null;
           }
-          if (node.hasClass('transition')) {
-            // SESE structural reductions are gated behind exhaustion of elementary reductions
-            // per Lassen & van der Aalst (2008) Def. 21.
-            if (!this.hasElementaryReductions()) {
-              const mgCands = this.detectMarkedGraphs();
-              if (mgCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
-                return 'marked_graph';
-              }
-            }
-            return null;
-          }
+
           return null;
         }
 
@@ -2618,6 +2648,50 @@
           });
         }
 
+        _calculateUnstructuredOmega(nodeIds, compTrans) {
+          const nodeSet = nodeIds instanceof Set ? nodeIds : new Set(nodeIds);
+          let arcCount = 0;
+          this.cy.edges().forEach(function(e) {
+            if (nodeSet.has(e.source().id()) && nodeSet.has(e.target().id())) {
+              arcCount++;
+            }
+          });
+          const nodeCount = nodeSet.size;
+          let weight = 5 * (Math.abs(arcCount - nodeCount) + 1);
+          if (this.cfg.unstructured !== undefined && this.cfg.unstructured !== 7.0) {
+            weight = (this.cfg.unstructured / 7.0) * weight;
+          }
+          const sym = this.sese.calculateSubnetSymmetry(nodeSet, false);
+          const diffP = sym.diffP;
+          const diffT = sym.diffT;
+          const symmetryProduct = diffP * diffT;
+
+          const tauSum = compTrans.reduce(function(sum, t) {
+            const tau = parseFloat(t.data('tau'));
+            return sum + (isNaN(tau) ? 1.0 : tau);
+          }, 0.0);
+
+          const tauNew = parseFloat((compTrans.reduce(function(sum, t) {
+            const tau = parseFloat(t.data('tau'));
+            const tVal = isNaN(tau) ? 1.0 : tau;
+            return sum + weight * tVal;
+          }, 0.0) * symmetryProduct).toFixed(2));
+          const omega = parseFloat((tauNew - tauSum).toFixed(2));
+
+          return {
+            multiplier: weight,
+            symmetryProduct: symmetryProduct,
+            diffP: diffP,
+            diffT: diffT,
+            arcCount: arcCount,
+            nodeCount: nodeCount,
+            weight: weight,
+            tauSum: tauSum,
+            tauNew: tauNew,
+            omega: omega
+          };
+        }
+
         detectUnstructured() {
           const self = this;
           const knotCandidates = this._discoverSESESubnets({
@@ -2636,27 +2710,16 @@
               return true;
             },
             calculateMultiplier: function(cand, compTrans) {
-              let arcCount = 0;
-              self.cy.edges().forEach(function(e) {
-                if (cand.nodes.has(e.source().id()) && cand.nodes.has(e.target().id())) {
-                  arcCount++;
-                }
-              });
-              const nodeCount = cand.nodes.size;
-              let weight = 5 * (Math.abs(arcCount - nodeCount) + 1);
-              if (self.cfg.unstructured !== undefined && self.cfg.unstructured !== 7.0) {
-                weight = (self.cfg.unstructured / 7.0) * weight;
-              }
-              const sym = self.sese.calculateSubnetSymmetry(cand.nodes, false);
+              const calc = self._calculateUnstructuredOmega(cand.nodes, compTrans);
               return {
-                multiplier: weight,
-                symmetryProduct: sym.diffP * sym.diffT,
+                multiplier: calc.multiplier,
+                symmetryProduct: calc.symmetryProduct,
                 extraProperties: {
-                  diffP: sym.diffP,
-                  diffT: sym.diffT,
-                  arcCount: arcCount,
-                  nodeCount: nodeCount,
-                  weight: weight
+                  diffP: calc.diffP,
+                  diffT: calc.diffT,
+                  arcCount: calc.arcCount,
+                  nodeCount: calc.nodeCount,
+                  weight: calc.weight
                 }
               };
             }
@@ -2698,32 +2761,7 @@
           transNodes.forEach(function(t) { allNodeIds.add(t.id()); });
 
           const compTrans = transNodes.toArray();
-          let arcCount = 0;
-          this.cy.edges().forEach(function(e) {
-            if (allNodeIds.has(e.source().id()) && allNodeIds.has(e.target().id())) {
-              arcCount++;
-            }
-          });
-          const nodeCount = allNodeIds.size;
-          let weight = 5 * (Math.abs(arcCount - nodeCount) + 1);
-          if (this.cfg.unstructured !== undefined && this.cfg.unstructured !== 7.0) {
-            weight = (this.cfg.unstructured / 7.0) * weight;
-          }
-
-          const sym = this.sese.calculateSubnetSymmetry(allNodeIds, false);
-          const diffP = sym.diffP;
-          const diffT = sym.diffT;
-          const tauSum = compTrans.reduce(function(sum, t) {
-            const tau = parseFloat(t.data('tau'));
-            return sum + (isNaN(tau) ? 1.0 : tau);
-          }, 0.0);
-
-          const tauNew = parseFloat((compTrans.reduce(function(sum, t) {
-            const tau = parseFloat(t.data('tau'));
-            const tVal = isNaN(tau) ? 1.0 : tau;
-            return sum + weight * tVal;
-          }, 0.0) * diffP * diffT).toFixed(2));
-          const omega = parseFloat((tauNew - tauSum).toFixed(2));
+          const calc = this._calculateUnstructuredOmega(allNodeIds, compTrans);
 
           return [{
             componentType: 'Unstructured',
@@ -2731,14 +2769,14 @@
             sinkId: p_snk.id(),
             nodes: allNodeIds,
             compTrans: compTrans,
-            diffP: diffP,
-            diffT: diffT,
-            arcCount: arcCount,
-            nodeCount: nodeCount,
-            weight: weight,
-            tauSum: tauSum,
-            tauNew: tauNew,
-            omega: omega,
+            diffP: calc.diffP,
+            diffT: calc.diffT,
+            arcCount: calc.arcCount,
+            nodeCount: calc.nodeCount,
+            weight: calc.weight,
+            tauSum: calc.tauSum,
+            tauNew: calc.tauNew,
+            omega: calc.omega,
             isGlobalFallback: true
           }];
         }
@@ -3187,55 +3225,20 @@
       function updateFoldableHighlights() {
         if (!cy || typeof cy.nodes !== 'function' || !foldEngine) return;
 
-        const hasElementary = foldEngine.hasElementaryReductions();
+        const activeStructural = foldEngine.getActiveStructuralCandidates();
 
-        const mgCandidates = hasElementary ? [] : foldEngine.detectMarkedGraphs();
-        const mgBoundaryIds = new Set();
-        mgCandidates.forEach(function(c) {
-          mgBoundaryIds.add(c.sourceId);
-          mgBoundaryIds.add(c.sinkId);
-        });
-
-        const smCandidates = hasElementary ? [] : foldEngine.detectStateMachines();
-        const smBoundaryIds = new Set();
-        smCandidates.forEach(function(c) {
-          smBoundaryIds.add(c.sourceId);
-          smBoundaryIds.add(c.sinkId);
-        });
-
-        const hasPriorReductions = hasElementary || mgCandidates.length > 0 || smCandidates.length > 0;
-        const wsCandidates = hasPriorReductions ? [] : foldEngine.detectWellStructured();
-        const wsBoundaryIds = new Set();
-        wsCandidates.forEach(function(c) {
-          wsBoundaryIds.add(c.sourceId);
-          wsBoundaryIds.add(c.sinkId);
-        });
-
-        const hasPriorToUnstructured = hasPriorReductions || wsCandidates.length > 0;
-        const unCandidates = hasPriorToUnstructured ? [] : foldEngine.detectUnstructured();
-        const unBoundaryIds = new Set();
-        unCandidates.forEach(function(c) {
-          unBoundaryIds.add(c.sourceId);
-          unBoundaryIds.add(c.sinkId);
-        });
-
-        const placeBoundaryTypeMap = new Map();
-        smBoundaryIds.forEach(function(id) { placeBoundaryTypeMap.set(id, 'state_machine'); });
-        wsBoundaryIds.forEach(function(id) {
-          if (!placeBoundaryTypeMap.has(id)) {
-            placeBoundaryTypeMap.set(id, 'well_structured');
-          }
-        });
-        unBoundaryIds.forEach(function(id) {
-          if (!placeBoundaryTypeMap.has(id)) {
-            placeBoundaryTypeMap.set(id, 'unstructured');
-          }
-        });
+        const boundaryTypeMap = new Map();
+        for (const [foldType, candidates] of Object.entries(activeStructural)) {
+          candidates.forEach(function(c) {
+            if (!boundaryTypeMap.has(c.sourceId)) boundaryTypeMap.set(c.sourceId, foldType);
+            if (!boundaryTypeMap.has(c.sinkId)) boundaryTypeMap.set(c.sinkId, foldType);
+          });
+        }
 
         cy.nodes('.place').forEach(function(p) {
-          const foldType = foldEngine.getFoldType(p) || placeBoundaryTypeMap.get(p.id()) || null;
+          const foldType = foldEngine.getFoldType(p) || boundaryTypeMap.get(p.id()) || null;
           const meta = foldType ? LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType] : null;
-          const targetClass = meta ? meta.className : null;
+          const targetClass = (meta && meta.targetGroup === 'place') ? meta.className : null;
 
           LiveFoldReductionEngine.ALL_PLACE_CONTRACTIBLE_CLASSES.forEach(function(cls) {
             if (cls === targetClass) {
@@ -3252,12 +3255,18 @@
         });
 
         cy.nodes('.transition').forEach(function(t) {
-          if (mgBoundaryIds.has(t.id())) {
+          const foldType = foldEngine.getFoldType(t) || boundaryTypeMap.get(t.id()) || null;
+          const meta = foldType ? LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType] : null;
+          const isContractible = meta && meta.targetGroup === 'transition';
+
+          if (isContractible) {
             t.addClass('contractible');
-            t.addClass(LiveFoldReductionEngine.FOLD_TYPE_REGISTRY.marked_graph.className);
+            t.addClass(meta.className);
           } else {
             t.removeClass('contractible');
-            t.removeClass(LiveFoldReductionEngine.FOLD_TYPE_REGISTRY.marked_graph.className);
+            if (LiveFoldReductionEngine.FOLD_TYPE_REGISTRY.marked_graph) {
+              t.removeClass(LiveFoldReductionEngine.FOLD_TYPE_REGISTRY.marked_graph.className);
+            }
           }
         });
       }

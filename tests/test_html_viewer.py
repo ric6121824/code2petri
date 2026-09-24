@@ -3278,7 +3278,7 @@ console.log(JSON.stringify(result));
         self.assertEqual(js_data["omega"], expected_omega)
 
     def test_unstructured_custom_config_respected_headless(self):
-        """Validates that LiveFoldReductionEngine respects custom unstructured multiplier option matching Python."""
+        """Validates that LiveFoldReductionEngine respects custom unstructured Fold Config penalty weight matching Python."""
         from code2petri.model import PetriNet
         from code2petri.fold import fold_unstructured, FoldConfig
 
@@ -3324,7 +3324,7 @@ console.log(JSON.stringify(result));
         self.assertEqual(js_data["omega"], expected_omega)
 
     def test_unstructured_tap_interaction_headless(self):
-        """Validates that left-clicking boundary place triggers unstructured reduction and opens inspector."""
+        """Validates that a Place-Centric Fold Trigger on an eligible boundary place executes Unstructured reduction and opens inspector."""
         test_logic = """
 const pIn = cy.getElementById('p_in');
 pIn.emit('tap');
