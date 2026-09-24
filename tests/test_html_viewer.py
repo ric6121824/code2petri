@@ -2949,6 +2949,434 @@ console.log(JSON.stringify(result));
         self.assertEqual(js_data["tau"], expected_tau)
         self.assertEqual(js_data["omega"], expected_omega)
 
+    UNSTRUCTURED_IRREDUCIBLE_NET_JSON = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 },
+    { id: 'p1', label: 'p1', initial_tokens: 0 },
+    { id: 'p2', label: 'p2', initial_tokens: 0 },
+    { id: 'p_out', label: 'out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't2', label: 't2', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't3', label: 't3', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't4', label: 't4', tau: 1.0, metadata: { tau: 1.0 } }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't1' },
+    { source: 'p_in', target: 't2' },
+    { source: 't1', target: 'p1' },
+    { source: 't2', target: 'p2' },
+    { source: 'p1', target: 't3' },
+    { source: 'p2', target: 't3' },
+    { source: 'p1', target: 't4' },
+    { source: 't3', target: 'p_out' },
+    { source: 't4', target: 'p2' }
+  ]
+}"""
+
+    UNSTRUCTURED_KNOT_NET_JSON = """{
+  places: [
+    { id: 'p_start', label: 'start', initial_tokens: 1 },
+    { id: 'p_knot_in', label: 'knot_in', initial_tokens: 0 },
+    { id: 'p_k1', label: 'k1', initial_tokens: 0 },
+    { id: 'p_k2', label: 'k2', initial_tokens: 0 },
+    { id: 'p_knot_out', label: 'knot_out', initial_tokens: 0 },
+    { id: 'p_end', label: 'end', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_head', label: 'head', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't1', label: 't1', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't2', label: 't2', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't3', label: 't3', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't4', label: 't4', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't_tail', label: 'tail', tau: 1.0, metadata: { tau: 1.0 } }
+  ],
+  arcs: [
+    { source: 'p_start', target: 't_head' },
+    { source: 't_head', target: 'p_knot_in' },
+    { source: 'p_knot_in', target: 't1' },
+    { source: 'p_knot_in', target: 't2' },
+    { source: 't1', target: 'p_k1' },
+    { source: 't2', target: 'p_k2' },
+    { source: 'p_k1', target: 't3' },
+    { source: 'p_k2', target: 't3' },
+    { source: 'p_k1', target: 't4' },
+    { source: 't3', target: 'p_knot_out' },
+    { source: 't4', target: 'p_k2' },
+    { source: 'p_knot_out', target: 't_tail' },
+    { source: 't_tail', target: 'p_end' }
+  ]
+}"""
+
+    UNSTRUCTURED_SINGLE_PLACE_NET_JSON = """{
+  places: [
+    { id: 'p0', label: 'p0', initial_tokens: 1 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0, metadata: { tau: 1.0 } },
+    { id: 't2', label: 't2', tau: 1.0, metadata: { tau: 1.0 } }
+  ],
+  arcs: [
+    { source: 'p0', target: 't1' },
+    { source: 't1', target: 'p0' },
+    { source: 'p0', target: 't2' },
+    { source: 't2', target: 'p0' }
+  ]
+}"""
+
+    def test_unstructured_styling_in_template(self):
+        """Verifies template.html includes contractible CSS styling for unstructured components."""
+        html = _read_template_html()
+        self.assertIn("node.place.contractible-unstructured", html)
+        self.assertIn("#e06c75", html)
+
+    def test_unstructured_detection_and_highlighting_headless(self):
+        """Validates that boundary places of Unstructured components receive .contractible-unstructured class."""
+        test_logic = """
+const pIn = cy.getElementById('p_in');
+const pOut = cy.getElementById('p_out');
+const p1 = cy.getElementById('p1');
+const p2 = cy.getElementById('p2');
+
+if (!pIn.hasClass('contractible') || !pIn.hasClass('contractible-unstructured')) {
+  throw new Error('p_in should have contractible and contractible-unstructured classes');
+}
+if (!pOut.hasClass('contractible') || !pOut.hasClass('contractible-unstructured')) {
+  throw new Error('p_out should have contractible and contractible-unstructured classes');
+}
+
+if (p1.hasClass('contractible') || p2.hasClass('contractible')) {
+  throw new Error('Internal places p1/p2 should not be contractible');
+}
+
+cy.nodes('.transition').forEach(function(t) {
+  if (t.hasClass('contractible')) {
+    throw new Error('Transition ' + t.id() + ' should not be marked contractible');
+  }
+});
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_IRREDUCIBLE_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unstructured_minimal_knot_isolation_headless(self):
+        """Validates that Live Fold Reduction isolates minimal SESE knot, leaving surrounding control flow reducible."""
+        test_logic = """
+const cands = foldEngine.detectUnstructured();
+if (cands.length !== 1) {
+  throw new Error('Expected exactly 1 unstructured candidate for minimal knot, got ' + cands.length);
+}
+const knotCand = cands[0];
+if (knotCand.sourceId !== 'p_knot_in' || knotCand.sinkId !== 'p_knot_out') {
+  throw new Error(`Expected knot between p_knot_in..p_knot_out, got ${knotCand.sourceId}..${knotCand.sinkId}`);
+}
+
+// Execute unstructured knot contraction
+const res = foldEngine.executeUnstructuredContraction(knotCand);
+if (!res.success) {
+  throw new Error('Unstructured knot contraction failed: ' + res.message);
+}
+
+// Verify internal knot nodes removed: t1, t2, t3, t4, p_k1, p_k2
+['t1', 't2', 't3', 't4', 'p_k1', 'p_k2'].forEach(function(id) {
+  if (cy.getElementById(id).length !== 0) {
+    throw new Error(`Internal knot node ${id} was not removed after contraction`);
+  }
+});
+
+// Verify surrounding structured nodes remain on canvas
+['p_start', 't_head', 'p_knot_in', 'p_knot_out', 't_tail', 'p_end'].forEach(function(id) {
+  if (cy.getElementById(id).length !== 1) {
+    throw new Error(`Surrounding control flow node ${id} should remain on canvas`);
+  }
+});
+
+// Verify opaque component created with ProM penalty formula
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) throw new Error('Opaque component c_01 was not created');
+if (c01.data('component_type') !== 'Unstructured') throw new Error('Expected component_type Unstructured');
+if (c01.data('tau') !== 160.0) throw new Error('Expected tau 160.0, got ' + c01.data('tau'));
+if (c01.data('omega') !== 156.0) throw new Error('Expected omega 156.0, got ' + c01.data('omega'));
+
+// Verify boundary arcs between p_knot_in -> c_01 -> p_knot_out
+const inEdges = c01.incomers('edge');
+if (inEdges.length !== 1 || inEdges[0].source().id() !== 'p_knot_in') {
+  throw new Error('Incomer to c_01 not from p_knot_in');
+}
+const outEdges = c01.outgoers('edge');
+if (outEdges.length !== 1 || outEdges[0].target().id() !== 'p_knot_out') {
+  throw new Error('Outgoer from c_01 not to p_knot_out');
+}
+
+// Surrounding control flow is now eligible for subsequent structured reductions:
+// 1. Fold sequence at p_knot_in
+const pIn = cy.getElementById('p_knot_in');
+if (foldEngine.getFoldType(pIn) !== 'sequence') {
+  throw new Error('p_knot_in should be eligible for sequence reduction, got: ' + foldEngine.getFoldType(pIn));
+}
+const resPIn = foldEngine.executeSinglePlaceContraction(pIn);
+if (!resPIn.success) throw new Error('Failed to fold sequence at p_knot_in: ' + resPIn.message);
+
+// 2. Fold sequence at p_knot_out
+const pOut = cy.getElementById('p_knot_out');
+if (foldEngine.getFoldType(pOut) !== 'sequence') {
+  throw new Error('p_knot_out should be eligible for sequence reduction, got: ' + foldEngine.getFoldType(pOut));
+}
+const resPOut = foldEngine.executeSinglePlaceContraction(pOut);
+if (!resPOut.success) throw new Error('Failed to fold sequence at p_knot_out: ' + resPOut.message);
+
+// Verify fully reduced to single transition connecting p_start to p_end
+const finalTrans = cy.nodes('.transition');
+if (finalTrans.length !== 1) {
+  throw new Error('Expected exactly 1 transition after sequence folding, got ' + finalTrans.length);
+}
+if (finalTrans[0].data('tau') !== 162.0) {
+  throw new Error('Expected final tau 162.0 (1.0 + 160.0 + 1.0), got ' + finalTrans[0].data('tau'));
+}
+const finalPlaces = cy.nodes('.place').map(p => p.id());
+if (finalPlaces.length !== 2 || !finalPlaces.includes('p_start') || !finalPlaces.includes('p_end')) {
+  throw new Error('Expected remaining places [p_start, p_end], got ' + JSON.stringify(finalPlaces));
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_KNOT_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unstructured_knot_python_parity_headless(self):
+        """Validates that Live Fold Reduction (Unstructured) tau/omega calculations match Python fold_unstructured."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import fold_unstructured, FoldConfig
+
+        # 1. Python calculation on the knot topology
+        py_net = PetriNet()
+        p_start = py_net.add_place("p_start", initial_tokens=1)
+        p_knot_in = py_net.add_place("p_knot_in")
+        p_k1 = py_net.add_place("p_k1")
+        p_k2 = py_net.add_place("p_k2")
+        p_knot_out = py_net.add_place("p_knot_out")
+        p_end = py_net.add_place("p_end")
+
+        t_head = py_net.add_transition("t_head")
+        t1 = py_net.add_transition("t1")
+        t2 = py_net.add_transition("t2")
+        t3 = py_net.add_transition("t3")
+        t4 = py_net.add_transition("t4")
+        t_tail = py_net.add_transition("t_tail")
+
+        py_net.add_arc(p_start, t_head)
+        py_net.add_arc(t_head, p_knot_in)
+        py_net.add_arc(p_knot_in, t1)
+        py_net.add_arc(p_knot_in, t2)
+        py_net.add_arc(t1, p_k1)
+        py_net.add_arc(t2, p_k2)
+        py_net.add_arc(p_k1, t3)
+        py_net.add_arc(p_k2, t3)
+        py_net.add_arc(p_k1, t4)
+        py_net.add_arc(t3, p_knot_out)
+        py_net.add_arc(t4, p_k2)
+        py_net.add_arc(p_knot_out, t_tail)
+        py_net.add_arc(t_tail, p_end)
+
+        py_folded, py_step = fold_unstructured(py_net, step_number=1, config=FoldConfig())
+        self.assertIsNotNone(py_step)
+        expected_tau = py_step.tau
+        expected_omega = py_step.omega
+
+        # 2. JS calculation
+        test_logic = """
+const knotCand = foldEngine.detectUnstructured()[0];
+const res = foldEngine.executeUnstructuredContraction(knotCand);
+if (!res.success) throw new Error('Unstructured contraction failed: ' + res.message);
+const c01 = cy.getElementById('c_01');
+const result = {
+  tau: c01.data('tau'),
+  omega: c01.data('omega')
+};
+console.log(JSON.stringify(result));
+"""
+        node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_KNOT_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
+
+    def test_unstructured_global_fallback_headless(self):
+        """Validates that when no internal SESE pair exists, global fallback collapses entire net matching Python."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import fold_unstructured, FoldConfig
+
+        # 1. Python calculation on single-place looping net
+        py_net = PetriNet()
+        p0 = py_net.add_place("p0", initial_tokens=1)
+        t1 = py_net.add_transition("t1")
+        t2 = py_net.add_transition("t2")
+        py_net.add_arc(p0, t1)
+        py_net.add_arc(t1, p0)
+        py_net.add_arc(p0, t2)
+        py_net.add_arc(t2, p0)
+
+        py_folded, py_step = fold_unstructured(py_net, step_number=1, config=FoldConfig())
+        self.assertIsNotNone(py_step)
+        expected_tau = py_step.tau
+        expected_omega = py_step.omega
+
+        # 2. JS calculation
+        test_logic = """
+const cands = foldEngine.detectUnstructured();
+if (cands.length !== 1) {
+  throw new Error('Expected 1 global fallback candidate, got ' + cands.length);
+}
+if (!cands[0].isGlobalFallback) {
+  throw new Error('Expected isGlobalFallback flag to be true');
+}
+
+const res = foldEngine.executeUnstructuredContraction(cands[0]);
+if (!res.success) {
+  throw new Error('Unstructured fallback contraction failed: ' + res.message);
+}
+
+// Single place p0 remains on canvas
+if (cy.getElementById('p0').length !== 1) {
+  throw new Error('p0 should remain on canvas');
+}
+
+// Opaque component created with looping arcs
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) throw new Error('c_01 was not created');
+if (c01.data('component_type') !== 'Unstructured') throw new Error('Expected component_type Unstructured');
+
+const inEdges = c01.incomers('edge');
+const outEdges = c01.outgoers('edge');
+if (inEdges.length !== 1 || inEdges[0].source().id() !== 'p0') {
+  throw new Error('Expected incoming arc p0 -> c_01');
+}
+if (outEdges.length !== 1 || outEdges[0].target().id() !== 'p0') {
+  throw new Error('Expected outgoing arc c_01 -> p0');
+}
+
+const result = {
+  tau: c01.data('tau'),
+  omega: c01.data('omega')
+};
+console.log(JSON.stringify(result));
+"""
+        node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_SINGLE_PLACE_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
+
+    def test_unstructured_custom_config_respected_headless(self):
+        """Validates that LiveFoldReductionEngine respects custom unstructured multiplier option matching Python."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import fold_unstructured, FoldConfig
+
+        # 1. Python calculation with unstructured=14.0
+        py_net = PetriNet()
+        p0 = py_net.add_place("p0", initial_tokens=1)
+        t1 = py_net.add_transition("t1")
+        t2 = py_net.add_transition("t2")
+        py_net.add_arc(p0, t1)
+        py_net.add_arc(t1, p0)
+        py_net.add_arc(p0, t2)
+        py_net.add_arc(t2, p0)
+
+        py_folded, py_step = fold_unstructured(py_net, step_number=1, config=FoldConfig(unstructured=14.0))
+        self.assertIsNotNone(py_step)
+        expected_tau = py_step.tau
+        expected_omega = py_step.omega
+
+        # 2. JS calculation with custom engine config { unstructured: 14.0 }
+        test_logic = """
+const customEngine = new LiveFoldReductionEngine(cy, { unstructured: 14.0 });
+const cands = customEngine.detectUnstructured();
+if (cands.length !== 1) {
+  throw new Error('Expected 1 unstructured candidate, got ' + cands.length);
+}
+const res = customEngine.executeUnstructuredContraction(cands[0]);
+if (!res.success) {
+  throw new Error('Unstructured contraction failed: ' + res.message);
+}
+const c01 = cy.getElementById('c_01');
+const result = {
+  tau: c01.data('tau'),
+  omega: c01.data('omega')
+};
+console.log(JSON.stringify(result));
+"""
+        node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_SINGLE_PLACE_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
+
+    def test_unstructured_tap_interaction_headless(self):
+        """Validates that left-clicking boundary place triggers unstructured reduction and opens inspector."""
+        test_logic = """
+const pIn = cy.getElementById('p_in');
+pIn.emit('tap');
+
+const c01 = cy.getElementById('c_01');
+if (c01.length === 0) throw new Error('c_01 was not created upon tapping p_in');
+if (c01.data('component_type') !== 'Unstructured') throw new Error('Expected Unstructured component');
+
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('Inspector panel did not open for Unstructured component');
+}
+if (inspectorType.textContent !== 'Unstructured') {
+  throw new Error('Inspector type expected Unstructured, got ' + inspectorType.textContent);
+}
+if (inspectorTau.textContent !== '160.0') {
+  throw new Error('Inspector tau expected 160.0, got ' + inspectorTau.textContent);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_IRREDUCIBLE_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unstructured_trivial_net_rejected_headless(self):
+        """Validates that trivial workflow nets with <= 1 transition return 0 unstructured candidates."""
+        net_literal = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 },
+    { id: 'p_out', label: 'out', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't1' },
+    { source: 't1', target: 'p_out' }
+  ]
+}"""
+        test_logic = """
+const cands = foldEngine.detectUnstructured();
+if (cands.length !== 0) {
+  throw new Error('Expected 0 unstructured candidates on trivial net, got ' + cands.length);
+}
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

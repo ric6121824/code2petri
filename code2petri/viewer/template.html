@@ -923,6 +923,28 @@
             }
           },
           {
+            selector: 'node.place.contractible-unstructured',
+            style: {
+              'border-color': '#e06c75',
+              'border-width': 3,
+              'border-style': 'solid',
+              'background-color': 'rgba(224, 108, 117, 0.20)',
+              'shadow-blur': 12,
+              'shadow-color': 'rgba(224, 108, 117, 0.75)',
+              'shadow-opacity': 0.9
+            }
+          },
+          {
+            selector: 'node.place.contractible-unstructured:selected',
+            style: {
+              'border-color': '#e06c75',
+              'border-width': 4,
+              'shadow-blur': 16,
+              'shadow-color': 'rgba(224, 108, 117, 1.0)',
+              'shadow-opacity': 1.0
+            }
+          },
+          {
             selector: 'node.transition',
             style: {
               'shape': 'rectangle',
@@ -1452,7 +1474,8 @@
             loop: options.loop !== undefined ? options.loop : 3.0,
             marked_graph: options.marked_graph !== undefined ? options.marked_graph : 2.0,
             state_machine: options.state_machine !== undefined ? options.state_machine : 2.0,
-            well_structured: options.well_structured !== undefined ? options.well_structured : 2.0
+            well_structured: options.well_structured !== undefined ? options.well_structured : 2.0,
+            unstructured: options.unstructured !== undefined ? options.unstructured : 7.0
           };
           this.sese = new SESEInfrastructure(cy);
         }
@@ -1907,6 +1930,12 @@
                 const wsCands = this.detectWellStructured();
                 if (wsCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
                   return 'well_structured';
+                }
+                if (wsCands.length === 0) {
+                  const unCands = this.detectUnstructured();
+                  if (unCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
+                    return 'unstructured';
+                  }
                 }
               }
             }
@@ -2461,8 +2490,11 @@
           });
 
           candidates.sort(function(a, b) {
-            if (b.nodes.size !== a.nodes.size) {
-              return b.nodes.size - a.nodes.size;
+            const sizeDiff = options.sortMinimal
+              ? a.nodes.size - b.nodes.size
+              : b.nodes.size - a.nodes.size;
+            if (sizeDiff !== 0) {
+              return sizeDiff;
             }
             if (a.sourceId !== b.sourceId) {
               return a.sourceId.localeCompare(b.sourceId);
@@ -2584,6 +2616,131 @@
               };
             }
           });
+        }
+
+        detectUnstructured() {
+          const self = this;
+          const knotCandidates = this._discoverSESESubnets({
+            boundarySelector: '.place',
+            componentType: 'Unstructured',
+            filterMaximal: false,
+            sortMinimal: true,
+            validateNode: function(node, cand) {
+              if (node.hasClass('place')) {
+                if (node.id() !== cand.sourceId && node.id() !== cand.sinkId) {
+                  if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
+                    return false;
+                  }
+                }
+              }
+              return true;
+            },
+            calculateMultiplier: function(cand, compTrans) {
+              let arcCount = 0;
+              self.cy.edges().forEach(function(e) {
+                if (cand.nodes.has(e.source().id()) && cand.nodes.has(e.target().id())) {
+                  arcCount++;
+                }
+              });
+              const nodeCount = cand.nodes.size;
+              let weight = 5 * (Math.abs(arcCount - nodeCount) + 1);
+              if (self.cfg.unstructured !== undefined && self.cfg.unstructured !== 7.0) {
+                weight = (self.cfg.unstructured / 7.0) * weight;
+              }
+              const sym = self.sese.calculateSubnetSymmetry(cand.nodes, false);
+              return {
+                multiplier: weight,
+                symmetryProduct: sym.diffP * sym.diffT,
+                extraProperties: {
+                  diffP: sym.diffP,
+                  diffT: sym.diffT,
+                  arcCount: arcCount,
+                  nodeCount: nodeCount,
+                  weight: weight
+                }
+              };
+            }
+          });
+
+          if (knotCandidates.length > 0) {
+            return [knotCandidates[0]];
+          }
+
+          // Global fallback: if no internal SESE pair exists and more than one transition remains
+          const transNodes = this.cy.nodes('.transition');
+          if (transNodes.length <= 1) {
+            return [];
+          }
+
+          const placeNodes = this.cy.nodes('.place');
+          if (placeNodes.length === 0) {
+            return [];
+          }
+
+          const sourceCandidates = placeNodes.filter(function(p) {
+            return p.incomers('edge').length === 0 || parseInt(p.data('initial_tokens') || 0, 10) > 0;
+          });
+          const sinkCandidates = placeNodes.filter(function(p) {
+            return p.outgoers('edge').length === 0;
+          });
+
+          const p_src = sourceCandidates.length > 0 ? sourceCandidates[0] : placeNodes[0];
+          let p_snk = sinkCandidates.length > 0 ? sinkCandidates[0] : placeNodes[placeNodes.length - 1];
+          if (p_src.id() === p_snk.id() && placeNodes.length > 1) {
+            const otherPlaces = placeNodes.filter(function(p) { return p.id() !== p_src.id(); });
+            if (otherPlaces.length > 0) {
+              p_snk = otherPlaces[otherPlaces.length - 1];
+            }
+          }
+
+          const allNodeIds = new Set();
+          placeNodes.forEach(function(p) { allNodeIds.add(p.id()); });
+          transNodes.forEach(function(t) { allNodeIds.add(t.id()); });
+
+          const compTrans = transNodes.toArray();
+          let arcCount = 0;
+          this.cy.edges().forEach(function(e) {
+            if (allNodeIds.has(e.source().id()) && allNodeIds.has(e.target().id())) {
+              arcCount++;
+            }
+          });
+          const nodeCount = allNodeIds.size;
+          let weight = 5 * (Math.abs(arcCount - nodeCount) + 1);
+          if (this.cfg.unstructured !== undefined && this.cfg.unstructured !== 7.0) {
+            weight = (this.cfg.unstructured / 7.0) * weight;
+          }
+
+          const sym = this.sese.calculateSubnetSymmetry(allNodeIds, false);
+          const diffP = sym.diffP;
+          const diffT = sym.diffT;
+          const tauSum = compTrans.reduce(function(sum, t) {
+            const tau = parseFloat(t.data('tau'));
+            return sum + (isNaN(tau) ? 1.0 : tau);
+          }, 0.0);
+
+          const tauNew = parseFloat((compTrans.reduce(function(sum, t) {
+            const tau = parseFloat(t.data('tau'));
+            const tVal = isNaN(tau) ? 1.0 : tau;
+            return sum + weight * tVal;
+          }, 0.0) * diffP * diffT).toFixed(2));
+          const omega = parseFloat((tauNew - tauSum).toFixed(2));
+
+          return [{
+            componentType: 'Unstructured',
+            sourceId: p_src.id(),
+            sinkId: p_snk.id(),
+            nodes: allNodeIds,
+            compTrans: compTrans,
+            diffP: diffP,
+            diffT: diffT,
+            arcCount: arcCount,
+            nodeCount: nodeCount,
+            weight: weight,
+            tauSum: tauSum,
+            tauNew: tauNew,
+            omega: omega,
+            isGlobalFallback: true
+          }];
         }
 
         // ProM selects maximal SESE components per Lassen Def. 18
@@ -2848,7 +3005,8 @@
 
           const prefixMap = {
             StateMachine: 'sm',
-            WellStructured: 'ws'
+            WellStructured: 'ws',
+            Unstructured: 'un'
           };
           const prefix = prefixMap[candidate.componentType] || candidate.componentType.toLowerCase();
 
@@ -2956,6 +3114,15 @@
           return this._executePlaceSESEReduction(cand);
         }
 
+        executeUnstructuredContraction(nodeOrSrc, snk = null) {
+          const candidates = this.detectUnstructured();
+          const cand = this._findCandidateForNode(candidates, nodeOrSrc, snk);
+          if (!cand) {
+            return { success: false, message: "No eligible Unstructured candidate found for the specified node." };
+          }
+          return this._executePlaceSESEReduction(cand);
+        }
+
         static get FOLD_TYPE_REGISTRY() {
           return {
             sequence: {
@@ -2987,6 +3154,11 @@
               targetGroup: 'place',
               className: 'contractible-well-structured',
               execute: function(engine, node) { return engine.executeWellStructuredContraction(node); }
+            },
+            unstructured: {
+              targetGroup: 'place',
+              className: 'contractible-unstructured',
+              execute: function(engine, node) { return engine.executeUnstructuredContraction(node); }
             }
           };
         }
@@ -3039,11 +3211,24 @@
           wsBoundaryIds.add(c.sinkId);
         });
 
+        const hasPriorToUnstructured = hasPriorReductions || wsCandidates.length > 0;
+        const unCandidates = hasPriorToUnstructured ? [] : foldEngine.detectUnstructured();
+        const unBoundaryIds = new Set();
+        unCandidates.forEach(function(c) {
+          unBoundaryIds.add(c.sourceId);
+          unBoundaryIds.add(c.sinkId);
+        });
+
         const placeBoundaryTypeMap = new Map();
         smBoundaryIds.forEach(function(id) { placeBoundaryTypeMap.set(id, 'state_machine'); });
         wsBoundaryIds.forEach(function(id) {
           if (!placeBoundaryTypeMap.has(id)) {
             placeBoundaryTypeMap.set(id, 'well_structured');
+          }
+        });
+        unBoundaryIds.forEach(function(id) {
+          if (!placeBoundaryTypeMap.has(id)) {
+            placeBoundaryTypeMap.set(id, 'unstructured');
           }
         });
 

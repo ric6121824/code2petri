@@ -4,10 +4,10 @@
 
 **Blocked by:** 37 — JS Fold Engine: Well-Structured SESE Reduction
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] When no structured rule matches, the viewer identifies and collapses only the minimal internal SESE subnet containing the irreducible cycle
-- [ ] The surrounding structured control flow remains on the canvas, still eligible for subsequent structured reductions
-- [ ] The unstructured component's tau is calculated using the ProM penalty formula ($5 \times (||F_C| - (|P_C| + |T_C|)| + 1)$)
-- [ ] If no internal SESE pair exists and more than one transition remains, the entire remaining net is collapsed as a final fallback
-- [ ] JS tau and omega values match the Python fold engine for the same topologies
+- [x] When no structured rule matches, the viewer identifies and collapses only the minimal internal SESE subnet containing the irreducible cycle
+- [x] The surrounding structured control flow remains on the canvas, still eligible for subsequent structured reductions
+- [x] The unstructured component's tau is calculated using the ProM penalty formula ($5 \times (||F_C| - (|P_C| + |T_C|)| + 1)$)
+- [x] If no internal SESE pair exists and more than one transition remains, the entire remaining net is collapsed as a final fallback
+- [x] JS tau and omega values match the Python fold engine for the same topologies
