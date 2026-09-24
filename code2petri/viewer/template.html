@@ -1451,7 +1451,8 @@
             choice: options.choice !== undefined ? options.choice : 1.0,
             loop: options.loop !== undefined ? options.loop : 3.0,
             marked_graph: options.marked_graph !== undefined ? options.marked_graph : 2.0,
-            state_machine: options.state_machine !== undefined ? options.state_machine : 2.0
+            state_machine: options.state_machine !== undefined ? options.state_machine : 2.0,
+            well_structured: options.well_structured !== undefined ? options.well_structured : 2.0
           };
           this.sese = new SESEInfrastructure(cy);
         }
@@ -1874,7 +1875,7 @@
 
         // Adheres to Lassen & van der Aalst (2008) Definition 21 (Order of Reductions):
         // Elementary reductions (Sequence -> Choice -> Loop) take precedence and must be
-        // exhausted before evaluating macro/SESE structural fold reductions.
+        // exhausted before evaluating SESE structural fold reductions.
         hasElementaryReductions() {
           const self = this;
           let found = false;
@@ -1895,7 +1896,7 @@
             if (this.detectChoiceCandidates(node).ok) return 'choice';
             if (this.detectWhileCandidates(node).ok) return 'while';
             // SESE structural reductions are gated behind exhaustion of elementary reductions
-            // per Lassen & van der Aalst (2008) Def. 21 to prevent premature macro folding.
+            // per Lassen & van der Aalst (2008) Def. 21 to prevent premature structural folding.
             if (!this.hasElementaryReductions()) {
               const smCands = this.detectStateMachines();
               if (smCands.some(function(c) { return c.sourceId === node.id() || c.sinkId === node.id(); })) {
@@ -2392,13 +2393,8 @@
           return true;
         }
 
-        // Detects SESE Subnets for structural folding (Marked Graph or State Machine).
-        // Internal places must have initial_tokens === 0 to preserve workflow net
-        // token conservation during live SESE structural folding.
-        _detectSESESubnetCandidates(isMarkedGraph) {
-          const boundaryElements = isMarkedGraph
-            ? this.cy.nodes('.transition')
-            : this.cy.nodes('.place');
+        _discoverSESESubnets(options) {
+          const boundaryElements = this.cy.nodes(options.boundarySelector);
           const boundaryIds = boundaryElements.map(function(n) { return n.id(); });
           boundaryIds.sort();
 
@@ -2414,34 +2410,16 @@
                 valid = false;
                 break;
               }
-              if (isMarkedGraph) {
-                if (node.hasClass('place')) {
-                  if (node.incomers('edge').length !== 1 || node.outgoers('edge').length !== 1) {
-                    valid = false;
-                    break;
-                  }
-                  if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                    valid = false;
-                    break;
-                  }
-                }
-              } else {
-                if (node.hasClass('transition')) {
-                  if (node.incomers('edge').length !== 1 || node.outgoers('edge').length !== 1) {
-                    valid = false;
-                    break;
-                  }
-                } else if (node.hasClass('place')) {
-                  if (nid !== cand.sourceId && nid !== cand.sinkId) {
-                    if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                      valid = false;
-                      break;
-                    }
-                  }
-                }
+              if (options.validateNode && !options.validateNode(node, cand)) {
+                valid = false;
+                break;
               }
             }
             if (!valid) return;
+
+            if (options.validateSubnet && !options.validateSubnet(cand)) {
+              return;
+            }
 
             if (!self._validateSESEFunctionBoundaries(cand.nodes)) {
               return;
@@ -2455,34 +2433,31 @@
               }
             });
 
-            const diff = self.sese.calculateSymmetryMultiplier(cand.nodes, null, false);
             const tauSum = compTrans.reduce(function(sum, t) {
               const tau = parseFloat(t.data('tau'));
               return sum + (isNaN(tau) ? 1.0 : tau);
             }, 0.0);
 
-            const multiplier = isMarkedGraph
-              ? (self.cfg.marked_graph !== undefined ? self.cfg.marked_graph : 2.0)
-              : (self.cfg.state_machine !== undefined ? self.cfg.state_machine : 2.0);
-
+            const multData = options.calculateMultiplier(cand, compTrans);
             const tauNew = parseFloat((compTrans.reduce(function(sum, t) {
               const tau = parseFloat(t.data('tau'));
               const tVal = isNaN(tau) ? 1.0 : tau;
-              return sum + multiplier * tVal;
-            }, 0.0) * diff).toFixed(2));
+              return sum + multData.multiplier * tVal;
+            }, 0.0) * multData.symmetryProduct).toFixed(2));
             const omega = parseFloat((tauNew - tauSum).toFixed(2));
 
-            candidates.push({
-              componentType: isMarkedGraph ? 'MarkedGraph' : 'StateMachine',
+            const candidateObj = Object.assign({
+              componentType: options.componentType,
               sourceId: cand.sourceId,
               sinkId: cand.sinkId,
               nodes: cand.nodes,
               compTrans: compTrans,
-              diff: diff,
               tauSum: tauSum,
               tauNew: tauNew,
               omega: omega
-            });
+            }, multData.extraProperties || {});
+
+            candidates.push(candidateObj);
           });
 
           candidates.sort(function(a, b) {
@@ -2495,7 +2470,55 @@
             return a.sinkId.localeCompare(b.sinkId);
           });
 
-          return this._filterMaximalCandidates(candidates);
+          return options.filterMaximal ? this._filterMaximalCandidates(candidates) : candidates;
+        }
+
+        // Detects SESE Subnets for structural folding (Marked Graph or State Machine).
+        // Internal places must have initial_tokens === 0 to preserve workflow net
+        // token conservation during live SESE structural folding.
+        _detectSESESubnetCandidates(isMarkedGraph) {
+          const self = this;
+          return this._discoverSESESubnets({
+            boundarySelector: isMarkedGraph ? '.transition' : '.place',
+            componentType: isMarkedGraph ? 'MarkedGraph' : 'StateMachine',
+            filterMaximal: false,
+            validateNode: function(node, cand) {
+              if (isMarkedGraph) {
+                if (node.hasClass('place')) {
+                  if (node.incomers('edge').length !== 1 || node.outgoers('edge').length !== 1) {
+                    return false;
+                  }
+                  if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
+                    return false;
+                  }
+                }
+              } else {
+                if (node.hasClass('transition')) {
+                  if (node.incomers('edge').length !== 1 || node.outgoers('edge').length !== 1) {
+                    return false;
+                  }
+                } else if (node.hasClass('place')) {
+                  if (node.id() !== cand.sourceId && node.id() !== cand.sinkId) {
+                    if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
+                      return false;
+                    }
+                  }
+                }
+              }
+              return true;
+            },
+            calculateMultiplier: function(cand, compTrans) {
+              const diff = self.sese.calculateSymmetryMultiplier(cand.nodes, null, false);
+              const multiplier = isMarkedGraph
+                ? (self.cfg.marked_graph !== undefined ? self.cfg.marked_graph : 2.0)
+                : (self.cfg.state_machine !== undefined ? self.cfg.state_machine : 2.0);
+              return {
+                multiplier: multiplier,
+                symmetryProduct: diff,
+                extraProperties: { diff: diff }
+              };
+            }
+          });
         }
 
         detectMarkedGraphs() {
@@ -2507,118 +2530,60 @@
         }
 
         detectWellStructured() {
-          const boundaryElements = this.cy.nodes('.place');
-          const boundaryIds = boundaryElements.map(function(n) { return n.id(); });
-          boundaryIds.sort();
-
-          const candidates = [];
-          const seseCandidates = this.sese.findAllSESECandidates(boundaryIds, 2);
           const self = this;
-
-          seseCandidates.forEach(function(cand) {
-            let valid = true;
-            for (const nid of cand.nodes) {
-              const node = self.cy.getElementById(nid);
-              if (!node || node.length === 0) {
-                valid = false;
-                break;
-              }
+          return this._discoverSESESubnets({
+            boundarySelector: '.place',
+            componentType: 'WellStructured',
+            filterMaximal: true,
+            validateNode: function(node, cand) {
               if (node.hasClass('place')) {
-                if (nid !== cand.sourceId && nid !== cand.sinkId) {
+                if (node.id() !== cand.sourceId && node.id() !== cand.sinkId) {
                   if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                    valid = false;
-                    break;
+                    return false;
                   }
                 }
               }
-            }
-            if (!valid) return;
+              return true;
+            },
+            validateSubnet: function(cand) {
+              for (const nid of cand.nodes) {
+                if (nid !== cand.sinkId) {
+                  const node = self.cy.getElementById(nid);
+                  if (node && node.hasClass('place')) {
+                    const outEdges = node.outgoers('edge');
+                    for (let i = 0; i < outEdges.length; i++) {
+                      const tNode = outEdges[i].target();
+                      if (!tNode || !tNode.hasClass('transition')) continue;
+                      const tid = tNode.id();
 
-            // Invariant: no PT/TP handle confusion and no internal cycle
-            let isWS = true;
-            for (const nid of cand.nodes) {
-              if (nid !== cand.sinkId) {
-                const node = self.cy.getElementById(nid);
-                if (node && node.hasClass('place')) {
-                  const outEdges = node.outgoers('edge');
-                  for (let i = 0; i < outEdges.length; i++) {
-                    const tNode = outEdges[i].target();
-                    if (!tNode || !tNode.hasClass('transition')) continue;
-                    const tid = tNode.id();
-
-                    if (node.outgoers('edge').length > 1 && tNode.incomers('edge').length > 1) {
-                      isWS = false;
-                      break;
-                    }
-                    if (node.incomers('edge').length > 1 && tNode.incomers('edge').length > 1) {
-                      isWS = false;
-                      break;
-                    }
-                    if (self.sese.forwardReachability(tid, cand.sinkId).has(nid)) {
-                      isWS = false;
-                      break;
+                      if (node.outgoers('edge').length > 1 && tNode.incomers('edge').length > 1) {
+                        return false;
+                      }
+                      if (node.incomers('edge').length > 1 && tNode.incomers('edge').length > 1) {
+                        return false;
+                      }
+                      if (self.sese.forwardReachability(tid, cand.sinkId).has(nid)) {
+                        return false;
+                      }
                     }
                   }
-                  if (!isWS) break;
                 }
               }
+              return true;
+            },
+            calculateMultiplier: function(cand, compTrans) {
+              const sym = self.sese.calculateSubnetSymmetry(cand.nodes, false);
+              const multiplier = (self.cfg.well_structured !== undefined ? self.cfg.well_structured : 2.0);
+              return {
+                multiplier: multiplier,
+                symmetryProduct: sym.diffP * sym.diffT,
+                extraProperties: {
+                  diffP: sym.diffP,
+                  diffT: sym.diffT
+                }
+              };
             }
-            if (!isWS) return;
-
-            if (!self._validateSESEFunctionBoundaries(cand.nodes)) {
-              return;
-            }
-
-            const compTrans = [];
-            cand.nodes.forEach(function(nid) {
-              const n = self.cy.getElementById(nid);
-              if (n && n.length > 0 && n.hasClass('transition')) {
-                compTrans.push(n);
-              }
-            });
-
-            const sym = self.sese.calculateSubnetSymmetry(cand.nodes, false);
-            const diffP = sym.diffP;
-            const diffT = sym.diffT;
-            const tauSum = compTrans.reduce(function(sum, t) {
-              const tau = parseFloat(t.data('tau'));
-              return sum + (isNaN(tau) ? 1.0 : tau);
-            }, 0.0);
-
-            const multiplier = (self.cfg.well_structured !== undefined ? self.cfg.well_structured : 2.0);
-
-            const tauNew = parseFloat((compTrans.reduce(function(sum, t) {
-              const tau = parseFloat(t.data('tau'));
-              const tVal = isNaN(tau) ? 1.0 : tau;
-              return sum + multiplier * tVal;
-            }, 0.0) * diffP * diffT).toFixed(2));
-            const omega = parseFloat((tauNew - tauSum).toFixed(2));
-
-            candidates.push({
-              componentType: 'WellStructured',
-              sourceId: cand.sourceId,
-              sinkId: cand.sinkId,
-              nodes: cand.nodes,
-              compTrans: compTrans,
-              diffP: diffP,
-              diffT: diffT,
-              tauSum: tauSum,
-              tauNew: tauNew,
-              omega: omega
-            });
           });
-
-          candidates.sort(function(a, b) {
-            if (b.nodes.size !== a.nodes.size) {
-              return b.nodes.size - a.nodes.size;
-            }
-            if (a.sourceId !== b.sourceId) {
-              return a.sourceId.localeCompare(b.sourceId);
-            }
-            return a.sinkId.localeCompare(b.sinkId);
-          });
-
-          return this._filterMaximalCandidates(candidates);
         }
 
         // ProM selects maximal SESE components per Lassen Def. 18
@@ -2874,12 +2839,18 @@
           });
         }
 
-        _executePlaceSESEReduction(candidate, prefix) {
+        _executePlaceSESEReduction(candidate) {
           const p_src = this.cy.getElementById(candidate.sourceId);
           const p_snk = this.cy.getElementById(candidate.sinkId);
           if (!p_src || p_src.length === 0 || !p_snk || p_snk.length === 0) {
             return { success: false, message: `${candidate.componentType} boundary places not found on canvas.` };
           }
+
+          const prefixMap = {
+            StateMachine: 'sm',
+            WellStructured: 'ws'
+          };
+          const prefix = prefixMap[candidate.componentType] || candidate.componentType.toLowerCase();
 
           const self = this;
           return this._executeSESEReduction(candidate, function(cand, opaqueId) {
@@ -2973,7 +2944,7 @@
           if (!cand) {
             return { success: false, message: "No eligible State Machine candidate found for the specified node." };
           }
-          return this._executePlaceSESEReduction(cand, 'sm');
+          return this._executePlaceSESEReduction(cand);
         }
 
         executeWellStructuredContraction(nodeOrSrc, snk = null) {
@@ -2982,7 +2953,7 @@
           if (!cand) {
             return { success: false, message: "No eligible Well-Structured candidate found for the specified node." };
           }
-          return this._executePlaceSESEReduction(cand, 'ws');
+          return this._executePlaceSESEReduction(cand);
         }
 
         static get FOLD_TYPE_REGISTRY() {
@@ -3025,6 +2996,17 @@
             .filter(function(def) { return def.targetGroup === 'place'; })
             .map(function(def) { return def.className; });
         }
+
+        static getMatchingFoldType(node) {
+          if (!node || typeof node.hasClass !== 'function') return null;
+          const registry = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY;
+          for (const [key, meta] of Object.entries(registry)) {
+            if (node.hasClass(meta.className)) {
+              return key;
+            }
+          }
+          return null;
+        }
       }
 
       const FOLD_TYPE_REGISTRY = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY;
@@ -3057,14 +3039,16 @@
           wsBoundaryIds.add(c.sinkId);
         });
 
+        const placeBoundaryTypeMap = new Map();
+        smBoundaryIds.forEach(function(id) { placeBoundaryTypeMap.set(id, 'state_machine'); });
+        wsBoundaryIds.forEach(function(id) {
+          if (!placeBoundaryTypeMap.has(id)) {
+            placeBoundaryTypeMap.set(id, 'well_structured');
+          }
+        });
+
         cy.nodes('.place').forEach(function(p) {
-          let foldType = foldEngine.getFoldType(p);
-          if (!foldType && smBoundaryIds.has(p.id())) {
-            foldType = 'state_machine';
-          }
-          if (!foldType && wsBoundaryIds.has(p.id())) {
-            foldType = 'well_structured';
-          }
+          const foldType = foldEngine.getFoldType(p) || placeBoundaryTypeMap.get(p.id()) || null;
           const meta = foldType ? LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType] : null;
           const targetClass = meta ? meta.className : null;
 
@@ -3139,12 +3123,7 @@
 
         // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction, Choice, While Loop, State Machine, or Well-Structured)
         if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
-          let fallback = null;
-          if (targetNode.hasClass('contractible-state-machine')) {
-            fallback = 'state_machine';
-          } else if (targetNode.hasClass('contractible-well-structured')) {
-            fallback = 'well_structured';
-          }
+          const fallback = typeof LiveFoldReductionEngine !== 'undefined' ? LiveFoldReductionEngine.getMatchingFoldType(targetNode) : null;
           handleFoldReduction(targetNode, fallback);
           return;
         }
@@ -3154,7 +3133,7 @@
         const isComponent = targetNode.hasClass('compound') || targetNode.data('is_compound') === true || targetNode.data('is_opaque') === true;
 
         if (isTransition || isComponent) {
-          const fallback = targetNode.hasClass('contractible-marked-graph') ? 'marked_graph' : null;
+          const fallback = typeof LiveFoldReductionEngine !== 'undefined' ? LiveFoldReductionEngine.getMatchingFoldType(targetNode) : null;
           if (handleFoldReduction(targetNode, fallback)) {
             return;
           }

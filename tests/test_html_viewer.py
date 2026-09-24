@@ -2819,8 +2819,10 @@ console.log('PASS');
 
     def test_well_structured_rejects_pt_handle_and_internal_cycle_headless(self):
         """Validates that SESE subnets with PT/TP handles or internal cycles are rejected from well-structured reduction."""
-        # 1. Net with PT handle confusion: pw2 -> tw4 directly while pw2 -> tw2 -> pw3 -> tw4
-        pt_handle_net_json = """{
+        test_cases = [
+            (
+                "PT handle",
+                """{
   places: [
     { id: 'pw1', label: 'pw1', initial_tokens: 1 },
     { id: 'pw2', label: 'pw2', initial_tokens: 0 },
@@ -2841,21 +2843,11 @@ console.log('PASS');
     { source: 'pw3', target: 'tw4' },
     { source: 'tw4', target: 'pw5' }
   ]
-}"""
-        test_logic_handle = """
-const cands = foldEngine.detectWellStructured();
-if (cands.length !== 0) {
-  throw new Error('Expected 0 well-structured candidates on PT handle net, got ' + cands.length);
-}
-console.log('PASS');
-"""
-        node_script_handle = _setup_live_fold_test_harness(pt_handle_net_json, test_logic_handle)
-        proc_handle = _run_node_script(node_script_handle)
-        self.assertEqual(proc_handle.returncode, 0, f"Node script failed: {proc_handle.stderr}")
-        self.assertIn("PASS", proc_handle.stdout)
-
-        # 2. Net with internal cycle: tw4 -> pw2
-        cycle_net_json = """{
+}""",
+            ),
+            (
+                "internal cycle",
+                """{
   places: [
     { id: 'pw1', label: 'pw1', initial_tokens: 1 },
     { id: 'pw2', label: 'pw2', initial_tokens: 0 },
@@ -2881,18 +2873,81 @@ console.log('PASS');
     { source: 'tw4', target: 'pw5' },
     { source: 'tw4', target: 'pw2' }
   ]
-}"""
-        test_logic_cycle = """
+}""",
+            ),
+        ]
+
+        for desc, net_json in test_cases:
+            with self.subTest(topology=desc):
+                test_logic = f"""
 const cands = foldEngine.detectWellStructured();
-if (cands.length !== 0) {
-  throw new Error('Expected 0 well-structured candidates on cycle net, got ' + cands.length);
-}
+if (cands.length !== 0) {{
+  throw new Error('Expected 0 well-structured candidates on {desc} net, got ' + cands.length);
+}}
 console.log('PASS');
 """
-        node_script_cycle = _setup_live_fold_test_harness(cycle_net_json, test_logic_cycle)
-        proc_cycle = _run_node_script(node_script_cycle)
-        self.assertEqual(proc_cycle.returncode, 0, f"Node script failed: {proc_cycle.stderr}")
-        self.assertIn("PASS", proc_cycle.stdout)
+                node_script = _setup_live_fold_test_harness(net_json, test_logic)
+                proc = _run_node_script(node_script)
+                self.assertEqual(proc.returncode, 0, f"Node script failed for {desc}: {proc.stderr}")
+                self.assertIn("PASS", proc.stdout)
+
+    def test_well_structured_custom_config_respected_headless(self):
+        """Validates that LiveFoldReductionEngine respects custom well_structured multiplier option matching Python."""
+        from code2petri.model import PetriNet
+        from code2petri.fold import fold_well_structured, FoldConfig
+
+        # 1. Python model with well_structured=5.0
+        py_net = PetriNet()
+        pw1 = py_net.add_place("pw1", initial_tokens=1)
+        pw2 = py_net.add_place("pw2", initial_tokens=0)
+        pw3 = py_net.add_place("pw3", initial_tokens=0)
+        pw4 = py_net.add_place("pw4", initial_tokens=0)
+        pw5 = py_net.add_place("pw5", initial_tokens=0)
+        tw1 = py_net.add_transition("tw1", metadata={"tau": 1.5})
+        tw2 = py_net.add_transition("tw2", metadata={"tau": 2.5})
+        tw3 = py_net.add_transition("tw3", metadata={"tau": 1.0})
+        tw4 = py_net.add_transition("tw4", metadata={"tau": 2.0})
+
+        py_net.add_arc(pw1, tw1)
+        py_net.add_arc(tw1, pw2)
+        py_net.add_arc(pw2, tw2)
+        py_net.add_arc(pw2, tw3)
+        py_net.add_arc(tw2, pw3)
+        py_net.add_arc(tw3, pw4)
+        py_net.add_arc(pw3, tw4)
+        py_net.add_arc(pw4, tw4)
+        py_net.add_arc(tw4, pw5)
+
+        py_folded, py_step = fold_well_structured(py_net, step_number=1, config=FoldConfig(well_structured=5.0))
+        self.assertIsNotNone(py_step)
+        expected_tau = py_step.tau
+        expected_omega = py_step.omega
+
+        # 2. JS model with custom engine config { well_structured: 5.0 }
+        test_logic = """
+const customEngine = new LiveFoldReductionEngine(cy, { well_structured: 5.0 });
+const cands = customEngine.detectWellStructured();
+if (cands.length !== 1) {
+  throw new Error('Expected 1 well-structured candidate, got ' + cands.length);
+}
+const res = customEngine.executeWellStructuredContraction(cands[0]);
+if (!res.success) {
+  throw new Error('Well-Structured contraction failed: ' + res.message);
+}
+const c01 = cy.getElementById('c_01');
+const result = {
+  tau: c01.data('tau'),
+  omega: c01.data('omega')
+};
+console.log(JSON.stringify(result));
+"""
+        node_script = _setup_live_fold_test_harness(self.WELL_STRUCTURED_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        js_data = json.loads(proc.stdout.strip())
+
+        self.assertEqual(js_data["tau"], expected_tau)
+        self.assertEqual(js_data["omega"], expected_omega)
 
 
 if __name__ == "__main__":
