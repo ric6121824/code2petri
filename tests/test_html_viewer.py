@@ -82,6 +82,10 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_update is not None, "Could not extract updateFoldableHighlights from template.html"
     update_highlights_js = m_update.group(0)
 
+    m_cxttap = re.search(r"function handleRightClickUnfold\(node\) \{.*?\n      cy\.on\('cxttap', 'node', function\(evt\) \{.*?\n      \}\);", html, re.DOTALL)
+    assert m_cxttap is not None, "Could not extract handleRightClickUnfold and cy.on('cxttap') from template.html"
+    cxttap_handler_js = m_cxttap.group(0)
+
     return f"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 
@@ -115,7 +119,11 @@ const foldEngine = new LiveFoldReductionEngine(cy);
 {update_highlights_js}
 updateFoldableHighlights();
 
+let hasDragged = false;
+
 {tap_handler_js}
+
+{cxttap_handler_js}
 
 {test_logic_js}
 """
@@ -3653,6 +3661,371 @@ if (inspectorType.textContent !== 'Collapsed Compound') {
 }
 if (inspectorTau.textContent !== '2.0') {
   throw new Error('Expected inspectorTau 2.0, got ' + inspectorTau.textContent);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+    def test_unfold_opaque_component_right_click_headless(self):
+        """Ticket 40 Acceptance Criteria 1: Right-clicking an opaque component restores the nodes and edges it consumed."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'start', initial_tokens: 1 },
+    { id: 'p1', label: 'p1', initial_tokens: 0 },
+    { id: 'p2', label: 'end', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0 },
+    { id: 't2', label: 't2', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't1' },
+    { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't2' },
+    { source: 't2', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+const p1 = cy.getElementById('p1');
+const foldRes = foldEngine.executeSinglePlaceContraction(p1);
+if (!foldRes.success) throw new Error('Initial fold failed');
+
+const c01 = cy.getElementById('c_01');
+if (!c01 || c01.length === 0) throw new Error('c_01 not found after fold');
+
+// Simulate right-click (cxttap event)
+c01.emit('cxttap');
+
+// c_01 should be removed
+if (cy.getElementById('c_01').inside()) {
+  throw new Error('c_01 should be removed after unfold');
+}
+
+// Original nodes must be restored
+['p1', 't1', 't2'].forEach(function(id) {
+  const n = cy.getElementById(id);
+  if (!n || !n.inside()) throw new Error('Expected node ' + id + ' to be restored');
+});
+
+// SM score should be restored to 2.0
+const sm = foldEngine.calculateSMScore();
+if (sm !== 2.0) {
+  throw new Error('Expected SM score 2.0 after unfold, got ' + sm);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unfold_collapsed_compound_right_click_headless(self):
+        """Ticket 40 Acceptance Criteria 2: Right-clicking a Collapsed Compound State reopens the compound to its fully expanded internal state."""
+        net_literal = """{
+  compounds: [
+    { id: 'compound_calc', function_name: 'calc', label: 'calc()' }
+  ],
+  places: [
+    { id: 'p0', label: 'start', initial_tokens: 1 },
+    { id: 'p1', label: 'p1', initial_tokens: 0, parent: 'compound_calc' },
+    { id: 'p2', label: 'p2', initial_tokens: 0, parent: 'compound_calc' },
+    { id: 'p3', label: 'end', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0, parent: 'compound_calc' },
+    { id: 't2', label: 't2', tau: 1.0, parent: 'compound_calc' },
+    { id: 't3', label: 't3', tau: 1.0, parent: 'compound_calc' }
+  ],
+  arcs: [
+    { source: 'p0', target: 't1' },
+    { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't2' },
+    { source: 't2', target: 'p2' },
+    { source: 'p2', target: 't3' },
+    { source: 't3', target: 'p3' }
+  ]
+}"""
+        test_logic = """
+// Fold p1 into c_01
+const fold1 = foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
+if (!fold1.success) throw new Error('fold1 failed');
+
+// Fold p2 into c_02, which reduces compound_calc into single opaque component c_02
+const fold2 = foldEngine.executeSinglePlaceContraction(cy.getElementById('p2'));
+if (!fold2.success) throw new Error('fold2 failed');
+
+const comp = cy.getElementById('compound_calc');
+if (!comp.hasClass('collapsed-compound')) {
+  throw new Error('compound_calc should be collapsed');
+}
+if (comp.data('label') !== 'calc (c_02)') {
+  throw new Error('Expected label calc (c_02), got ' + comp.data('label'));
+}
+
+// Right click on the collapsed compound
+comp.emit('cxttap');
+
+// Verify compound is reopened to fully expanded state
+if (comp.hasClass('collapsed-compound')) {
+  throw new Error('compound_calc should no longer have collapsed-compound class');
+}
+if (comp.data('label') !== 'calc()') {
+  throw new Error('Expected restored label calc(), got ' + comp.data('label'));
+}
+
+// All original internal nodes must be present and belong to compound_calc
+['p1', 'p2', 't1', 't2', 't3'].forEach(function(id) {
+  const n = cy.getElementById(id);
+  if (!n || !n.inside()) throw new Error('Expected restored node ' + id);
+  if (n.data('parent') !== 'compound_calc') {
+    throw new Error('Expected node ' + id + ' parent to be compound_calc, got ' + n.data('parent'));
+  }
+});
+
+// No opaque components should remain in compound_calc
+const remainingOpaques = cy.nodes().filter(n => n.data('parent') === 'compound_calc' && (n.data('is_opaque') || n.hasClass('component')));
+if (remainingOpaques.length > 0) {
+  throw new Error('Compound still contains opaque components after full reopen: ' + remainingOpaques.map(n => n.id()));
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unfold_boundary_arcs_restored_headless(self):
+        """Ticket 40 Acceptance Criteria 3: Arc connections at the boundary are correctly restored to original elements."""
+        net_literal = """{
+  places: [
+    { id: 'p_pre', label: 'pre', initial_tokens: 1 },
+    { id: 'p_mid', label: 'mid', initial_tokens: 0 },
+    { id: 'p_post', label: 'post', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_src', label: 'src', tau: 1.0 },
+    { id: 't_snk', label: 'snk', tau: 1.0 }
+  ],
+  arcs: [
+    { id: 'arc_in', source: 'p_pre', target: 't_src' },
+    { id: 'arc_mid_1', source: 't_src', target: 'p_mid' },
+    { id: 'arc_mid_2', source: 'p_mid', target: 't_snk' },
+    { id: 'arc_out', source: 't_snk', target: 'p_post' }
+  ]
+}"""
+        test_logic = """
+const pMid = cy.getElementById('p_mid');
+foldEngine.executeSinglePlaceContraction(pMid);
+
+// Verify folded boundary arcs
+const edgesAfterFold = cy.edges();
+const inEdgeFolded = edgesAfterFold.filter(e => e.source().id() === 'p_pre' && e.target().id() === 'c_01');
+const outEdgeFolded = edgesAfterFold.filter(e => e.source().id() === 'c_01' && e.target().id() === 'p_post');
+if (inEdgeFolded.length !== 1 || outEdgeFolded.length !== 1) {
+  throw new Error('Folded boundary edges missing');
+}
+
+// Unfold
+const c01 = cy.getElementById('c_01');
+c01.emit('cxttap');
+
+// Check boundary arcs restored to original t_src and t_snk
+const edgesAfterUnfold = cy.edges();
+const restoredIn = edgesAfterUnfold.filter(e => e.source().id() === 'p_pre' && e.target().id() === 't_src');
+const restoredOut = edgesAfterUnfold.filter(e => e.source().id() === 't_snk' && e.target().id() === 'p_post');
+const restoredMidIn = edgesAfterUnfold.filter(e => e.source().id() === 't_src' && e.target().id() === 'p_mid');
+const restoredMidOut = edgesAfterUnfold.filter(e => e.source().id() === 'p_mid' && e.target().id() === 't_snk');
+
+if (restoredIn.length !== 1) throw new Error('Boundary in-arc p_pre -> t_src not restored');
+if (restoredOut.length !== 1) throw new Error('Boundary out-arc t_snk -> p_post not restored');
+if (restoredMidIn.length !== 1) throw new Error('Internal arc t_src -> p_mid not restored');
+if (restoredMidOut.length !== 1) throw new Error('Internal arc p_mid -> t_snk not restored');
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unfold_isolation_from_other_folded_components_headless(self):
+        """Ticket 40 Acceptance Criteria 4: Other folded components on the canvas are not affected by the unfold operation."""
+        net_literal = """{
+  compounds: [
+    { id: 'compound_1', function_name: 'f1', label: 'f1()' },
+    { id: 'compound_2', function_name: 'f2', label: 'f2()' }
+  ],
+  places: [
+    { id: 'p0', label: 'p0', initial_tokens: 1 },
+    { id: 'p1', label: 'p1', initial_tokens: 0, parent: 'compound_1' },
+    { id: 'p2', label: 'p2', initial_tokens: 0 },
+    { id: 'p3', label: 'p3', initial_tokens: 0, parent: 'compound_2' },
+    { id: 'p4', label: 'p4', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0, parent: 'compound_1' },
+    { id: 't2', label: 't2', tau: 1.0, parent: 'compound_1' },
+    { id: 't3', label: 't3', tau: 1.0, parent: 'compound_2' },
+    { id: 't4', label: 't4', tau: 1.0, parent: 'compound_2' }
+  ],
+  arcs: [
+    { source: 'p0', target: 't1' },
+    { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't2' },
+    { source: 't2', target: 'p2' },
+    { source: 'p2', target: 't3' },
+    { source: 't3', target: 'p3' },
+    { source: 'p3', target: 't4' },
+    { source: 't4', target: 'p4' }
+  ]
+}"""
+        test_logic = """
+// Fold both places
+foldEngine.executeSinglePlaceContraction(cy.getElementById('p1')); // creates c_01 in compound_1
+foldEngine.executeSinglePlaceContraction(cy.getElementById('p3')); // creates c_02 in compound_2
+
+const comp1 = cy.getElementById('compound_1');
+const comp2 = cy.getElementById('compound_2');
+if (!comp1.hasClass('collapsed-compound') || !comp2.hasClass('collapsed-compound')) {
+  throw new Error('Both compounds should be collapsed');
+}
+
+// Right-click only compound_1
+comp1.emit('cxttap');
+
+// compound_1 should be reopened
+if (comp1.hasClass('collapsed-compound')) {
+  throw new Error('compound_1 should be reopened');
+}
+if (!cy.getElementById('p1').inside() || !cy.getElementById('t1').inside() || !cy.getElementById('t2').inside()) {
+  throw new Error('compound_1 elements not restored');
+}
+
+// compound_2 MUST remain completely folded!
+if (!comp2.hasClass('collapsed-compound')) {
+  throw new Error('compound_2 must remain in collapsed-compound state');
+}
+if (comp2.data('label') !== 'f2 (c_02)') {
+  throw new Error('compound_2 label changed unexpectedly: ' + comp2.data('label'));
+}
+const c02 = cy.getElementById('c_02');
+if (!c02 || !c02.inside()) {
+  throw new Error('c_02 should still exist inside compound_2');
+}
+if (cy.getElementById('p3').inside() || cy.getElementById('t3').inside() || cy.getElementById('t4').inside()) {
+  throw new Error('compound_2 internal nodes should NOT be restored');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unfold_restored_elements_eligible_for_refold_headless(self):
+        """Ticket 40 Acceptance Criteria 5: After unfold, restored elements are selectable and eligible for further fold operations."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'start', initial_tokens: 1 },
+    { id: 'p1', label: 'p1', initial_tokens: 0 },
+    { id: 'p2', label: 'end', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0 },
+    { id: 't2', label: 't2', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't1' },
+    { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't2' },
+    { source: 't2', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+// Fold
+foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
+
+// Unfold via cxttap
+cy.getElementById('c_01').emit('cxttap');
+
+const restoredP1 = cy.getElementById('p1');
+const restoredT1 = cy.getElementById('t1');
+const restoredT2 = cy.getElementById('t2');
+
+// Selectable check
+if (!restoredP1.selectable() || !restoredT1.selectable() || !restoredT2.selectable()) {
+  throw new Error('Restored elements must be selectable');
+}
+
+// Fold eligibility check
+const canFold = foldEngine.canContractPlace(restoredP1);
+if (!canFold.ok) {
+  throw new Error('Restored place p1 should be eligible for contraction: ' + canFold.reason);
+}
+
+// Perform fold again (refold)
+const refoldRes = foldEngine.executeSinglePlaceContraction(restoredP1);
+if (!refoldRes.success) {
+  throw new Error('Refolding p1 failed: ' + refoldRes.message);
+}
+if (!refoldRes.node || !refoldRes.node.inside()) {
+  throw new Error('Refolded node not inside cy');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_unfold_drag_pan_does_not_trigger_unfold_headless(self):
+        """Validates that right-clicking during or after canvas drag-panning does not trigger an unfold."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'start', initial_tokens: 1 },
+    { id: 'p1', label: 'p1', initial_tokens: 0 },
+    { id: 'p2', label: 'end', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0 },
+    { id: 't2', label: 't2', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't1' },
+    { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't2' },
+    { source: 't2', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
+
+const c01 = cy.getElementById('c_01');
+if (!c01.inside()) throw new Error('c_01 missing');
+
+// Simulate dragging state
+hasDragged = true;
+
+// Emit cxttap while hasDragged is true
+c01.emit('cxttap');
+
+// c_01 should NOT have unfolded because hasDragged was true
+if (!cy.getElementById('c_01').inside()) {
+  throw new Error('c_01 should NOT unfold when hasDragged is true');
+}
+
+// Reset dragging state
+hasDragged = false;
+c01.emit('cxttap');
+
+// Now c_01 should unfold
+if (cy.getElementById('c_01').inside()) {
+  throw new Error('c_01 should unfold when hasDragged is false');
 }
 
 console.log('PASS');
