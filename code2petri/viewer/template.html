@@ -1064,6 +1064,42 @@
             }
           },
           {
+            selector: 'node.compound.collapsed-compound, node.collapsed-compound',
+            style: {
+              'shape': 'roundrectangle',
+              'background-color': 'rgba(210, 153, 34, 0.15)',
+              'border-width': 2.5,
+              'border-color': '#d29922',
+              'border-style': 'solid',
+              'padding': '14px 20px',
+              'label': 'data(collapsed_label)',
+              'text-valign': 'center',
+              'text-halign': 'center',
+              'text-margin-y': 0,
+              'font-size': '12px',
+              'font-weight': 'bold',
+              'font-family': 'ui-monospace, monospace',
+              'color': '#b07d17',
+              'text-background-opacity': 0,
+              'cursor': 'pointer'
+            }
+          },
+          {
+            selector: 'node.collapsed-child, node.compound.collapsed-compound > node',
+            style: {
+              'opacity': 0,
+              'label': '',
+              'text-opacity': 0,
+              'background-opacity': 0,
+              'background-image-opacity': 0,
+              'background-image': 'none',
+              'border-width': 0,
+              'pointer-events': 'none',
+              'width': 60,
+              'height': 24
+            }
+          },
+          {
             selector: 'node.transition.resolved, node.compound',
             style: {
               'cursor': 'pointer'
@@ -1213,10 +1249,13 @@
         const rawLabel = node.data('raw_label') || node.data('label') || node.id();
         const isCompound = node.hasClass('compound') || node.data('is_compound') === true;
         const isOpaque = node.data('is_opaque') === true;
+        const isCollapsedCompound = node.hasClass('collapsed-compound') || node.data('is_collapsed_compound') === true;
 
         let compType = node.data('component_type');
         if (!compType) {
-          if (isOpaque) {
+          if (isCollapsedCompound) {
+            compType = 'Collapsed Compound';
+          } else if (isOpaque) {
             compType = 'Opaque Transition';
           } else if (isCompound) {
             compType = 'Compound Container';
@@ -1225,9 +1264,20 @@
           }
         }
 
-        // Transitions carry a tau weight; compound function containers do not
+        // Transitions carry a tau weight; compound function containers do not (unless collapsed around an opaque child)
         let tauStr = '—';
-        if (!isCompound) {
+        if (isCollapsedCompound) {
+          const childId = node.data('collapsed_opaque_id');
+          if (childId && typeof node.cy === 'function') {
+            const childNode = node.cy().getElementById(childId);
+            if (childNode && childNode.length > 0) {
+              const childTau = childNode.data('tau');
+              if (childTau !== undefined && childTau !== null) {
+                tauStr = Number.isInteger(Number(childTau)) ? Number(childTau).toFixed(1) : String(childTau);
+              }
+            }
+          }
+        } else if (!isCompound) {
           const rawTau = node.data('tau');
           const tauVal = (rawTau !== undefined && rawTau !== null) ? Number(rawTau) : 1.0;
           tauStr = Number.isInteger(tauVal) ? tauVal.toFixed(1) : String(tauVal);
@@ -1468,6 +1518,7 @@
         constructor(cy, options = {}) {
           this.cy = cy;
           this.stepCounter = 0;
+          this.history = [];
           this.cfg = {
             sequence: options.sequence !== undefined ? options.sequence : 0.0,
             choice: options.choice !== undefined ? options.choice : 1.0,
@@ -1546,7 +1597,9 @@
             nodeDef.position = Object.assign({}, position);
           }
 
-          return this.cy.add(nodeDef);
+          const addedNode = this.cy.add(nodeDef);
+          this._updateCollapsedCompoundStates();
+          return addedNode;
         }
 
         calculateSMScore() {
@@ -1556,6 +1609,117 @@
             sm += isNaN(tau) ? 1.0 : tau;
           });
           return parseFloat(sm.toFixed(2));
+        }
+
+        _updateCollapsedCompoundStates(specificParentId = null) {
+          const self = this;
+          let targetCompounds;
+          if (specificParentId) {
+            const specificNode = this.cy.getElementById(specificParentId);
+            targetCompounds = (specificNode && specificNode.length > 0) ? specificNode : this.cy.collection();
+          } else {
+            targetCompounds = this.cy.nodes('.compound');
+          }
+
+          targetCompounds.forEach(function(compoundNode) {
+            const cId = compoundNode.id();
+            const children = self.cy.nodes().filter(function(n) {
+              return n.data('parent') === cId && n.inside();
+            });
+
+            if (children.length === 1) {
+              const onlyChild = children[0];
+              if (onlyChild.data('is_opaque') === true || onlyChild.data('opaque') === true || onlyChild.hasClass('component') || onlyChild.hasClass('opaque')) {
+                // Transition to Collapsed Compound State automatically
+                compoundNode.addClass('collapsed-compound');
+                const opaqueId = onlyChild.id();
+                let fnName = compoundNode.data('function_name');
+                if (!fnName) {
+                  fnName = compoundNode.data('label') || compoundNode.id();
+                }
+                fnName = String(fnName).replace(/\(\)$/, '').trim();
+                if (fnName.startsWith('compound_')) {
+                  fnName = fnName.replace(/^compound_/, '');
+                }
+
+                if (!compoundNode.data('original_label')) {
+                  compoundNode.data('original_label', compoundNode.data('label') || compoundNode.id());
+                }
+
+                const collapsedLabel = `${fnName} (${opaqueId})`;
+                compoundNode.data('collapsed_label', collapsedLabel);
+                compoundNode.data('label', collapsedLabel);
+                compoundNode.data('collapsed_opaque_id', opaqueId);
+                compoundNode.data('is_collapsed_compound', true);
+
+                // Hide internal child node
+                onlyChild.addClass('collapsed-child');
+                onlyChild.data('is_collapsed_child', true);
+                if (!onlyChild.data('original_label')) {
+                  onlyChild.data('original_label', onlyChild.data('label') || onlyChild.id());
+                }
+                onlyChild.data('label', '');
+                return;
+              }
+            }
+
+            // If not meeting criteria and was collapsed, uncollapse (e.g. after unfold or reset)
+            if (compoundNode.hasClass('collapsed-compound')) {
+              compoundNode.removeClass('collapsed-compound');
+              compoundNode.removeData('collapsed_opaque_id');
+              compoundNode.removeData('is_collapsed_compound');
+              compoundNode.removeData('collapsed_label');
+              if (compoundNode.data('original_label')) {
+                compoundNode.data('label', compoundNode.data('original_label'));
+                compoundNode.removeData('original_label');
+              } else {
+                const origFn = compoundNode.data('function_name');
+                if (origFn) {
+                  compoundNode.data('label', origFn.endsWith('()') ? origFn : (origFn + '()'));
+                }
+              }
+            }
+
+            // Restore any children that might have collapsed-child class if > 1 children
+            if (children.length > 1) {
+              children.forEach(function(child) {
+                if (child.hasClass('collapsed-child')) {
+                  child.removeClass('collapsed-child');
+                  child.removeData('is_collapsed_child');
+                  if (child.data('original_label')) {
+                    child.data('label', child.data('original_label'));
+                    child.removeData('original_label');
+                  }
+                }
+              });
+            }
+          });
+        }
+
+        renameNode(nodeOrId, newName) {
+          const node = typeof nodeOrId === 'string' ? this.cy.getElementById(nodeOrId) : nodeOrId;
+          if (!node || node.length === 0) return false;
+          const trimmed = (newName || '').trim();
+          if (!trimmed) return false;
+
+          node.data('label', trimmed);
+          node.data('custom_name', trimmed);
+
+          // If inside a collapsed compound, update its banner
+          const parentId = node.data('parent');
+          if (parentId) {
+            const parentNode = this.cy.getElementById(parentId);
+            if (parentNode && parentNode.length > 0 && parentNode.hasClass('collapsed-compound')) {
+              let fnName = parentNode.data('function_name');
+              if (!fnName) fnName = parentNode.data('label') || parentNode.id();
+              fnName = String(fnName).replace(/\(\)$/, '').trim();
+              if (fnName.startsWith('compound_')) fnName = fnName.replace(/^compound_/, '');
+              const newCollapsedLabel = `${fnName} (${trimmed})`;
+              parentNode.data('collapsed_label', newCollapsedLabel);
+              parentNode.data('label', newCollapsedLabel);
+            }
+          }
+          return true;
         }
 
         isFunctionFoldedIntoSingleComponent(compoundIdOrNode) {
@@ -1813,11 +1977,15 @@
             });
           });
 
+          const isCollapsed = parentId ? Boolean(this.cy.getElementById(parentId).hasClass('collapsed-compound')) : false;
+          consumedSubnet.isCompoundCollapsed = isCollapsed;
+
           return {
             success: true,
             message: `Folded sequence into '${opaqueId}'`,
             step: consumedSubnet,
-            node: opaqueNode
+            node: opaqueNode,
+            isCompoundCollapsed: isCollapsed
           };
         }
 
@@ -2258,11 +2426,15 @@
             });
           });
 
+          const isCollapsed = parentId ? Boolean(this.cy.getElementById(parentId).hasClass('collapsed-compound')) : false;
+          consumedSubnet.isCompoundCollapsed = isCollapsed;
+
           return {
             success: true,
             message: `Folded while loop around '${placeNode.data('label') || placeNode.id()}' into '${opaqueId}' (ω=${omega}, τ=${tau_new}).`,
             step: consumedSubnet,
-            node: opaqueNode
+            node: opaqueNode,
+            isCompoundCollapsed: isCollapsed
           };
         }
 
@@ -2384,11 +2556,15 @@
             classes: 'arc'
           });
 
+          const isCollapsed = parentId ? Boolean(this.cy.getElementById(parentId).hasClass('collapsed-compound')) : false;
+          consumedSubnet.isCompoundCollapsed = isCollapsed;
+
           return {
             success: true,
             message: `Folded choice transitions [${transLabels}] into '${opaqueId}' (ω=${omega}, τ=${accumulatedTau}).`,
             step: consumedSubnet,
-            node: opaqueNode
+            node: opaqueNode,
+            isCompoundCollapsed: isCollapsed
           };
         }
 
@@ -2922,11 +3098,15 @@
             config.addBoundaryArcs(opaqueId, self.cy);
           }
 
+          const isCollapsed = config.parentId ? Boolean(this.cy.getElementById(config.parentId).hasClass('collapsed-compound')) : false;
+          consumedSubnet.isCompoundCollapsed = isCollapsed;
+
           return {
             success: true,
             message: `Folded ${candidate.componentType} (${config.rawSrc}..${config.rawSnk}) into '${opaqueId}' (ω=${candidate.omega}, τ=${candidate.tauNew}).`,
             step: consumedSubnet,
-            node: opaqueNode
+            node: opaqueNode,
+            isCompoundCollapsed: isCollapsed
           };
         }
 
@@ -3224,6 +3404,9 @@
 
       function updateFoldableHighlights() {
         if (!cy || typeof cy.nodes !== 'function' || !foldEngine) return;
+        if (typeof foldEngine._updateCollapsedCompoundStates === 'function') {
+          foldEngine._updateCollapsedCompoundStates();
+        }
 
         const activeStructural = foldEngine.getActiveStructuralCandidates();
 
@@ -3337,7 +3520,7 @@
         if (targetNode.data('composite_preassembled') === true) return;
 
         // 3. (Single-function mode only) If clicked node is an expanded compound node, collapse it
-        if (expandedNodes.has(targetId) || targetNode.hasClass('compound')) {
+        if (!targetNode.hasClass('collapsed-compound') && (expandedNodes.has(targetId) || targetNode.hasClass('compound'))) {
           const prefix = targetId + '__';
           Array.from(expandedNodes.keys()).forEach(function(id) {
             if (id.startsWith(prefix)) {

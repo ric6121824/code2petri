@@ -3377,6 +3377,291 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+    # =========================================================================
+    # Ticket 39: Viewer Collapsed Compound State Tests
+    # =========================================================================
+
+    def test_collapsed_compound_automatic_transition_headless(self):
+        """Criterion 1: When all internal nodes of an inlined function compound node are reduced to a single component, the container transitions to the Collapsed Compound State automatically."""
+        net_literal = """{
+  compounds: [
+    { id: 'compound_auth', function_name: 'auth', label: 'auth()' }
+  ],
+  places: [
+    { id: 'p_start', label: 'start', initial_tokens: 0 },
+    { id: 'p_mid', label: 'mid', initial_tokens: 0, parent: 'compound_auth' },
+    { id: 'p_end', label: 'end', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_caller_src', label: 'caller_src', tau: 1.0 },
+    { id: 't1', label: 't1', tau: 1.0, parent: 'compound_auth' },
+    { id: 't2', label: 't2', tau: 1.0, parent: 'compound_auth' },
+    { id: 't_caller_snk', label: 'caller_snk', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 't_caller_src', target: 'p_start' },
+    { source: 'p_start', target: 't1' },
+    { source: 't1', target: 'p_mid' },
+    { source: 'p_mid', target: 't2' },
+    { source: 't2', target: 'p_end' },
+    { source: 'p_end', target: 't_caller_snk' }
+  ]
+}"""
+        test_logic = """
+const compAuth = cy.getElementById('compound_auth');
+if (compAuth.hasClass('collapsed-compound')) {
+  throw new Error('compound_auth should NOT be collapsed initially');
+}
+if (foldEngine.isFunctionFoldedIntoSingleComponent('compound_auth')) {
+  throw new Error('compound_auth should NOT report single component folded initially');
+}
+
+// Fold internal place p_mid
+const pMid = cy.getElementById('p_mid');
+const res = foldEngine.executeSinglePlaceContraction(pMid);
+if (!res.success) {
+  throw new Error('Failed to fold p_mid: ' + res.message);
+}
+
+if (!res.isCompoundCollapsed) {
+  throw new Error('res.isCompoundCollapsed should be true');
+}
+if (!compAuth.hasClass('collapsed-compound')) {
+  throw new Error('compound_auth should now have class collapsed-compound');
+}
+if (!foldEngine.isFunctionFoldedIntoSingleComponent('compound_auth')) {
+  throw new Error('isFunctionFoldedIntoSingleComponent should be true');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_collapsed_compound_label_formatting_and_renaming_headless(self):
+        """Criterion 2: The collapsed container displays the label function_name (c_XX) where c_XX is the component identifier, updating when renamed."""
+        net_literal = """{
+  compounds: [
+    { id: 'compound_calculate_tax', function_name: 'calculate_tax', label: 'calculate_tax()' }
+  ],
+  places: [
+    { id: 'p_mid', label: 'mid', initial_tokens: 0, parent: 'compound_calculate_tax' }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0, parent: 'compound_calculate_tax' },
+    { id: 't2', label: 't2', tau: 1.0, parent: 'compound_calculate_tax' }
+  ],
+  arcs: [
+    { source: 't1', target: 'p_mid' },
+    { source: 'p_mid', target: 't2' }
+  ]
+}"""
+        test_logic = """
+const pMid = cy.getElementById('p_mid');
+const res = foldEngine.executeSinglePlaceContraction(pMid);
+const comp = cy.getElementById('compound_calculate_tax');
+
+if (comp.data('collapsed_label') !== 'calculate_tax (c_01)') {
+  throw new Error('Expected label calculate_tax (c_01), got ' + comp.data('collapsed_label'));
+}
+if (comp.data('label') !== 'calculate_tax (c_01)') {
+  throw new Error('Expected data(label) calculate_tax (c_01), got ' + comp.data('label'));
+}
+if (comp.data('collapsed_opaque_id') !== 'c_01') {
+  throw new Error('Expected collapsed_opaque_id c_01, got ' + comp.data('collapsed_opaque_id'));
+}
+
+// Rename component
+foldEngine.renameNode('c_01', 'tax_core');
+if (comp.data('collapsed_label') !== 'calculate_tax (tax_core)') {
+  throw new Error('Expected renamed label calculate_tax (tax_core), got ' + comp.data('collapsed_label'));
+}
+if (comp.data('label') !== 'calculate_tax (tax_core)') {
+  throw new Error('Expected renamed data(label) calculate_tax (tax_core), got ' + comp.data('label'));
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_collapsed_compound_internal_nodes_hidden_headless(self):
+        """Criterion 3: The internal nodes are hidden, leaving only the closed container visible on the canvas."""
+        net_literal = """{
+  compounds: [
+    { id: 'compound_auth', function_name: 'auth', label: 'auth()' }
+  ],
+  places: [
+    { id: 'p_mid', label: 'mid', initial_tokens: 0, parent: 'compound_auth' }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0, parent: 'compound_auth' },
+    { id: 't2', label: 't2', tau: 1.0, parent: 'compound_auth' }
+  ],
+  arcs: [
+    { source: 't1', target: 'p_mid' },
+    { source: 'p_mid', target: 't2' }
+  ]
+}"""
+        test_logic = """
+const pMid = cy.getElementById('p_mid');
+foldEngine.executeSinglePlaceContraction(pMid);
+const c01 = cy.getElementById('c_01');
+
+if (!c01.hasClass('collapsed-child')) {
+  throw new Error('c_01 must have class collapsed-child');
+}
+if (!c01.data('is_collapsed_child')) {
+  throw new Error('c_01 must have is_collapsed_child true');
+}
+if (c01.data('label') !== '') {
+  throw new Error('c_01 label must be empty string, got: ' + c01.data('label'));
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+        # Also verify stylesheet definitions in template.html
+        html = _read_template_html()
+        self.assertIn("node.collapsed-child, node.compound.collapsed-compound > node", html)
+        self.assertIn("'opacity': 0", html)
+        self.assertIn("'pointer-events': 'none'", html)
+        self.assertIn("'background-opacity': 0", html)
+
+    def test_collapsed_compound_visual_distinction_headless(self):
+        """Criterion 4: A Collapsed Compound State is visually distinct from a plain opaque transition."""
+        html = _read_template_html()
+        # Verify plain opaque transition styling
+        self.assertIn("node.transition.opaque", html)
+        self.assertIn("'border-style': 'dashed'", html)
+        self.assertIn("'border-color': '#111111'", html)
+
+        # Verify collapsed compound styling: roundrectangle folder, solid warm amber border, golden background
+        self.assertIn("node.compound.collapsed-compound, node.collapsed-compound", html)
+        self.assertIn("'shape': 'roundrectangle'", html)
+        self.assertIn("'background-color': 'rgba(210, 153, 34, 0.15)'", html)
+        self.assertIn("'border-color': '#d29922'", html)
+        self.assertIn("'border-style': 'solid'", html)
+        self.assertIn("'label': 'data(collapsed_label)'", html)
+        self.assertIn("'color': '#b07d17'", html)
+
+    def test_collapsed_compound_boundary_folding_headless(self):
+        """Validates that a Collapsed Compound container unblocks surrounding caller boundary place contractions."""
+        net_literal = """{
+  compounds: [
+    { id: 'compound_auth', function_name: 'auth', label: 'auth()' }
+  ],
+  places: [
+    { id: 'p_start', label: 'start', initial_tokens: 0 },
+    { id: 'p_mid', label: 'mid', initial_tokens: 0, parent: 'compound_auth' },
+    { id: 'p_end', label: 'end', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't_caller_src', label: 'caller_src', tau: 1.0 },
+    { id: 't1', label: 't1', tau: 1.0, parent: 'compound_auth' },
+    { id: 't2', label: 't2', tau: 1.0, parent: 'compound_auth' },
+    { id: 't_caller_snk', label: 'caller_snk', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 't_caller_src', target: 'p_start' },
+    { source: 'p_start', target: 't1' },
+    { source: 't1', target: 'p_mid' },
+    { source: 'p_mid', target: 't2' },
+    { source: 't2', target: 'p_end' },
+    { source: 'p_end', target: 't_caller_snk' }
+  ]
+}"""
+        test_logic = """
+const pStart = cy.getElementById('p_start');
+
+// Initially, p_start cannot fold because compound_auth is not reduced to single component
+const preCheck = foldEngine.canContractPlace(pStart);
+if (preCheck.ok) {
+  throw new Error('p_start should NOT be contractible before compound_auth is collapsed');
+}
+
+// Fold internal place p_mid
+const pMid = cy.getElementById('p_mid');
+const res = foldEngine.executeSinglePlaceContraction(pMid);
+if (!res.success) throw new Error('p_mid fold failed');
+
+// Now compound_auth is collapsed, p_start CAN fold!
+const postCheck = foldEngine.canContractPlace(pStart);
+if (!postCheck.ok) {
+  throw new Error('p_start should now be contractible, but failed: ' + postCheck.reason);
+}
+
+// Execute fold on p_start
+const foldCaller = foldEngine.executeSinglePlaceContraction(pStart);
+if (!foldCaller.success) {
+  throw new Error('p_start fold failed: ' + foldCaller.message);
+}
+
+// Verify compound_auth was pruned since its only child was consumed into the higher component
+if (cy.getElementById('compound_auth').inside()) {
+  throw new Error('compound_auth should be pruned after its only child is consumed');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_collapsed_compound_inspector_tap_headless(self):
+        """Validates that tapping a Collapsed Compound container opens the inspector displaying its collapsed label, type, and tau."""
+        net_literal = """{
+  compounds: [
+    { id: 'compound_auth', function_name: 'auth', label: 'auth()' }
+  ],
+  places: [
+    { id: 'p_mid', label: 'mid', initial_tokens: 0, parent: 'compound_auth' }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0, parent: 'compound_auth' },
+    { id: 't2', label: 't2', tau: 1.0, parent: 'compound_auth' }
+  ],
+  arcs: [
+    { source: 't1', target: 'p_mid' },
+    { source: 'p_mid', target: 't2' }
+  ]
+}"""
+        test_logic = """
+const pMid = cy.getElementById('p_mid');
+foldEngine.executeSinglePlaceContraction(pMid);
+
+const compAuth = cy.getElementById('compound_auth');
+compAuth.emit('tap');
+
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('Inspector panel did not open on tapping collapsed compound');
+}
+if (inspectorLabel.textContent !== 'auth (c_01)') {
+  throw new Error('Expected inspectorLabel auth (c_01), got ' + inspectorLabel.textContent);
+}
+if (inspectorType.textContent !== 'Collapsed Compound') {
+  throw new Error('Expected inspectorType Collapsed Compound, got ' + inspectorType.textContent);
+}
+if (inspectorTau.textContent !== '2.0') {
+  throw new Error('Expected inspectorTau 2.0, got ' + inspectorTau.textContent);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
