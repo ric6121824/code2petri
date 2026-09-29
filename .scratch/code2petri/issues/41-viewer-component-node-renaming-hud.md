@@ -4,11 +4,11 @@
 
 **Blocked by:** 40 — Viewer: Component-Local Unfold
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Left-clicking a transition or component node opens the floating HUD popover near the selected node
-- [ ] The HUD displays tau weight, component type, and source line number as compact stat pills
-- [ ] The HUD contains an editable text field pre-filled with the node's current label
-- [ ] Saving a new name updates the node's displayed label on the canvas immediately
-- [ ] The HUD closes when the user clicks elsewhere on the canvas
-- [ ] A renamed component retains its custom label after being unfolded and re-folded
+- [x] Left-clicking a transition or component node opens the floating HUD popover near the selected node
+- [x] The HUD displays tau weight, component type, and source line number as compact stat pills
+- [x] The HUD contains an editable text field pre-filled with the node's current label
+- [x] Saving a new name updates the node's displayed label on the canvas immediately
+- [x] The HUD closes when the user clicks elsewhere on the canvas
+- [x] A renamed component retains its custom label after being unfolded and re-folded

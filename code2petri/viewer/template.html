@@ -132,18 +132,23 @@
       position: absolute;
       top: 20px;
       right: 20px;
-      width: 290px;
+      width: 300px;
       background: rgba(255, 255, 255, 0.98);
-      border: 1px solid #dee2e6;
-      border-radius: 8px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-      backdrop-filter: blur(8px);
-      z-index: 15;
+      border: 1px solid #c8d1d9;
+      border-radius: 10px;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+      backdrop-filter: blur(10px);
+      z-index: 18;
       display: none;
       flex-direction: column;
       overflow: hidden;
       font-size: 12px;
       color: #24292e;
+      animation: popoverFade 0.15s ease-out;
+    }
+    @keyframes popoverFade {
+      from { opacity: 0; transform: translateY(-4px); }
+      to { opacity: 1; transform: translateY(0); }
     }
     .inspector-header {
       padding: 10px 14px;
@@ -182,7 +187,7 @@
     .inspector-row {
       display: flex;
       flex-direction: column;
-      gap: 2px;
+      gap: 4px;
     }
     .inspector-label {
       font-size: 10px;
@@ -191,12 +196,79 @@
       letter-spacing: 0.5px;
       color: #6a737d;
     }
+    .inspector-input-group {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .inspector-input {
+      flex: 1;
+      padding: 6px 10px;
+      font-size: 12px;
+      border: 1px solid #d1d5da;
+      border-radius: 6px;
+      background: #ffffff;
+      color: #24292e;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      outline: none;
+    }
+    .inspector-input:focus {
+      border-color: #0366d6;
+      box-shadow: 0 0 0 2px rgba(3, 102, 214, 0.2);
+    }
+    .inspector-save-btn {
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #ffffff;
+      background-color: #2ea44f;
+      border: 1px solid #2c974b;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background-color 0.15s ease;
+    }
+    .inspector-save-btn:hover {
+      background-color: #2c974b;
+    }
     .inspector-val {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 12px;
       font-weight: 600;
       color: #24292e;
       word-break: break-all;
+    }
+    .inspector-stat-pills {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .stat-pill {
+      background: #f6f8fa;
+      border: 1px solid #e1e4e8;
+      border-radius: 6px;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      text-align: center;
+    }
+    .stat-pill .pill-key {
+      font-size: 9px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+      color: #6a737d;
+    }
+    .stat-pill .pill-val {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 700;
+      color: #0366d6;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .inspector-stat-grid {
       display: grid;
@@ -348,28 +420,32 @@
       </div>
     </div>
 
-    <div id="inspector-panel" class="inspector-panel" style="display: none;">
+    <div id="inspector-panel" class="inspector-panel hud-popover" style="display: none;">
       <div class="inspector-header">
-        <span class="inspector-title">Node Inspector</span>
+        <span class="inspector-title" id="hud-title">Node Inspector</span>
         <button id="inspector-close" class="inspector-close-btn" title="Close inspector">✕</button>
       </div>
       <div class="inspector-body">
         <div class="inspector-row">
-          <span class="inspector-label">Label:</span>
-          <span id="inspector-label" class="inspector-val"></span>
-        </div>
-        <div class="inspector-row">
-          <span class="inspector-label">Component Type:</span>
-          <span id="inspector-type" class="inspector-val"></span>
-        </div>
-        <div class="inspector-stat-grid">
-          <div class="inspector-stat-card">
-            <span class="key">Tau (τ):</span>
-            <span id="inspector-tau" class="val">1.0</span>
+          <label class="inspector-label" for="hud-input-label">Name / Label:</label>
+          <div class="inspector-input-group">
+            <input id="hud-input-label" class="inspector-input" type="text" placeholder="Component name" />
+            <button id="hud-btn-save" class="inspector-save-btn" title="Save name">Save</button>
           </div>
-          <div class="inspector-stat-card">
-            <span class="key">Line:</span>
-            <span id="inspector-line" class="val">—</span>
+          <span id="inspector-label" class="inspector-val" style="display: none;"></span>
+        </div>
+        <div class="inspector-stat-pills">
+          <div class="stat-pill">
+            <span class="pill-key">Tau (τ):</span>
+            <span id="inspector-tau" class="pill-val">1.0</span>
+          </div>
+          <div class="stat-pill">
+            <span class="pill-key">Type:</span>
+            <span id="inspector-type" class="pill-val">—</span>
+          </div>
+          <div class="stat-pill">
+            <span class="pill-key">Line:</span>
+            <span id="inspector-line" class="pill-val">—</span>
           </div>
         </div>
       </div>
@@ -1258,13 +1334,17 @@
       // Inspector panel DOM elements and functions
       const inspectorPanel = document.getElementById('inspector-panel');
       const inspectorLabel = document.getElementById('inspector-label');
+      const inspectorInput = document.getElementById('hud-input-label');
+      const inspectorSaveBtn = document.getElementById('hud-btn-save');
       const inspectorType = document.getElementById('inspector-type');
       const inspectorTau = document.getElementById('inspector-tau');
       const inspectorLine = document.getElementById('inspector-line');
       const inspectorCloseBtn = document.getElementById('inspector-close');
 
+      let selectedInspectorNode = null;
+
       function getInspectorData(node) {
-        const rawLabel = node.data('raw_label') || node.data('label') || node.id();
+        const rawLabel = node.data('custom_name') || node.data('raw_label') || node.data('label') || node.id();
         const isCompound = node.hasClass('compound') || node.data('is_compound') === true;
         const isOpaque = node.data('is_opaque') === true;
         const isCollapsedCompound = node.hasClass('collapsed-compound') || node.data('is_collapsed_compound') === true;
@@ -1312,14 +1392,67 @@
         };
       }
 
+      function saveInspectorName(newName) {
+        if (!selectedInspectorNode || !selectedInspectorNode.inside()) return false;
+        const inputEl = typeof inspectorInput !== 'undefined' && inspectorInput ? inspectorInput : (typeof document !== 'undefined' ? document.getElementById('hud-input-label') : null);
+        const labelEl = typeof inspectorLabel !== 'undefined' && inspectorLabel ? inspectorLabel : (typeof document !== 'undefined' ? document.getElementById('inspector-label') : null);
+        const val = (newName !== undefined ? newName : (inputEl ? (inputEl.value || inputEl.textContent) : '')).trim();
+        if (!val) return false;
+        if (typeof foldEngine !== 'undefined' && foldEngine) {
+          foldEngine.renameNode(selectedInspectorNode, val);
+        }
+        if (labelEl) labelEl.textContent = val;
+        if (inputEl) inputEl.value = val;
+        return true;
+      }
+
       function openInspector(node) {
         if (!inspectorPanel) return;
+        selectedInspectorNode = node;
         const data = getInspectorData(node);
 
-        if (inspectorLabel) inspectorLabel.textContent = data.label;
-        if (inspectorTau) inspectorTau.textContent = data.tau;
-        if (inspectorType) inspectorType.textContent = data.componentType;
-        if (inspectorLine) inspectorLine.textContent = data.lineNumber;
+        const inputEl = typeof inspectorInput !== 'undefined' && inspectorInput ? inspectorInput : (typeof document !== 'undefined' ? document.getElementById('hud-input-label') : null);
+        const labelEl = typeof inspectorLabel !== 'undefined' && inspectorLabel ? inspectorLabel : (typeof document !== 'undefined' ? document.getElementById('inspector-label') : null);
+        const tauEl = typeof inspectorTau !== 'undefined' && inspectorTau ? inspectorTau : (typeof document !== 'undefined' ? document.getElementById('inspector-tau') : null);
+        const typeEl = typeof inspectorType !== 'undefined' && inspectorType ? inspectorType : (typeof document !== 'undefined' ? document.getElementById('inspector-type') : null);
+        const lineEl = typeof inspectorLine !== 'undefined' && inspectorLine ? inspectorLine : (typeof document !== 'undefined' ? document.getElementById('inspector-line') : null);
+
+        if (labelEl) labelEl.textContent = data.label;
+        if (inputEl) inputEl.value = data.label;
+        if (tauEl) tauEl.textContent = data.tau;
+        if (typeEl) typeEl.textContent = data.componentType;
+        if (lineEl) lineEl.textContent = data.lineNumber;
+
+        // Position floating HUD near selected node
+        if (node && typeof node.renderedPosition === 'function') {
+          try {
+            const rpos = node.renderedPosition();
+            if (rpos && typeof rpos.x === 'number' && typeof rpos.y === 'number') {
+              const nodeW = typeof node.renderedOuterWidth === 'function' ? node.renderedOuterWidth() : 40;
+              const nodeH = typeof node.renderedOuterHeight === 'function' ? node.renderedOuterHeight() : 40;
+              let left = rpos.x + nodeW / 2 + 16;
+              let top = rpos.y - 40;
+
+              const containerW = (typeof cy !== 'undefined' && cy.width && cy.width() > 0) ? cy.width() : 800;
+              const containerH = (typeof cy !== 'undefined' && cy.height && cy.height() > 0) ? cy.height() : 600;
+              const hudW = 300;
+              const hudH = 180;
+
+              if (left + hudW > containerW - 16) {
+                left = Math.max(16, rpos.x - nodeW / 2 - hudW - 16);
+              }
+              if (top + hudH > containerH - 16) {
+                top = Math.max(16, containerH - hudH - 16);
+              }
+              if (top < 16) top = 16;
+              if (left < 16) left = 16;
+
+              inspectorPanel.style.left = left + 'px';
+              inspectorPanel.style.top = top + 'px';
+              inspectorPanel.style.right = 'auto';
+            }
+          } catch (e) {}
+        }
 
         inspectorPanel.style.display = 'flex';
       }
@@ -1328,6 +1461,34 @@
         if (inspectorPanel) {
           inspectorPanel.style.display = 'none';
         }
+        selectedInspectorNode = null;
+      }
+
+      if (inspectorSaveBtn) {
+        inspectorSaveBtn.addEventListener('click', function(e) {
+          if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+          saveInspectorName();
+        });
+      }
+
+      if (inspectorInput) {
+        inspectorInput.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+            saveInspectorName();
+            if (typeof inspectorInput.blur === 'function') inspectorInput.blur();
+          }
+        });
+        inspectorInput.addEventListener('change', function() {
+          saveInspectorName();
+        });
+      }
+
+      if (inspectorPanel && typeof inspectorPanel.addEventListener === 'function') {
+        inspectorPanel.addEventListener('click', function(e) {
+          if (e && typeof e.stopPropagation === 'function') {
+            e.stopPropagation();
+          }
+        });
       }
 
       if (inspectorCloseBtn) {
@@ -1584,13 +1745,56 @@
           const componentType = opts.componentType || consumedSubnet.componentType;
           const parentId = opts.parentId !== undefined ? opts.parentId : (consumedSubnet.parentCompound || null);
           const rawLabel = opts.rawLabel || opts.label || opaqueId;
-          const label = opts.label || opaqueId;
+          let label = opts.label || opaqueId;
           const position = opts.position || null;
+
+          // Check if there is a remembered custom name from a previous rename
+          this.rememberedCustomNames = this.rememberedCustomNames || new Map();
+          let customName = opts.customName || null;
+          if (!customName && consumedSubnet) {
+            if (consumedSubnet.custom_name) {
+              customName = consumedSubnet.custom_name;
+            }
+            if (!customName && consumedSubnet.consumedPlaceId && this.rememberedCustomNames.has(consumedSubnet.consumedPlaceId)) {
+              customName = this.rememberedCustomNames.get(consumedSubnet.consumedPlaceId);
+            }
+            if (!customName && consumedSubnet.placeId && this.rememberedCustomNames.has(consumedSubnet.placeId)) {
+              customName = this.rememberedCustomNames.get(consumedSubnet.placeId);
+            }
+            if (!customName && consumedSubnet.sourcePlaceId && consumedSubnet.targetPlaceId) {
+              const pKey = `${consumedSubnet.sourcePlaceId}__${consumedSubnet.targetPlaceId}`;
+              if (this.rememberedCustomNames.has(pKey)) customName = this.rememberedCustomNames.get(pKey);
+            }
+            if (!customName && Array.isArray(consumedSubnet.consumedTransIds)) {
+              const tKey = consumedSubnet.consumedTransIds.slice().sort().join('__');
+              if (this.rememberedCustomNames.has(tKey)) customName = this.rememberedCustomNames.get(tKey);
+            }
+            if (!customName && Array.isArray(consumedSubnet.nodes)) {
+              for (let i = 0; i < consumedSubnet.nodes.length; i++) {
+                const n = consumedSubnet.nodes[i];
+                if (n && n.data && n.data.remembered_custom_name) {
+                  customName = n.data.remembered_custom_name;
+                  break;
+                }
+                if (n && n.data && this.rememberedCustomNames.has(n.data.id)) {
+                  customName = this.rememberedCustomNames.get(n.data.id);
+                  break;
+                }
+              }
+            }
+          }
+          if (!customName && this.rememberedCustomNames.has(opaqueId)) {
+            customName = this.rememberedCustomNames.get(opaqueId);
+          }
+
+          if (customName) {
+            label = customName;
+          }
 
           const newNodeData = {
             id: opaqueId,
             label: label,
-            raw_label: rawLabel,
+            raw_label: customName || rawLabel,
             type: 'Opaque Transition',
             component_type: componentType,
             is_opaque: true,
@@ -1602,6 +1806,9 @@
             consumedSubnet: consumedSubnet,
             consumedSubgraph: consumedSubnet
           };
+          if (customName) {
+            newNodeData.custom_name = customName;
+          }
           if (parentId) {
             newNodeData.parent = parentId;
           }
@@ -1690,7 +1897,10 @@
                   compoundNode.data('original_label', compoundNode.data('label') || compoundNode.id());
                 }
 
-                const collapsedLabel = `${fnName} (${opaqueId})`;
+                const compoundCustom = compoundNode.data('custom_name');
+                const childCustom = onlyChild.data('custom_name') || (self.rememberedCustomNames && self.rememberedCustomNames.get(opaqueId));
+                const labelSuffix = childCustom || opaqueId;
+                const collapsedLabel = compoundCustom || `${fnName} (${labelSuffix})`;
                 compoundNode.data('collapsed_label', collapsedLabel);
                 compoundNode.data('label', collapsedLabel);
                 compoundNode.data('collapsed_opaque_id', opaqueId);
@@ -1747,7 +1957,25 @@
           if (!trimmed) return false;
 
           node.data('label', trimmed);
+          node.data('raw_label', trimmed);
           node.data('custom_name', trimmed);
+
+          // If node itself is a collapsed compound, also update collapsed_label and internal opaque child
+          if (this.isCollapsedCompound(node)) {
+            node.data('collapsed_label', trimmed);
+            const childId = node.data('collapsed_opaque_id');
+            if (childId) {
+              const childNode = this.cy.getElementById(childId);
+              if (childNode && childNode.length > 0) {
+                childNode.data('custom_name', trimmed);
+                childNode.data('raw_label', trimmed);
+                this._rememberCustomName(childNode, trimmed);
+              }
+            }
+          }
+
+          // Remember custom name in engine registry and on consumed elements
+          this._rememberCustomName(node, trimmed);
 
           // If inside a collapsed compound, update its banner
           const parentId = node.data('parent');
@@ -1761,6 +1989,45 @@
             }
           }
           return true;
+        }
+
+        _rememberCustomName(node, customName) {
+          if (!node || !customName) return;
+          this.rememberedCustomNames = this.rememberedCustomNames || new Map();
+          const nodeId = typeof node.id === 'function' ? node.id() : String(node);
+          this.rememberedCustomNames.set(nodeId, customName);
+
+          const consumedSubnet = typeof node.data === 'function' ? (node.data('consumedSubnet') || node.data('consumedSubgraph')) : null;
+          if (consumedSubnet) {
+            consumedSubnet.custom_name = customName;
+            if (consumedSubnet.consumedPlaceId) {
+              this.rememberedCustomNames.set(consumedSubnet.consumedPlaceId, customName);
+            }
+            if (consumedSubnet.placeId) {
+              this.rememberedCustomNames.set(consumedSubnet.placeId, customName);
+            }
+            if (consumedSubnet.headPlaceId) {
+              this.rememberedCustomNames.set(consumedSubnet.headPlaceId, customName);
+            }
+            if (consumedSubnet.splitPlaceId) {
+              this.rememberedCustomNames.set(consumedSubnet.splitPlaceId, customName);
+            }
+            if (consumedSubnet.sourcePlaceId && consumedSubnet.targetPlaceId) {
+              this.rememberedCustomNames.set(`${consumedSubnet.sourcePlaceId}__${consumedSubnet.targetPlaceId}`, customName);
+            }
+            if (Array.isArray(consumedSubnet.consumedTransIds)) {
+              this.rememberedCustomNames.set(consumedSubnet.consumedTransIds.slice().sort().join('__'), customName);
+            }
+            if (Array.isArray(consumedSubnet.nodes)) {
+              const self = this;
+              consumedSubnet.nodes.forEach(function(n) {
+                if (n && n.data && n.data.id) {
+                  self.rememberedCustomNames.set(n.data.id, customName);
+                  n.data.remembered_custom_name = customName;
+                }
+              });
+            }
+          }
         }
 
         isFunctionFoldedIntoSingleComponent(compoundIdOrNode) {
@@ -1833,6 +2100,14 @@
           const opaqueId = opaqueNode.id();
           const self = this;
 
+          const customName = opaqueNode.data('custom_name') ||
+            (consumedSubnet && consumedSubnet.custom_name) ||
+            (this.rememberedCustomNames && this.rememberedCustomNames.get(opaqueId));
+
+          if (customName) {
+            this._rememberCustomName(opaqueNode, customName);
+          }
+
           // 1. Remove all incident boundary edges connected to the opaque transition
           const incidentEdges = opaqueNode.connectedEdges();
           incidentEdges.forEach(function(e) {
@@ -1865,6 +2140,9 @@
                   delete nodeCopy.data.is_collapsed_child;
                   if (nodeCopy.data.original_label) {
                     nodeCopy.data.label = nodeCopy.data.original_label;
+                  }
+                  if (customName) {
+                    nodeCopy.data.remembered_custom_name = customName;
                   }
                 }
                 self.cy.add(nodeCopy);
@@ -1980,8 +2258,9 @@
           return { success: false, reason: "Target is neither an opaque transition nor a collapsed compound." };
         }
 
-        canSinglePlaceContract(placeNode) {
-          if (!placeNode || !placeNode.hasClass('place')) {
+        canSinglePlaceContract(placeNodeOrId) {
+          const placeNode = typeof placeNodeOrId === 'string' ? this.cy.getElementById(placeNodeOrId) : placeNodeOrId;
+          if (!placeNode || typeof placeNode.hasClass !== 'function' || !placeNode.hasClass('place')) {
             return { ok: false, reason: "Target is not a Petri net place." };
           }
 
@@ -2062,7 +2341,8 @@
           return this.canSinglePlaceContract(placeNode);
         }
 
-        executeSinglePlaceContraction(placeNode) {
+        executeSinglePlaceContraction(placeNodeOrId) {
+          const placeNode = typeof placeNodeOrId === 'string' ? this.cy.getElementById(placeNodeOrId) : placeNodeOrId;
           const check = this.canSinglePlaceContract(placeNode);
           if (!check.ok) {
             return { success: false, message: check.reason };
@@ -3735,7 +4015,9 @@
         // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction, Choice, While Loop, State Machine, or Well-Structured)
         if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
           const fallback = typeof LiveFoldReductionEngine !== 'undefined' ? LiveFoldReductionEngine.getMatchingFoldType(targetNode) : null;
-          handleFoldReduction(targetNode, fallback);
+          if (!handleFoldReduction(targetNode, fallback)) {
+            closeInspector();
+          }
           return;
         }
 

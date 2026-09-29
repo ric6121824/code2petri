@@ -94,13 +94,78 @@ const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 {engine_js}
 
 // Mock DOM elements for inspector
-const inspectorPanel = {{ style: {{ display: 'none' }} }};
+const inspectorPanel = {{ style: {{ display: 'none', left: '', top: '', right: '' }} }};
 const inspectorLabel = {{ textContent: '' }};
+const inspectorInput = {{
+  value: '',
+  _listeners: {{}},
+  addEventListener: function(evt, cb) {{
+    this._listeners[evt] = this._listeners[evt] || [];
+    this._listeners[evt].push(cb);
+  }},
+  trigger: function(evt, data) {{
+    if (this._listeners[evt]) {{
+      this._listeners[evt].forEach(cb => cb(data || {{}}));
+    }}
+  }},
+  blur: function() {{}}
+}};
+const inspectorSaveBtn = {{
+  _listeners: {{}},
+  addEventListener: function(evt, cb) {{
+    this._listeners[evt] = this._listeners[evt] || [];
+    this._listeners[evt].push(cb);
+  }},
+  click: function() {{
+    if (this._listeners['click']) {{
+      this._listeners['click'].forEach(cb => cb({{}}));
+    }}
+  }}
+}};
 const inspectorType = {{ textContent: '' }};
 const inspectorTau = {{ textContent: '' }};
 const inspectorLine = {{ textContent: '' }};
+const inspectorCloseBtn = {{
+  addEventListener: function(evt, cb) {{
+    if (evt === 'click') this.onclick = cb;
+  }},
+  click: function() {{
+    if (this.onclick) this.onclick();
+  }}
+}};
+
+const document = {{
+  getElementById: function(id) {{
+    if (id === 'inspector-panel') return inspectorPanel;
+    if (id === 'inspector-label') return inspectorLabel;
+    if (id === 'hud-input-label' || id === 'inspector-input-label') return inspectorInput;
+    if (id === 'hud-btn-save' || id === 'inspector-btn-save') return inspectorSaveBtn;
+    if (id === 'inspector-type') return inspectorType;
+    if (id === 'inspector-tau') return inspectorTau;
+    if (id === 'inspector-line') return inspectorLine;
+    if (id === 'inspector-close' || id === 'btn-close-hud') return inspectorCloseBtn;
+    return null;
+  }}
+}};
 
 {inspector_js}
+
+if (inspectorSaveBtn) {{
+  inspectorSaveBtn.addEventListener('click', function(e) {{
+    saveInspectorName();
+  }});
+}}
+if (inspectorInput) {{
+  inspectorInput.addEventListener('keydown', function(e) {{
+    if (e.key === 'Enter') saveInspectorName();
+  }});
+  inspectorInput.addEventListener('change', function() {{
+    saveInspectorName();
+  }});
+}}
+if (inspectorCloseBtn) {{
+  inspectorCloseBtn.addEventListener('click', closeInspector);
+}}
 
 const net = {net_json_literal};
 
@@ -112,6 +177,12 @@ function renderStep() {{}}
 const cy = cytoscape({{
   elements: netToElements(net),
   userPanningEnabled: false
+}});
+
+cy.on('tap', function(evt) {{
+  if (evt.target === cy) {{
+    closeInspector();
+  }}
 }});
 
 const foldEngine = new LiveFoldReductionEngine(cy);
@@ -4181,6 +4252,296 @@ if (res2.success) {
 }
 if (!res2.reason || !res2.reason.includes('Failed to unfold internal opaque transition')) {
   throw new Error('Unexpected failure reason for compound: ' + res2.reason);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_hud_popover_dom_elements_in_template(self):
+        """Verifies template.html contains the floating HUD popover elements and styling."""
+        html = _read_template_html()
+        self.assertIn('id="inspector-panel"', html)
+        self.assertIn('hud-popover', html)
+        self.assertIn('id="hud-input-label"', html)
+        self.assertIn('id="hud-btn-save"', html)
+        self.assertIn('id="inspector-tau"', html)
+        self.assertIn('id="inspector-type"', html)
+        self.assertIn('id="inspector-line"', html)
+        self.assertIn('stat-pill', html)
+
+    def test_hud_popover_opens_on_left_click_headless(self):
+        """Validates that left-clicking a transition opens the floating HUD popover near the node."""
+        net_literal = """{
+  places: [{ id: 'p0', label: 'p0' }],
+  transitions: [{ id: 't0', label: 'ComputeStep', tau: 2.0 }],
+  arcs: [{ source: 'p0', target: 't0' }]
+}"""
+        test_logic = """
+const t0 = cy.getElementById('t0');
+if (inspectorPanel.style.display !== 'none') {
+  throw new Error('HUD inspector should be hidden initially');
+}
+
+// Simulate left-click on transition
+t0.emit('tap', { target: t0 });
+
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('HUD inspector should be displayed as flex on left-click');
+}
+if (!inspectorPanel.style.left || !inspectorPanel.style.top) {
+  throw new Error('HUD inspector position style left/top should be set');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_hud_displays_compact_stat_pills_headless(self):
+        """Validates that HUD displays tau weight, component type, and line number in stat pills."""
+        net_literal = """{
+  places: [{ id: 'p0', label: 'p0' }, { id: 'p1', label: 'p1' }, { id: 'p2', label: 'p2' }],
+  transitions: [
+    { id: 't0', label: 'StepAlpha', tau: 3.5, line_number: 42 },
+    { id: 't1', label: 'StepBeta', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+const t0 = cy.getElementById('t0');
+t0.emit('tap', { target: t0 });
+
+if (inspectorTau.textContent !== '3.5') {
+  throw new Error(`Expected tau '3.5', got '${inspectorTau.textContent}'`);
+}
+if (inspectorType.textContent !== 'Atomic Transition') {
+  throw new Error(`Expected type 'Atomic Transition', got '${inspectorType.textContent}'`);
+}
+if (inspectorLine.textContent !== '42') {
+  throw new Error(`Expected line '42', got '${inspectorLine.textContent}'`);
+}
+
+// Contract p1 and test opaque component stat pills
+foldEngine.executeSinglePlaceContraction('p1');
+const comp = cy.nodes('[is_opaque]').first();
+if (comp.length === 0) throw new Error('Expected contracted opaque component node');
+
+openInspector(comp);
+if (inspectorType.textContent !== 'Sequence') {
+  throw new Error(`Expected component type 'Sequence', got '${inspectorType.textContent}'`);
+}
+if (!inspectorTau.textContent || inspectorTau.textContent === '—') {
+  throw new Error(`Expected valid tau for component, got '${inspectorTau.textContent}'`);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_hud_contains_editable_text_field_prefilled_headless(self):
+        """Validates that HUD contains an editable text field pre-filled with the node's current label."""
+        net_literal = """{
+  places: [{ id: 'p0', label: 'p0' }],
+  transitions: [{ id: 't0', label: 'MyWorkerTransition', tau: 1.0 }],
+  arcs: [{ source: 'p0', target: 't0' }]
+}"""
+        test_logic = """
+const t0 = cy.getElementById('t0');
+t0.emit('tap', { target: t0 });
+
+if (inspectorInput.value !== 'MyWorkerTransition') {
+  throw new Error(`Expected inspectorInput pre-filled with 'MyWorkerTransition', got '${inspectorInput.value}'`);
+}
+if (inspectorLabel.textContent !== 'MyWorkerTransition') {
+  throw new Error(`Expected inspectorLabel 'MyWorkerTransition', got '${inspectorLabel.textContent}'`);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_hud_saving_new_name_updates_canvas_immediately_headless(self):
+        """Validates that saving a new name in HUD updates the node's label on the canvas immediately."""
+        net_literal = """{
+  places: [{ id: 'p0', label: 'p0' }],
+  transitions: [{ id: 't0', label: 'OldLabel', tau: 1.0 }],
+  arcs: [{ source: 'p0', target: 't0' }]
+}"""
+        test_logic = """
+const t0 = cy.getElementById('t0');
+t0.emit('tap', { target: t0 });
+
+// Edit name and trigger save
+inspectorInput.value = 'SemanticCustomLabel';
+inspectorSaveBtn.click();
+
+if (t0.data('label') !== 'SemanticCustomLabel') {
+  throw new Error(`Expected node label on canvas to be 'SemanticCustomLabel', got '${t0.data('label')}'`);
+}
+if (t0.data('custom_name') !== 'SemanticCustomLabel') {
+  throw new Error(`Expected node custom_name to be 'SemanticCustomLabel', got '${t0.data('custom_name')}'`);
+}
+if (inspectorLabel.textContent !== 'SemanticCustomLabel') {
+  throw new Error(`Expected inspectorLabel 'SemanticCustomLabel', got '${inspectorLabel.textContent}'`);
+}
+
+// Collapsed compound test: add compound with single opaque child
+cy.add({
+  group: 'nodes',
+  data: { id: 'c_parent', is_compound: true, function_name: 'processItem' },
+  classes: 'compound'
+});
+cy.add({
+  group: 'nodes',
+  data: { id: 'c_child', parent: 'c_parent', is_opaque: true, label: 'c_child' }
+});
+
+foldEngine._updateCollapsedCompoundStates();
+const parentCompound = cy.getElementById('c_parent');
+if (!foldEngine.isCollapsedCompound(parentCompound)) {
+  throw new Error('c_parent should be a collapsed compound');
+}
+
+openInspector(parentCompound);
+inspectorInput.value = 'CustomProcessBanner';
+inspectorSaveBtn.click();
+
+if (parentCompound.data('label') !== 'CustomProcessBanner') {
+  throw new Error(`Expected parent compound label 'CustomProcessBanner', got '${parentCompound.data('label')}'`);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_hud_closes_when_clicking_canvas_background_headless(self):
+        """Validates that HUD closes when clicking elsewhere on the canvas background or uncontractible place."""
+        net_literal = """{
+  places: [{ id: 'p0', label: 'p0' }],
+  transitions: [{ id: 't0', label: 't0', tau: 1.0 }],
+  arcs: [{ source: 'p0', target: 't0' }]
+}"""
+        test_logic = """
+const t0 = cy.getElementById('t0');
+const p0 = cy.getElementById('p0');
+
+// 1. Open HUD
+t0.emit('tap', { target: t0 });
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('HUD should be open');
+}
+
+// 2. Click background
+cy.emit('tap', { target: cy });
+if (inspectorPanel.style.display !== 'none') {
+  throw new Error('HUD should be closed after clicking canvas background');
+}
+
+// 3. Open HUD again, then click uncontractible place
+t0.emit('tap', { target: t0 });
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('HUD should be open again');
+}
+
+p0.emit('tap', { target: p0 });
+if (inspectorPanel.style.display !== 'none') {
+  throw new Error('HUD should be closed after clicking uncontractible place');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_renamed_component_retains_custom_label_after_unfold_and_refold_headless(self):
+        """Validates that a renamed component retains its custom label after being unfolded and re-folded."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'p0' },
+    { id: 'p1', label: 'p1' },
+    { id: 'p2', label: 'p2' }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0 },
+    { id: 't2', label: 't2', tau: 2.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't1' },
+    { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't2' },
+    { source: 't2', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+// 1. Contract p1 (Single-Place Contraction)
+const resFold1 = foldEngine.executeSinglePlaceContraction('p1');
+if (!resFold1.success) {
+  throw new Error('Initial contraction failed: ' + resFold1.reason);
+}
+
+let comp = cy.nodes('[is_opaque]').first();
+if (comp.length === 0) throw new Error('Contracted component not found');
+const origCompId = comp.id();
+
+// 2. Open HUD and rename component to 'CustomFoldedSeq'
+openInspector(comp);
+inspectorInput.value = 'CustomFoldedSeq';
+inspectorSaveBtn.click();
+
+if (comp.data('label') !== 'CustomFoldedSeq') {
+  throw new Error(`Expected renamed label 'CustomFoldedSeq', got '${comp.data('label')}'`);
+}
+if (comp.data('custom_name') !== 'CustomFoldedSeq') {
+  throw new Error(`Expected custom_name 'CustomFoldedSeq', got '${comp.data('custom_name')}'`);
+}
+
+// 3. Unfold the component
+const resUnfold = foldEngine.executeComponentLocalUnfold(comp);
+if (!resUnfold.success) {
+  throw new Error('Component-local unfold failed: ' + resUnfold.reason);
+}
+
+const p1Restored = cy.getElementById('p1');
+if (!p1Restored.inside()) {
+  throw new Error('Expected p1 to be restored inside canvas');
+}
+
+// 4. Re-fold p1
+const resFold2 = foldEngine.executeSinglePlaceContraction('p1');
+if (!resFold2.success) {
+  throw new Error('Re-contraction failed: ' + resFold2.reason);
+}
+
+const comp2 = cy.nodes('[is_opaque]').first();
+if (comp2.length === 0) throw new Error('Re-contracted component not found');
+
+if (comp2.data('label') !== 'CustomFoldedSeq') {
+  throw new Error(`Expected re-folded component to retain custom label 'CustomFoldedSeq', but got '${comp2.data('label')}'`);
+}
+if (comp2.data('custom_name') !== 'CustomFoldedSeq') {
+  throw new Error(`Expected re-folded component custom_name 'CustomFoldedSeq', got '${comp2.data('custom_name')}'`);
 }
 
 console.log('PASS');
