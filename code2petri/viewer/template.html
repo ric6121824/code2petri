@@ -1552,8 +1552,65 @@
         });
       }
 
-      function serializeToPnml(cy, netName) {
+      function _resolvePlaceExportData(p) {
+        const pId = p.id();
+        const label = p.data('raw_label') || p.data('label') || pId;
+        const tokens = parseInt(p.data('initial_tokens') || p.data('tokens') || 0, 10);
+        return {
+          id: pId,
+          label: label,
+          tokens: tokens
+        };
+      }
+
+      function _resolveTransitionExportData(t, cy) {
+        const tId = t.id();
+        const parentId = t.data('parent');
+        let parentCompound = null;
+        const cyInstance = cy || (typeof t.cy === 'function' ? t.cy() : null);
+        if (parentId && cyInstance) {
+          parentCompound = cyInstance.getElementById(parentId);
+        }
+        const isInsideCollapsedCompound = Boolean(parentCompound && parentCompound.length > 0 &&
+          (parentCompound.hasClass('collapsed-compound') || parentCompound.data('is_collapsed_compound') === true || Boolean(parentCompound.data('collapsed_opaque_id'))));
+        const isOpaque = t.data('is_opaque') === true || t.hasClass('opaque') || Boolean(t.data('opaque'));
+
+        let label;
+        if (isInsideCollapsedCompound) {
+          // P1: Reflect the collapsed compound container's visible label on screen
+          label = parentCompound.data('custom_name') || parentCompound.data('collapsed_label') || parentCompound.data('label');
+        } else if (isOpaque) {
+          // P4: For component nodes, custom_name first, then on-screen label ('c_XX'), not internal composite expression ('raw_label')
+          label = t.data('custom_name') || t.data('label') || t.data('original_label') || t.data('raw_label') || tId;
+        } else {
+          // For atomic/unfolded transitions, custom_name first, then code statement ('raw_label'), then label or id
+          label = t.data('custom_name') || t.data('raw_label') || t.data('label') || tId;
+        }
+        const rawTau = t.data('tau');
+        const tauVal = (rawTau !== undefined && rawTau !== null) ? Number(rawTau) : 1.0;
+        const tauStr = Number.isInteger(tauVal) ? tauVal.toFixed(1) : String(tauVal);
+
+        return {
+          id: tId,
+          label: label,
+          tau: tauStr,
+          isOpaque: isOpaque
+        };
+      }
+
+      function _resolveNodeExportData(node, cy) {
+        if (!node) return null;
+        if (node.hasClass('place')) {
+          return _resolvePlaceExportData(node);
+        } else if (node.hasClass('transition')) {
+          return _resolveTransitionExportData(node, cy);
+        }
+        return null;
+      }
+
+      function serializeToPnml(cy, netName, options) {
         if (!netName) netName = 'LiveFoldPetriNet';
+        const opts = (typeof options === 'boolean') ? { includeTools: options } : (options || {});
         let xml = '<?xml version="1.0" encoding="utf-8"?>\n';
         xml += '<pnml xmlns="http://www.pnml.org/version-2009/grammar/pnml">\n';
         xml += '  <net id="net0" type="http://www.pnml.org/version-2009/grammar/ptnet">\n';
@@ -1567,17 +1624,14 @@
           return p.inside() && !p.hasClass('compound');
         });
         places.forEach(function(p) {
-          const pId = p.id();
-          const label = p.data('raw_label') || p.data('label') || pId;
-          const tokens = parseInt(p.data('initial_tokens') || p.data('tokens') || 0, 10);
-
-          xml += `      <place id="${escapeXml(pId)}">\n`;
+          const pData = _resolveNodeExportData(p, cy);
+          xml += `      <place id="${escapeXml(pData.id)}">\n`;
           xml += '        <name>\n';
-          xml += `          <text>${escapeXml(label)}</text>\n`;
+          xml += `          <text>${escapeXml(pData.label)}</text>\n`;
           xml += '        </name>\n';
-          if (tokens > 0) {
+          if (pData.tokens > 0) {
             xml += '        <initialMarking>\n';
-            xml += `          <text>${tokens}</text>\n`;
+            xml += `          <text>${pData.tokens}</text>\n`;
             xml += '        </initialMarking>\n';
           }
           xml += '      </place>\n';
@@ -1588,58 +1642,19 @@
           return t.inside() && !t.hasClass('compound');
         });
         transitions.forEach(function(t) {
-          const tId = t.id();
-          let label = t.data('custom_name') || t.data('raw_label');
-          if (!label) {
-            const rawDataLabel = t.data('label');
-            if (rawDataLabel) {
-              label = rawDataLabel;
-            } else {
-              label = t.data('original_label') || tId;
-            }
-          }
-
-          const rawTau = t.data('tau');
-          const tauVal = (rawTau !== undefined && rawTau !== null) ? Number(rawTau) : 1.0;
-          const tauStr = Number.isInteger(tauVal) ? tauVal.toFixed(1) : String(tauVal);
-
-          const rawOmega = t.data('omega');
-          const omegaVal = (rawOmega !== undefined && rawOmega !== null) ? Number(rawOmega) : 0.0;
-          const omegaStr = Number.isInteger(omegaVal) ? omegaVal.toFixed(1) : String(omegaVal);
-
-          const isOpaque = t.data('is_opaque') === true || t.hasClass('opaque') || Boolean(t.data('opaque'));
-          const lineNo = t.data('source_line') || t.data('line_number');
-          const compType = t.data('component_type');
-          const parent = t.data('parent') || t.data('enclosing_function');
-          const resolved = t.data('resolved');
-          const resolvedTo = t.data('resolved_to');
-          const targetFile = t.data('target_file');
-
-          xml += `      <transition id="${escapeXml(tId)}">\n`;
+          const tData = _resolveNodeExportData(t, cy);
+          xml += `      <transition id="${escapeXml(tData.id)}">\n`;
           xml += '        <name>\n';
-          xml += `          <text>${escapeXml(label)}</text>\n`;
+          xml += `          <text>${escapeXml(tData.label)}</text>\n`;
           xml += '        </name>\n';
-          xml += '        <toolspecific tool="code2petri" version="1.0">\n';
-          xml += `          <property name="tau" value="${escapeXml(tauStr)}"/>\n`;
-          if (isOpaque) {
-            xml += '          <property name="opaque" value="true"/>\n';
-            xml += `          <property name="omega" value="${escapeXml(omegaStr)}"/>\n`;
-            if (compType) {
-              xml += `          <property name="component_type" value="${escapeXml(compType)}"/>\n`;
+          if (opts.includeTools) {
+            xml += '        <toolspecific tool="code2petri" version="1.0">\n';
+            xml += `          <property name="tau" value="${escapeXml(tData.tau)}"/>\n`;
+            if (tData.isOpaque) {
+              xml += '          <property name="opaque" value="true"/>\n';
             }
+            xml += '        </toolspecific>\n';
           }
-          if (lineNo !== undefined && lineNo !== null && lineNo !== '') {
-            xml += `          <property name="line_number" value="${escapeXml(lineNo)}"/>\n`;
-          }
-          if (parent) {
-            xml += `          <property name="enclosing_function" value="${escapeXml(parent)}"/>\n`;
-          }
-          if (resolved === true) {
-            xml += `          <resolved target="${escapeXml(resolvedTo || '')}" file="${escapeXml(targetFile || '')}"/>\n`;
-          } else if (resolved === false) {
-            xml += '          <unresolved/>\n';
-          }
-          xml += '        </toolspecific>\n';
           xml += '      </transition>\n';
         });
 
@@ -1689,32 +1704,40 @@
         return 'petri_net.pnml';
       }
 
-      function downloadPnmlFile(cy, filename) {
+      function _triggerBlobDownload(blob, filename) {
+        if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+          return;
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        if (document.body && typeof document.body.appendChild === 'function') {
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        } else if (typeof a.click === 'function') {
+          a.click();
+        }
+        if (typeof URL.revokeObjectURL === 'function') {
+          setTimeout(function() {
+            URL.revokeObjectURL(url);
+          }, 100);
+        }
+      }
+
+      function exportClientSidePnml(cy, filename, options) {
         if (!filename) filename = getExportFilename();
         const netName = filename.replace(/\.pnml$/i, '');
-        const xmlContent = serializeToPnml(cy, netName);
-        if (typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        const xmlContent = serializeToPnml(cy, netName, options);
+        if (typeof Blob !== 'undefined') {
           const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = filename;
-          if (document.body && typeof document.body.appendChild === 'function') {
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          } else if (typeof a.click === 'function') {
-            a.click();
-          }
-          if (typeof URL.revokeObjectURL === 'function') {
-            setTimeout(function() {
-              URL.revokeObjectURL(url);
-            }, 100);
-          }
+          _triggerBlobDownload(blob, filename);
         }
         return xmlContent;
       }
-      const exportPnml = downloadPnmlFile;
+      const exportPnml = exportClientSidePnml;
+      const downloadPnmlFile = exportClientSidePnml;
 
       // Phase 2.7 SESE Infrastructure (Bidirectional Reachability & Symmetry Multipliers)
       class SESEInfrastructure {
@@ -4424,7 +4447,7 @@
       if (btnExportPnml) {
         btnExportPnml.addEventListener('click', function(e) {
           if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-          exportPnml(cy);
+          exportClientSidePnml(cy);
         });
       }
     })();

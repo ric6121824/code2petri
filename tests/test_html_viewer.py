@@ -87,7 +87,7 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_cxttap is not None, "Could not extract handleRightClickUnfold and cy.on('cxttap') from template.html"
     cxttap_handler_js = m_cxttap.group(0)
 
-    m_pnml = re.search(r'function escapeXml\(unsafe\) \{.*?\n      const exportPnml = downloadPnmlFile;', html, re.DOTALL)
+    m_pnml = re.search(r'function escapeXml\(unsafe\) \{.*?\n      const downloadPnmlFile = exportClientSidePnml;', html, re.DOTALL)
     assert m_pnml is not None, "Could not extract PNML export functions from template.html"
     pnml_js = m_pnml.group(0)
 
@@ -228,7 +228,7 @@ if (inspectorCloseBtn) {{
 
 if (btnExportPnml) {{
   btnExportPnml.addEventListener('click', function(e) {{
-    exportPnml(cy);
+    exportClientSidePnml(cy);
   }});
 }}
 
@@ -4735,6 +4735,19 @@ console.log('PASS');
         self.assertIn('id="btn-export-pnml"', composite_html)
         self.assertIn('Export PNML', composite_html)
 
+    def _run_pnml_export_test(self, net_literal, test_logic):
+        """Helper to run a Node test script that outputs ___XML_START___...___XML_END___ and parse the PNML XML (S3)."""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+        m = re.search(r'___XML_START___(.*?)___XML_END___', proc.stdout, re.DOTALL)
+        self.assertIsNotNone(m, f"Could not extract PNML XML from stdout: {proc.stdout}")
+        xml_content = m.group(1).strip()
+        root = ET.fromstring(xml_content)
+        return root, xml_content, proc
+
     def test_client_side_pnml_export_unfolded_headless(self):
         """Validates that serializeToPnml emits valid ISO/IEC 15909-2 PNML for an unreduced net."""
         net_literal = """{
@@ -4755,17 +4768,7 @@ const xml = serializeToPnml(cy, 'TestPipeline');
 console.log('___XML_START___' + xml + '___XML_END___');
 console.log('PASS');
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
-        proc = _run_node_script(node_script)
-        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
-        self.assertIn("PASS", proc.stdout)
-
-        m = re.search(r'___XML_START___(.*?)___XML_END___', proc.stdout, re.DOTALL)
-        self.assertIsNotNone(m, "Could not extract PNML XML from stdout")
-        xml_content = m.group(1).strip()
-
-        # Parse with standard Python XML parser
-        root = ET.fromstring(xml_content)
+        root, xml_content, proc = self._run_pnml_export_test(net_literal, test_logic)
         self.assertTrue(root.tag.endswith("pnml"))
 
         # Check net type
@@ -4834,16 +4837,7 @@ const xml = serializeToPnml(cy, 'FoldedNet');
 console.log('___XML_START___' + xml + '___XML_END___');
 console.log('PASS');
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
-        proc = _run_node_script(node_script)
-        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
-        self.assertIn("PASS", proc.stdout)
-
-        m = re.search(r'___XML_START___(.*?)___XML_END___', proc.stdout, re.DOTALL)
-        self.assertIsNotNone(m, "Could not extract PNML XML from stdout")
-        xml_content = m.group(1).strip()
-
-        root = ET.fromstring(xml_content)
+        root, xml_content, proc = self._run_pnml_export_test(net_literal, test_logic)
         net_el = root.find("{http://www.pnml.org/version-2009/grammar/pnml}net")
 
         # Places: p1 must be gone; p0 and p2 remain
@@ -4851,16 +4845,19 @@ console.log('PASS');
         place_ids = {p.attrib.get("id") for p in places}
         self.assertEqual(place_ids, {"p0", "p2"})
 
-        # Transitions: t0 and t1 must be gone; opaque component c_1 created
+        # Transitions: t0 and t1 must be gone; opaque component c_01 created
         transitions = [t for t in net_el.iter() if t.tag.endswith("transition")]
         self.assertEqual(len(transitions), 1)
         comp_t = transitions[0]
         self.assertEqual(comp_t.attrib.get("id"), "c_01")
 
-        # Toolspecific properties
-        props = {p.attrib.get("name"): p.attrib.get("value") for p in comp_t.iter() if p.tag.endswith("property")}
-        self.assertEqual(props.get("opaque"), "true")
-        self.assertEqual(props.get("component_type"), "Sequence")
+        # P4: Unrenamed component node exports on-screen label 'c_01', not internal composite expression
+        t_name = comp_t.find("{http://www.pnml.org/version-2009/grammar/pnml}name").find("{http://www.pnml.org/version-2009/grammar/pnml}text").text
+        self.assertEqual(t_name, "c_01")
+
+        # P2: Standard PNML by default does not include proprietary toolspecific metadata
+        toolspecific = [p for p in comp_t.iter() if p.tag.endswith("toolspecific")]
+        self.assertEqual(len(toolspecific), 0)
 
         # Arcs: p0 -> c_01 and c_01 -> p2
         arcs = [a for a in net_el.iter() if a.tag.endswith("arc")]
@@ -4907,16 +4904,7 @@ const xml = serializeToPnml(cy, 'RenamedExport');
 console.log('___XML_START___' + xml + '___XML_END___');
 console.log('PASS');
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
-        proc = _run_node_script(node_script)
-        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
-        self.assertIn("PASS", proc.stdout)
-
-        m = re.search(r'___XML_START___(.*?)___XML_END___', proc.stdout, re.DOTALL)
-        self.assertIsNotNone(m, "Could not extract PNML XML from stdout")
-        xml_content = m.group(1).strip()
-
-        root = ET.fromstring(xml_content)
+        root, xml_content, proc = self._run_pnml_export_test(net_literal, test_logic)
         net_el = root.find("{http://www.pnml.org/version-2009/grammar/pnml}net")
 
         transitions = [t for t in net_el.iter() if t.tag.endswith("transition")]
@@ -4924,12 +4912,57 @@ console.log('PASS');
         t_el = transitions[0]
         self.assertEqual(t_el.attrib.get("id"), "c_01")
 
-        # Name text MUST be the user-assigned label, NOT auto-generated c_1
+        # Name text MUST be the user-assigned label, NOT auto-generated c_01
         name_text = t_el.find("{http://www.pnml.org/version-2009/grammar/pnml}name").find("{http://www.pnml.org/version-2009/grammar/pnml}text").text
         self.assertEqual(name_text, "UserDefinedProcessStep")
 
-    def test_client_side_pnml_export_download_triggers_file_download_headless(self):
-        """Validates that clicking the Export PNML button triggers a client-side .pnml file download (Ticket 42)."""
+    def test_client_side_pnml_export_collapsed_compound_container_headless(self):
+        """Validates that a collapsed compound container exports its visible label on screen (Ticket 42, P1)."""
+        net_literal = """{
+  compounds: [
+    { id: 'compound_calculate_tax', function_name: 'calculate_tax', label: 'calculate_tax()' }
+  ],
+  places: [
+    { id: 'p_mid', label: 'mid', initial_tokens: 0, parent: 'compound_calculate_tax' }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0, parent: 'compound_calculate_tax' },
+    { id: 't2', label: 't2', tau: 1.0, parent: 'compound_calculate_tax' }
+  ],
+  arcs: [
+    { source: 't1', target: 'p_mid' },
+    { source: 'p_mid', target: 't2' }
+  ]
+}"""
+        test_logic = """
+// 1. Contract p_mid which reduces compound into a single collapsed container
+const res = foldEngine.executeSinglePlaceContraction(cy.getElementById('p_mid'));
+if (!res.success) throw new Error('Contraction failed');
+const comp = cy.getElementById('compound_calculate_tax');
+if (!comp.hasClass('collapsed-compound')) {
+  throw new Error('Expected compound to have collapsed-compound class');
+}
+
+// 2. Export PNML
+const xml = serializeToPnml(cy, 'CollapsedCompoundExport');
+console.log('___XML_START___' + xml + '___XML_END___');
+console.log('PASS');
+"""
+        root, xml_content, proc = self._run_pnml_export_test(net_literal, test_logic)
+        net_el = root.find("{http://www.pnml.org/version-2009/grammar/pnml}net")
+
+        # Compound container itself is not an exported Petri net node, only the internal reduced transition is
+        transitions = [t for t in net_el.iter() if t.tag.endswith("transition")]
+        self.assertEqual(len(transitions), 1)
+        comp_t = transitions[0]
+        self.assertEqual(comp_t.attrib.get("id"), "c_01")
+
+        # P1: Label must reflect the collapsed compound container's visible label: 'calculate_tax (c_01)'
+        name_text = comp_t.find("{http://www.pnml.org/version-2009/grammar/pnml}name").find("{http://www.pnml.org/version-2009/grammar/pnml}text").text
+        self.assertEqual(name_text, "calculate_tax (c_01)")
+
+    def test_client_side_pnml_export_triggers_browser_export_headless(self):
+        """Validates that clicking the Export PNML button triggers a client-side .pnml export (Ticket 42, S1)."""
         net_literal = """{
   places: [{ id: 'p0', label: 'p0', initial_tokens: 1 }, { id: 'p1', label: 'p1' }],
   transitions: [{ id: 't0', label: 't0', tau: 1.0 }],
@@ -4984,16 +5017,8 @@ const xml = serializeToPnml(cy, 'ProMNet');
 console.log('___XML_START___' + xml + '___XML_END___');
 console.log('PASS');
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
-        proc = _run_node_script(node_script)
-        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
-        self.assertIn("PASS", proc.stdout)
+        root, xml_content, proc = self._run_pnml_export_test(net_literal, test_logic)
 
-        m = re.search(r'___XML_START___(.*?)___XML_END___', proc.stdout, re.DOTALL)
-        self.assertIsNotNone(m)
-        xml_content = m.group(1).strip()
-
-        root = ET.fromstring(xml_content)
         # Root namespace
         self.assertTrue(root.tag.startswith("{http://www.pnml.org/version-2009/grammar/pnml}"))
 

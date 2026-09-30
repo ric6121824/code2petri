@@ -28,18 +28,15 @@ function serializeToPnml(cy, netName = 'LiveFoldPetriNet') {
   xml += '<pnml xmlns="http://www.pnml.org/version-2009/grammar/pnml">\n';
   xml += '  <net id="net0" type="http://www.pnml.org/version-2009/grammar/ptnet">\n';
   xml += '    <name>\n';
-  xml += `      <text>${escapeXml(netName || 'LiveFoldPetriNet')}</text>\n`;
+  xml += `      <text>${escapeXml(netName)}</text>\n`;
   xml += '    </name>\n';
   xml += '    <page id="page0">\n';
 
   // 1. Places (excluding compound container parent nodes)
-  const places = cy.nodes('.place').filter(function(p) {
-    return p.inside() && !p.hasClass('compound');
-  });
-  places.forEach(p => {
+  cy.nodes('.place').forEach(p => {
     const pId = p.id();
-    const label = p.data('raw_label') || p.data('label') || pId;
-    const tokens = parseInt(p.data('initial_tokens') || p.data('tokens') || 0, 10);
+    const label = p.data('label') || pId;
+    const tokens = parseInt(p.data('initial_tokens') || 0, 10);
 
     xml += `      <place id="${escapeXml(pId)}">\n`;
     xml += '        <name>\n';
@@ -54,78 +51,43 @@ function serializeToPnml(cy, netName = 'LiveFoldPetriNet') {
   });
 
   // 2. Transitions
-  const transitions = cy.nodes('.transition').filter(function(t) {
-    return t.inside() && !t.hasClass('compound');
-  });
-  transitions.forEach(t => {
+  cy.nodes('.transition').forEach(t => {
     const tId = t.id();
-    let label = t.data('custom_name') || t.data('raw_label');
-    if (!label) {
-      const rawDataLabel = t.data('label');
-      if (rawDataLabel) {
-        label = rawDataLabel;
-      } else {
-        label = t.data('original_label') || tId;
-      }
-    }
-
-    const rawTau = t.data('tau');
-    const tauVal = (rawTau !== undefined && rawTau !== null) ? Number(rawTau) : 1.0;
-    const tauStr = Number.isInteger(tauVal) ? tauVal.toFixed(1) : String(tauVal);
-
-    const rawOmega = t.data('omega');
-    const omegaVal = (rawOmega !== undefined && rawOmega !== null) ? Number(rawOmega) : 0.0;
-    const omegaStr = Number.isInteger(omegaVal) ? omegaVal.toFixed(1) : String(omegaVal);
-
-    const isOpaque = t.data('is_opaque') === true || t.hasClass('opaque') || Boolean(t.data('opaque'));
-    const lineNo = t.data('source_line') || t.data('line_number');
-    const compType = t.data('component_type');
-    const parent = t.data('parent') || t.data('enclosing_function');
-    const resolved = t.data('resolved');
-    const resolvedTo = t.data('resolved_to');
-    const targetFile = t.data('target_file');
+    const label = t.data('label') || tId;
+    const tau = t.data('tau') !== undefined ? t.data('tau') : 1.0;
+    const omega = t.data('omega') !== undefined ? t.data('omega') : 0.0;
+    const isOpaque = Boolean(t.data('opaque'));
+    const lineNo = t.data('line_number');
 
     xml += `      <transition id="${escapeXml(tId)}">\n`;
     xml += '        <name>\n';
     xml += `          <text>${escapeXml(label)}</text>\n`;
     xml += '        </name>\n';
     xml += '        <toolspecific tool="code2petri" version="1.0">\n';
-    xml += `          <property name="tau" value="${escapeXml(tauStr)}"/>\n`;
+    xml += `          <property name="tau" value="${escapeXml(tau)}"/>\n`;
     if (isOpaque) {
       xml += '          <property name="opaque" value="true"/>\n';
-      xml += `          <property name="omega" value="${escapeXml(omegaStr)}"/>\n`;
-      if (compType) {
-        xml += `          <property name="component_type" value="${escapeXml(compType)}"/>\n`;
+      xml += `          <property name="omega" value="${escapeXml(omega)}"/>\n`;
+      if (t.data('component_type')) {
+        xml += `          <property name="component_type" value="${escapeXml(t.data('component_type'))}"/>\n`;
       }
     }
-    if (lineNo !== undefined && lineNo !== null && lineNo !== '') {
+    if (lineNo !== undefined && lineNo !== null) {
       xml += `          <property name="line_number" value="${escapeXml(lineNo)}"/>\n`;
     }
-    if (parent) {
-      xml += `          <property name="enclosing_function" value="${escapeXml(parent)}"/>\n`;
-    }
-    if (resolved === true) {
-      xml += `          <resolved target="${escapeXml(resolvedTo || '')}" file="${escapeXml(targetFile || '')}"/>\n`;
-    } else if (resolved === false) {
-      xml += '          <unresolved/>\n';
+    if (t.data('parent')) {
+      xml += `          <property name="enclosing_function" value="${escapeXml(t.data('parent'))}"/>\n`;
     }
     xml += '        </toolspecific>\n';
     xml += '      </transition>\n';
   });
 
   // 3. Arcs
-  const edges = cy.edges().filter(function(e) {
-    if (!e.inside()) return false;
-    const src = cy.getElementById(e.data('source'));
-    const tgt = cy.getElementById(e.data('target'));
-    return src && src.inside() && !src.hasClass('compound') &&
-           tgt && tgt.inside() && !tgt.hasClass('compound');
-  });
-  edges.forEach((edge, index) => {
+  cy.edges('.arc').forEach((edge, index) => {
     const arcId = edge.id() || `a${index + 1}`;
     const sourceId = edge.data('source');
     const targetId = edge.data('target');
-    const weight = parseInt(edge.data('weight') || 1, 10);
+    const weight = edge.data('weight') || 1;
 
     xml += `      <arc id="${escapeXml(arcId)}" source="${escapeXml(sourceId)}" target="${escapeXml(targetId)}">\n`;
     if (weight !== 1) {
@@ -149,34 +111,23 @@ function serializeToPnml(cy, netName = 'LiveFoldPetriNet') {
  * @param {string} [filename='petri_net_export.pnml']
  */
 function downloadPnmlFile(cy, filename = 'petri_net_export.pnml') {
-  const netName = filename.replace(/\.pnml$/i, '');
-  const xmlContent = serializeToPnml(cy, netName);
-  if (typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
-    const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    if (document.body && typeof document.body.appendChild === 'function') {
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    } else if (typeof a.click === 'function') {
-      a.click();
-    }
-    if (typeof URL.revokeObjectURL === 'function') {
-      setTimeout(() => URL.revokeObjectURL(url), 100);
-    }
-  }
-  return xmlContent;
+  const xmlContent = serializeToPnml(cy, filename.replace('.pnml', ''));
+  const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
-const exportPnml = downloadPnmlFile;
 
 // Export for browser or node
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { serializeToPnml, downloadPnmlFile, exportPnml };
+  module.exports = { serializeToPnml, downloadPnmlFile };
 } else {
   window.serializeToPnml = serializeToPnml;
   window.downloadPnmlFile = downloadPnmlFile;
-  window.exportPnml = exportPnml;
 }
