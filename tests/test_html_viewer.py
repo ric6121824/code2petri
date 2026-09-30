@@ -3,6 +3,7 @@ import os
 import re
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 from code2petri.engine import code2petri, main, TEXT_SERIALIZERS
 from code2petri.fold import FoldConfig, fold_net, FoldResult
@@ -86,6 +87,10 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_cxttap is not None, "Could not extract handleRightClickUnfold and cy.on('cxttap') from template.html"
     cxttap_handler_js = m_cxttap.group(0)
 
+    m_pnml = re.search(r'function escapeXml\(unsafe\) \{.*?\n      const exportPnml = downloadPnmlFile;', html, re.DOTALL)
+    assert m_pnml is not None, "Could not extract PNML export functions from template.html"
+    pnml_js = m_pnml.group(0)
+
     return f"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 
@@ -93,7 +98,25 @@ const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 {sese_js}
 {engine_js}
 
-// Mock DOM elements for inspector
+// Mock DOM elements for inspector and export
+let lastCreatedBlob = null;
+let lastCreatedUrl = null;
+let downloadedFilename = null;
+
+global.Blob = function(parts, options) {{
+  this.parts = parts;
+  this.options = options;
+  this.content = parts.join('');
+  lastCreatedBlob = this;
+}};
+global.URL = {{
+  createObjectURL: function(blob) {{
+    lastCreatedUrl = 'blob:mock-url-' + Math.random();
+    return lastCreatedUrl;
+  }},
+  revokeObjectURL: function(url) {{}}
+}};
+
 const inspectorPanel = {{ style: {{ display: 'none', left: '', top: '', right: '' }} }};
 const inspectorLabel = {{ textContent: '' }};
 const inspectorInput = {{
@@ -134,6 +157,21 @@ const inspectorCloseBtn = {{
   }}
 }};
 
+const btnExportPnml = {{
+  _listeners: {{}},
+  addEventListener: function(evt, cb) {{
+    this._listeners[evt] = this._listeners[evt] || [];
+    this._listeners[evt].push(cb);
+  }},
+  click: function() {{
+    if (this._listeners['click']) {{
+      this._listeners['click'].forEach(cb => cb({{}}));
+    }}
+  }}
+}};
+const infoFilename = {{ textContent: 'sample_test.py' }};
+const headerTitle = {{ textContent: 'Sample Test' }};
+
 const document = {{
   getElementById: function(id) {{
     if (id === 'inspector-panel') return inspectorPanel;
@@ -144,7 +182,29 @@ const document = {{
     if (id === 'inspector-tau') return inspectorTau;
     if (id === 'inspector-line') return inspectorLine;
     if (id === 'inspector-close' || id === 'btn-close-hud') return inspectorCloseBtn;
+    if (id === 'btn-export-pnml') return btnExportPnml;
+    if (id === 'info-filename') return infoFilename;
     return null;
+  }},
+  querySelector: function(sel) {{
+    if (sel === '.header-title') return headerTitle;
+    return null;
+  }},
+  createElement: function(tag) {{
+    if (tag === 'a') {{
+      return {{
+        href: '',
+        download: '',
+        click: function() {{
+          downloadedFilename = this.download;
+        }}
+      }};
+    }}
+    return {{}};
+  }},
+  body: {{
+    appendChild: function(el) {{}},
+    removeChild: function(el) {{}}
   }}
 }};
 
@@ -162,6 +222,14 @@ if (inspectorInput) {{
 }}
 if (inspectorCloseBtn) {{
   inspectorCloseBtn.addEventListener('click', closeInspector);
+}}
+
+{pnml_js}
+
+if (btnExportPnml) {{
+  btnExportPnml.addEventListener('click', function(e) {{
+    exportPnml(cy);
+  }});
 }}
 
 const net = {net_json_literal};
@@ -4633,6 +4701,322 @@ console.log('PASS');
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
+
+    # =========================================================================
+    # Ticket 42 — Viewer: Client-Side PNML Export
+    # =========================================================================
+
+    def test_export_pnml_button_visible_in_toolbar(self):
+        """Validates that an 'Export PNML' button is visible in the viewer toolbar across modes (Ticket 42)."""
+        # 1. Static no-fold net
+        static_net = PetriNet()
+        static_net.add_place("p0", "start", initial_tokens=1)
+        static_net.add_transition("t0", "run")
+        static_html = generate_html(static_net)
+        self.assertIn('id="viewer-toolbar"', static_html)
+        self.assertIn('id="btn-export-pnml"', static_html)
+        self.assertIn('Export PNML', static_html)
+
+        # 2. Fold mode net
+        from code2petri.fold import fold_net
+        fold_res = fold_net(static_net)
+        fold_html = generate_html(fold_res)
+        self.assertIn('id="viewer-toolbar"', fold_html)
+        self.assertIn('id="btn-export-pnml"', fold_html)
+        self.assertIn('Export PNML', fold_html)
+
+        # 3. Composite net
+        comp_net = PetriNet()
+        comp_net.add_place("p0", "start", initial_tokens=1)
+        comp_net.add_transition("t0", "run()")
+        comp_net.add_compound(id="compound_worker", label="worker()", function_name="worker", file="worker.py")
+        composite_html = generate_html(comp_net)
+        self.assertIn('id="viewer-toolbar"', composite_html)
+        self.assertIn('id="btn-export-pnml"', composite_html)
+        self.assertIn('Export PNML', composite_html)
+
+    def test_client_side_pnml_export_unfolded_headless(self):
+        """Validates that serializeToPnml emits valid ISO/IEC 15909-2 PNML for an unreduced net."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'start_state', initial_tokens: 1 },
+    { id: 'p1', label: 'end_state', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't0', label: 'execute_calc', tau: 2.5, line_number: 42 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0', weight: 1 },
+    { source: 't0', target: 'p1', weight: 1 }
+  ]
+}"""
+        test_logic = """
+const xml = serializeToPnml(cy, 'TestPipeline');
+console.log('___XML_START___' + xml + '___XML_END___');
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+        m = re.search(r'___XML_START___(.*?)___XML_END___', proc.stdout, re.DOTALL)
+        self.assertIsNotNone(m, "Could not extract PNML XML from stdout")
+        xml_content = m.group(1).strip()
+
+        # Parse with standard Python XML parser
+        root = ET.fromstring(xml_content)
+        self.assertTrue(root.tag.endswith("pnml"))
+
+        # Check net type
+        net_el = root.find("{http://www.pnml.org/version-2009/grammar/pnml}net")
+        self.assertIsNotNone(net_el)
+        self.assertEqual(net_el.attrib.get("type"), "http://www.pnml.org/version-2009/grammar/ptnet")
+
+        # Places
+        places = [p for p in net_el.iter() if p.tag.endswith("place")]
+        self.assertEqual(len(places), 2)
+        place_ids = {p.attrib.get("id") for p in places}
+        self.assertEqual(place_ids, {"p0", "p1"})
+
+        # p0 should have initialMarking = 1
+        p0_el = next(p for p in places if p.attrib.get("id") == "p0")
+        init_mark = [el for el in p0_el.iter() if el.tag.endswith("initialMarking")]
+        self.assertEqual(len(init_mark), 1)
+        self.assertEqual(init_mark[0].find("{http://www.pnml.org/version-2009/grammar/pnml}text").text, "1")
+
+        # p1 should not have initialMarking
+        p1_el = next(p for p in places if p.attrib.get("id") == "p1")
+        init_mark_p1 = [el for el in p1_el.iter() if el.tag.endswith("initialMarking")]
+        self.assertEqual(len(init_mark_p1), 0)
+
+        # Transitions
+        transitions = [t for t in net_el.iter() if t.tag.endswith("transition")]
+        self.assertEqual(len(transitions), 1)
+        t0_el = transitions[0]
+        self.assertEqual(t0_el.attrib.get("id"), "t0")
+        t0_name = t0_el.find("{http://www.pnml.org/version-2009/grammar/pnml}name")
+        self.assertIsNotNone(t0_name)
+        self.assertEqual(t0_name.find("{http://www.pnml.org/version-2009/grammar/pnml}text").text, "execute_calc")
+
+        # Arcs
+        arcs = [a for a in net_el.iter() if a.tag.endswith("arc")]
+        self.assertEqual(len(arcs), 2)
+        arc_pairs = {(a.attrib.get("source"), a.attrib.get("target")) for a in arcs}
+        self.assertEqual(arc_pairs, {("p0", "t0"), ("t0", "p1")})
+
+    def test_client_side_pnml_export_after_live_fold_reduction_headless(self):
+        """Validates that PNML export accurately reflects live fold reductions (Ticket 42)."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'p0', initial_tokens: 1 },
+    { id: 'p1', label: 'p1' },
+    { id: 'p2', label: 'p2' }
+  ],
+  transitions: [
+    { id: 't0', label: 'step1', tau: 1.0, line_number: 10 },
+    { id: 't1', label: 'step2', tau: 2.0, line_number: 20 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+// 1. Contract p1 (Single-Place Contraction)
+const res = foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
+if (!res.success) throw new Error('Contraction failed: ' + res.reason);
+
+// 2. Export to PNML
+const xml = serializeToPnml(cy, 'FoldedNet');
+console.log('___XML_START___' + xml + '___XML_END___');
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+        m = re.search(r'___XML_START___(.*?)___XML_END___', proc.stdout, re.DOTALL)
+        self.assertIsNotNone(m, "Could not extract PNML XML from stdout")
+        xml_content = m.group(1).strip()
+
+        root = ET.fromstring(xml_content)
+        net_el = root.find("{http://www.pnml.org/version-2009/grammar/pnml}net")
+
+        # Places: p1 must be gone; p0 and p2 remain
+        places = [p for p in net_el.iter() if p.tag.endswith("place")]
+        place_ids = {p.attrib.get("id") for p in places}
+        self.assertEqual(place_ids, {"p0", "p2"})
+
+        # Transitions: t0 and t1 must be gone; opaque component c_1 created
+        transitions = [t for t in net_el.iter() if t.tag.endswith("transition")]
+        self.assertEqual(len(transitions), 1)
+        comp_t = transitions[0]
+        self.assertEqual(comp_t.attrib.get("id"), "c_01")
+
+        # Toolspecific properties
+        props = {p.attrib.get("name"): p.attrib.get("value") for p in comp_t.iter() if p.tag.endswith("property")}
+        self.assertEqual(props.get("opaque"), "true")
+        self.assertEqual(props.get("component_type"), "Sequence")
+
+        # Arcs: p0 -> c_01 and c_01 -> p2
+        arcs = [a for a in net_el.iter() if a.tag.endswith("arc")]
+        self.assertEqual(len(arcs), 2)
+        arc_pairs = {(a.attrib.get("source"), a.attrib.get("target")) for a in arcs}
+        self.assertEqual(arc_pairs, {("p0", "c_01"), ("c_01", "p2")})
+
+    def test_client_side_pnml_export_with_renamed_component_node_headless(self):
+        """Validates that renamed component nodes export with their user-assigned label, not the auto-generated c_XX ID (Ticket 42)."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'p0', initial_tokens: 1 },
+    { id: 'p1', label: 'p1' },
+    { id: 'p2', label: 'p2' }
+  ],
+  transitions: [
+    { id: 't0', label: 'step1', tau: 1.0 },
+    { id: 't1', label: 'step2', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+// 1. Contract p1
+const res = foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
+if (!res.success) throw new Error('Contraction failed');
+const comp = cy.getElementById(res.node.id());
+
+// 2. Rename component node via inspector
+openInspector(comp);
+inspectorInput.value = 'UserDefinedProcessStep';
+inspectorSaveBtn.click();
+
+if (comp.data('label') !== 'UserDefinedProcessStep') {
+  throw new Error('Component rename failed');
+}
+
+// 3. Export PNML
+const xml = serializeToPnml(cy, 'RenamedExport');
+console.log('___XML_START___' + xml + '___XML_END___');
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+        m = re.search(r'___XML_START___(.*?)___XML_END___', proc.stdout, re.DOTALL)
+        self.assertIsNotNone(m, "Could not extract PNML XML from stdout")
+        xml_content = m.group(1).strip()
+
+        root = ET.fromstring(xml_content)
+        net_el = root.find("{http://www.pnml.org/version-2009/grammar/pnml}net")
+
+        transitions = [t for t in net_el.iter() if t.tag.endswith("transition")]
+        self.assertEqual(len(transitions), 1)
+        t_el = transitions[0]
+        self.assertEqual(t_el.attrib.get("id"), "c_01")
+
+        # Name text MUST be the user-assigned label, NOT auto-generated c_1
+        name_text = t_el.find("{http://www.pnml.org/version-2009/grammar/pnml}name").find("{http://www.pnml.org/version-2009/grammar/pnml}text").text
+        self.assertEqual(name_text, "UserDefinedProcessStep")
+
+    def test_client_side_pnml_export_download_triggers_file_download_headless(self):
+        """Validates that clicking the Export PNML button triggers a client-side .pnml file download (Ticket 42)."""
+        net_literal = """{
+  places: [{ id: 'p0', label: 'p0', initial_tokens: 1 }, { id: 'p1', label: 'p1' }],
+  transitions: [{ id: 't0', label: 't0', tau: 1.0 }],
+  arcs: [{ source: 'p0', target: 't0' }, { source: 't0', target: 'p1' }]
+}"""
+        test_logic = """
+// Click Export PNML button
+btnExportPnml.click();
+
+if (!downloadedFilename) {
+  throw new Error('downloadedFilename was not set');
+}
+if (!downloadedFilename.endsWith('.pnml')) {
+  throw new Error('Expected download filename to end with .pnml, got: ' + downloadedFilename);
+}
+if (!lastCreatedBlob || !lastCreatedBlob.content) {
+  throw new Error('No Blob content was generated');
+}
+if (!lastCreatedBlob.content.includes('<pnml') || !lastCreatedBlob.content.includes('</pnml>')) {
+  throw new Error('Blob content is not valid PNML');
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_client_side_pnml_export_valid_prom_grammar(self):
+        """Validates that exported PNML satisfies ProM ISO/IEC 15909-2 grammar invariants (Ticket 42)."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'p0', initial_tokens: 1 },
+    { id: 'p1', label: 'p1' },
+    { id: 'p2', label: 'p2' }
+  ],
+  transitions: [
+    { id: 't0', label: 't0', tau: 1.0 },
+    { id: 't1', label: 't1', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
+const xml = serializeToPnml(cy, 'ProMNet');
+console.log('___XML_START___' + xml + '___XML_END___');
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+        m = re.search(r'___XML_START___(.*?)___XML_END___', proc.stdout, re.DOTALL)
+        self.assertIsNotNone(m)
+        xml_content = m.group(1).strip()
+
+        root = ET.fromstring(xml_content)
+        # Root namespace
+        self.assertTrue(root.tag.startswith("{http://www.pnml.org/version-2009/grammar/pnml}"))
+
+        net_el = root.find("{http://www.pnml.org/version-2009/grammar/pnml}net")
+        self.assertIsNotNone(net_el)
+        self.assertEqual(net_el.attrib.get("type"), "http://www.pnml.org/version-2009/grammar/ptnet")
+
+        page_el = net_el.find("{http://www.pnml.org/version-2009/grammar/pnml}page")
+        self.assertIsNotNone(page_el)
+
+        # Check bipartite constraint: Arcs must connect Place <-> Transition only
+        place_ids = {p.attrib.get("id") for p in page_el.findall("{http://www.pnml.org/version-2009/grammar/pnml}place")}
+        trans_ids = {t.attrib.get("id") for t in page_el.findall("{http://www.pnml.org/version-2009/grammar/pnml}transition")}
+
+        # Ensure no overlap between place and transition IDs
+        self.assertEqual(len(place_ids.intersection(trans_ids)), 0)
+
+        for arc in page_el.findall("{http://www.pnml.org/version-2009/grammar/pnml}arc"):
+            src = arc.attrib.get("source")
+            tgt = arc.attrib.get("target")
+            is_p_to_t = (src in place_ids and tgt in trans_ids)
+            is_t_to_p = (src in trans_ids and tgt in place_ids)
+            self.assertTrue(is_p_to_t or is_t_to_p, f"Arc {src} -> {tgt} violates bipartite Petri net property")
 
 
 if __name__ == "__main__":

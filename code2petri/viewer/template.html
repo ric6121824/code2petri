@@ -45,6 +45,11 @@
       font-size: 12px;
       color: #adb5bd;
     }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
     .controls {
       display: flex;
       align-items: center;
@@ -383,20 +388,24 @@
       </div>
     </div>
 
-    <div class="controls" id="fold-controls" style="display: none;">
-      <button class="btn" id="btn-reset" title="Reset to initial un-folded net">Reset</button>
-      <button class="btn" id="btn-unfold" title="Step backward (unfold last component)">◀ Unfold</button>
-      <button class="btn btn-primary" id="btn-fold" title="Step forward (fold next component)">Fold ▶</button>
+    <div class="toolbar" id="viewer-toolbar">
+      <div class="controls" id="fold-controls" style="display: none;">
+        <button class="btn" id="btn-reset" title="Reset to initial un-folded net">Reset</button>
+        <button class="btn" id="btn-unfold" title="Step backward (unfold last component)">◀ Unfold</button>
+        <button class="btn btn-primary" id="btn-fold" title="Step forward (fold next component)">Fold ▶</button>
 
-      <div class="status-badge" id="badge-step">
-        <span class="label">Step</span>
-        <span class="value" id="val-step">0 / 0</span>
+        <div class="status-badge" id="badge-step">
+          <span class="label">Step</span>
+          <span class="value" id="val-step">0 / 0</span>
+        </div>
+
+        <div class="status-badge" id="badge-sm">
+          <span class="label">SM Score</span>
+          <span class="value sm-score" id="val-sm">0.0</span>
+        </div>
       </div>
 
-      <div class="status-badge" id="badge-sm">
-        <span class="label">SM Score</span>
-        <span class="value sm-score" id="val-sm">0.0</span>
-      </div>
+      <button class="btn" id="btn-export-pnml" title="Export current net state to ISO/IEC 15909-2 PNML">Export PNML</button>
     </div>
   </header>
 
@@ -601,6 +610,7 @@
             label: label,
             type: 'Place',
             tokens: tokens,
+            initial_tokens: tokens,
             raw_label: p.label || p.id
           };
           if (encFn) {
@@ -1527,6 +1537,184 @@
           closeInspector();
         }
       });
+
+      // Phase 2.7 Client-Side PNML Exporter
+      function escapeXml(unsafe) {
+        if (unsafe === undefined || unsafe === null) return '';
+        return String(unsafe).replace(/[<>&'"]/g, function (c) {
+          switch (c) {
+            case '<': return '&lt;';
+            case '>': return '&gt;';
+            case '&': return '&amp;';
+            case '\'': return '&apos;';
+            case '"': return '&quot;';
+          }
+        });
+      }
+
+      function serializeToPnml(cy, netName) {
+        if (!netName) netName = 'LiveFoldPetriNet';
+        let xml = '<?xml version="1.0" encoding="utf-8"?>\n';
+        xml += '<pnml xmlns="http://www.pnml.org/version-2009/grammar/pnml">\n';
+        xml += '  <net id="net0" type="http://www.pnml.org/version-2009/grammar/ptnet">\n';
+        xml += '    <name>\n';
+        xml += `      <text>${escapeXml(netName)}</text>\n`;
+        xml += '    </name>\n';
+        xml += '    <page id="page0">\n';
+
+        // 1. Places (excluding compound container parent nodes)
+        const places = cy.nodes('.place').filter(function(p) {
+          return p.inside() && !p.hasClass('compound');
+        });
+        places.forEach(function(p) {
+          const pId = p.id();
+          const label = p.data('raw_label') || p.data('label') || pId;
+          const tokens = parseInt(p.data('initial_tokens') || p.data('tokens') || 0, 10);
+
+          xml += `      <place id="${escapeXml(pId)}">\n`;
+          xml += '        <name>\n';
+          xml += `          <text>${escapeXml(label)}</text>\n`;
+          xml += '        </name>\n';
+          if (tokens > 0) {
+            xml += '        <initialMarking>\n';
+            xml += `          <text>${tokens}</text>\n`;
+            xml += '        </initialMarking>\n';
+          }
+          xml += '      </place>\n';
+        });
+
+        // 2. Transitions
+        const transitions = cy.nodes('.transition').filter(function(t) {
+          return t.inside() && !t.hasClass('compound');
+        });
+        transitions.forEach(function(t) {
+          const tId = t.id();
+          let label = t.data('custom_name') || t.data('raw_label');
+          if (!label) {
+            const rawDataLabel = t.data('label');
+            if (rawDataLabel) {
+              label = rawDataLabel;
+            } else {
+              label = t.data('original_label') || tId;
+            }
+          }
+
+          const rawTau = t.data('tau');
+          const tauVal = (rawTau !== undefined && rawTau !== null) ? Number(rawTau) : 1.0;
+          const tauStr = Number.isInteger(tauVal) ? tauVal.toFixed(1) : String(tauVal);
+
+          const rawOmega = t.data('omega');
+          const omegaVal = (rawOmega !== undefined && rawOmega !== null) ? Number(rawOmega) : 0.0;
+          const omegaStr = Number.isInteger(omegaVal) ? omegaVal.toFixed(1) : String(omegaVal);
+
+          const isOpaque = t.data('is_opaque') === true || t.hasClass('opaque') || Boolean(t.data('opaque'));
+          const lineNo = t.data('source_line') || t.data('line_number');
+          const compType = t.data('component_type');
+          const parent = t.data('parent') || t.data('enclosing_function');
+          const resolved = t.data('resolved');
+          const resolvedTo = t.data('resolved_to');
+          const targetFile = t.data('target_file');
+
+          xml += `      <transition id="${escapeXml(tId)}">\n`;
+          xml += '        <name>\n';
+          xml += `          <text>${escapeXml(label)}</text>\n`;
+          xml += '        </name>\n';
+          xml += '        <toolspecific tool="code2petri" version="1.0">\n';
+          xml += `          <property name="tau" value="${escapeXml(tauStr)}"/>\n`;
+          if (isOpaque) {
+            xml += '          <property name="opaque" value="true"/>\n';
+            xml += `          <property name="omega" value="${escapeXml(omegaStr)}"/>\n`;
+            if (compType) {
+              xml += `          <property name="component_type" value="${escapeXml(compType)}"/>\n`;
+            }
+          }
+          if (lineNo !== undefined && lineNo !== null && lineNo !== '') {
+            xml += `          <property name="line_number" value="${escapeXml(lineNo)}"/>\n`;
+          }
+          if (parent) {
+            xml += `          <property name="enclosing_function" value="${escapeXml(parent)}"/>\n`;
+          }
+          if (resolved === true) {
+            xml += `          <resolved target="${escapeXml(resolvedTo || '')}" file="${escapeXml(targetFile || '')}"/>\n`;
+          } else if (resolved === false) {
+            xml += '          <unresolved/>\n';
+          }
+          xml += '        </toolspecific>\n';
+          xml += '      </transition>\n';
+        });
+
+        // 3. Arcs
+        const edges = cy.edges().filter(function(e) {
+          if (!e.inside()) return false;
+          const src = cy.getElementById(e.data('source'));
+          const tgt = cy.getElementById(e.data('target'));
+          return src && src.inside() && !src.hasClass('compound') &&
+                 tgt && tgt.inside() && !tgt.hasClass('compound');
+        });
+        edges.forEach(function(edge, index) {
+          const arcId = edge.id() || ('a' + (index + 1));
+          const sourceId = edge.data('source');
+          const targetId = edge.data('target');
+          const weight = parseInt(edge.data('weight') || 1, 10);
+
+          xml += `      <arc id="${escapeXml(arcId)}" source="${escapeXml(sourceId)}" target="${escapeXml(targetId)}">\n`;
+          if (weight !== 1) {
+            xml += '        <inscription>\n';
+            xml += `          <text>${weight}</text>\n`;
+            xml += '        </inscription>\n';
+          }
+          xml += '      </arc>\n';
+        });
+
+        xml += '    </page>\n';
+        xml += '  </net>\n';
+        xml += '</pnml>\n';
+
+        return xml;
+      }
+
+      function getExportFilename() {
+        const infoEl = typeof document !== 'undefined' ? document.getElementById('info-filename') : null;
+        const raw = (infoEl && infoEl.textContent) ? infoEl.textContent.trim() : '';
+        if (raw && raw !== '—') {
+          const base = raw.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+          if (base) return `${base}.pnml`;
+        }
+        const titleEl = typeof document !== 'undefined' ? document.querySelector('.header-title') : null;
+        const titleRaw = (titleEl && titleEl.textContent) ? titleEl.textContent.trim() : '';
+        if (titleRaw && titleRaw !== '—') {
+          const base = titleRaw.replace(/[^a-zA-Z0-9_-]/g, '_');
+          if (base) return `${base}.pnml`;
+        }
+        return 'petri_net.pnml';
+      }
+
+      function downloadPnmlFile(cy, filename) {
+        if (!filename) filename = getExportFilename();
+        const netName = filename.replace(/\.pnml$/i, '');
+        const xmlContent = serializeToPnml(cy, netName);
+        if (typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+          const blob = new Blob([xmlContent], { type: 'application/xml;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          if (document.body && typeof document.body.appendChild === 'function') {
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          } else if (typeof a.click === 'function') {
+            a.click();
+          }
+          if (typeof URL.revokeObjectURL === 'function') {
+            setTimeout(function() {
+              URL.revokeObjectURL(url);
+            }, 100);
+          }
+        }
+        return xmlContent;
+      }
+      const exportPnml = downloadPnmlFile;
 
       // Phase 2.7 SESE Infrastructure (Bidirectional Reachability & Symmetry Multipliers)
       class SESEInfrastructure {
@@ -4130,6 +4318,7 @@
       const btnFold = document.getElementById('btn-fold');
       const btnUnfold = document.getElementById('btn-unfold');
       const btnReset = document.getElementById('btn-reset');
+      const btnExportPnml = document.getElementById('btn-export-pnml');
       const valStep = document.getElementById('val-step');
       const valSm = document.getElementById('val-sm');
       const infoTitle = document.getElementById('info-step-title');
@@ -4229,6 +4418,13 @@
       if (btnReset) {
         btnReset.addEventListener('click', function() {
           renderStep(0);
+        });
+      }
+
+      if (btnExportPnml) {
+        btnExportPnml.addEventListener('click', function(e) {
+          if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+          exportPnml(cy);
         });
       }
     })();
