@@ -4,11 +4,11 @@
 
 **Blocked by:** 29 — Prefactor: Backend Composite Assembly
 
-**Status:** ready-for-agent
+**Status:** completed
 
-- [ ] An "Export PNML" button is visible in the viewer toolbar
-- [ ] Clicking the button triggers a browser file download of a `.pnml` file
-- [ ] The exported PNML contains the places, transitions, arcs, and initial token markings of the graph as currently displayed (respecting any live fold reductions applied)
-- [ ] Component nodes that have been renamed export with the user-assigned label, not the auto-generated `c_XX` ID
-- [ ] The exported PNML is valid and can be imported into ProM without errors
-- [ ] No server or Python process is required to perform the export
+- [x] An "Export PNML" button is visible in the viewer toolbar
+- [x] Clicking the button triggers a browser file download of a `.pnml` file
+- [x] The exported PNML contains the places, transitions, arcs, and initial token markings of the graph as currently displayed (respecting any live fold reductions applied)
+- [x] Component nodes that have been renamed export with the user-assigned label, not the auto-generated `c_XX` ID
+- [x] The exported PNML is valid and can be imported into ProM without errors
+- [x] No server or Python process is required to perform the export
