@@ -152,15 +152,12 @@ const document = {{
 
 if (inspectorSaveBtn) {{
   inspectorSaveBtn.addEventListener('click', function(e) {{
-    saveInspectorName();
+    applyComponentNodeRename();
   }});
 }}
 if (inspectorInput) {{
   inspectorInput.addEventListener('keydown', function(e) {{
-    if (e.key === 'Enter') saveInspectorName();
-  }});
-  inspectorInput.addEventListener('change', function() {{
-    saveInspectorName();
+    if (e.key === 'Enter') applyComponentNodeRename();
   }});
 }}
 if (inspectorCloseBtn) {{
@@ -4272,6 +4269,8 @@ console.log('PASS');
         self.assertIn('id="inspector-type"', html)
         self.assertIn('id="inspector-line"', html)
         self.assertIn('stat-pill', html)
+        self.assertIn('Component Node Renaming', html)
+        self.assertIn('Name:', html)
 
     def test_hud_popover_opens_on_left_click_headless(self):
         """Validates that left-clicking a transition opens the floating HUD popover near the node."""
@@ -4309,7 +4308,7 @@ console.log('PASS');
   places: [{ id: 'p0', label: 'p0' }, { id: 'p1', label: 'p1' }, { id: 'p2', label: 'p2' }],
   transitions: [
     { id: 't0', label: 'StepAlpha', tau: 3.5, line_number: 42 },
-    { id: 't1', label: 'StepBeta', tau: 1.0 }
+    { id: 't1', label: 'StepBeta', tau: 1.0, line_number: 50 }
   ],
   arcs: [
     { source: 'p0', target: 't0' },
@@ -4332,8 +4331,8 @@ if (inspectorLine.textContent !== '42') {
   throw new Error(`Expected line '42', got '${inspectorLine.textContent}'`);
 }
 
-// Contract p1 and test opaque component stat pills
-foldEngine.executeSinglePlaceContraction('p1');
+// Contract p1 and test opaque component stat pills (pass element ref per P3)
+foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
 const comp = cy.nodes('[is_opaque]').first();
 if (comp.length === 0) throw new Error('Expected contracted opaque component node');
 
@@ -4343,6 +4342,12 @@ if (inspectorType.textContent !== 'Sequence') {
 }
 if (!inspectorTau.textContent || inspectorTau.textContent === '—') {
   throw new Error(`Expected valid tau for component, got '${inspectorTau.textContent}'`);
+}
+if (inspectorLine.textContent === '—' || !inspectorLine.textContent) {
+  throw new Error(`Expected non-dash line number for folded component, got '${inspectorLine.textContent}'`);
+}
+if (inspectorLine.textContent !== '42–50') {
+  throw new Error(`Expected folded component line number '42–50', got '${inspectorLine.textContent}'`);
 }
 
 console.log('PASS');
@@ -4435,7 +4440,7 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
     def test_hud_closes_when_clicking_canvas_background_headless(self):
-        """Validates that HUD closes when clicking elsewhere on the canvas background or uncontractible place."""
+        """Validates that HUD closes on canvas background click and discards uncommitted text, and does not close on place tap."""
         net_literal = """{
   places: [{ id: 'p0', label: 'p0' }],
   transitions: [{ id: 't0', label: 't0', tau: 1.0 }],
@@ -4451,21 +4456,25 @@ if (inspectorPanel.style.display !== 'flex') {
   throw new Error('HUD should be open');
 }
 
-// 2. Click background
+// 2. Type uncommitted text into input
+inspectorInput.value = 'UncommittedDraft';
+
+// 3. Click uncontractible place - HUD should NOT close (P4)
+p0.emit('tap', { target: p0 });
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('HUD should remain open when tapping uncontractible place node');
+}
+
+// 4. Click canvas background - HUD should close and discard uncommitted text (P2)
 cy.emit('tap', { target: cy });
 if (inspectorPanel.style.display !== 'none') {
-  throw new Error('HUD should be closed after clicking canvas background');
+  throw new Error('HUD should close after clicking canvas background');
 }
-
-// 3. Open HUD again, then click uncontractible place
-t0.emit('tap', { target: t0 });
-if (inspectorPanel.style.display !== 'flex') {
-  throw new Error('HUD should be open again');
+if (inspectorInput.value !== 't0') {
+  throw new Error(`Expected input value discarded and restored to 't0', got '${inspectorInput.value}'`);
 }
-
-p0.emit('tap', { target: p0 });
-if (inspectorPanel.style.display !== 'none') {
-  throw new Error('HUD should be closed after clicking uncontractible place');
+if (t0.data('label') !== 't0') {
+  throw new Error(`Expected node label untouched as 't0', got '${t0.data('label')}'`);
 }
 
 console.log('PASS');
@@ -4495,8 +4504,8 @@ console.log('PASS');
   ]
 }"""
         test_logic = """
-// 1. Contract p1 (Single-Place Contraction)
-const resFold1 = foldEngine.executeSinglePlaceContraction('p1');
+// 1. Contract p1 (Single-Place Contraction, passing node per P3)
+const resFold1 = foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
 if (!resFold1.success) {
   throw new Error('Initial contraction failed: ' + resFold1.reason);
 }
@@ -4528,8 +4537,8 @@ if (!p1Restored.inside()) {
   throw new Error('Expected p1 to be restored inside canvas');
 }
 
-// 4. Re-fold p1
-const resFold2 = foldEngine.executeSinglePlaceContraction('p1');
+// 4. Re-fold p1 (passing node per P3)
+const resFold2 = foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
 if (!resFold2.success) {
   throw new Error('Re-contraction failed: ' + resFold2.reason);
 }
@@ -4542,6 +4551,80 @@ if (comp2.data('label') !== 'CustomFoldedSeq') {
 }
 if (comp2.data('custom_name') !== 'CustomFoldedSeq') {
   throw new Error(`Expected re-folded component custom_name 'CustomFoldedSeq', got '${comp2.data('custom_name')}'`);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_renaming_one_component_does_not_affect_adjacent_fold_headless(self):
+        """Validates that renaming one component does not bleed onto an adjacent component sharing a boundary place (P5)."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'p0' },
+    { id: 'p1', label: 'p1' },
+    { id: 'p2', label: 'p2' },
+    { id: 'p3', label: 'p3' }
+  ],
+  transitions: [
+    { id: 't1', label: 't1', tau: 1.0 },
+    { id: 't2', label: 't2', tau: 1.0 },
+    { id: 't3', label: 't3', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't1' },
+    { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't2' },
+    { source: 't2', target: 'p2' },
+    { source: 'p2', target: 't3' },
+    { source: 't3', target: 'p3' }
+  ]
+}"""
+        test_logic = """
+// 1. Contract p1 into component 1
+const res1 = foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
+if (!res1.success) throw new Error('Contract p1 failed: ' + res1.reason);
+const comp1 = cy.getElementById(res1.node.id());
+
+// 2. Rename component 1 to 'FirstStage'
+openInspector(comp1);
+inspectorInput.value = 'FirstStage';
+inspectorSaveBtn.click();
+if (comp1.data('label') !== 'FirstStage') throw new Error('comp1 label mismatch');
+
+// 3. Contract p2 into component 2
+const res2 = foldEngine.executeSinglePlaceContraction(cy.getElementById('p2'));
+if (!res2.success) throw new Error('Contract p2 failed: ' + res2.reason);
+const comp2 = cy.getElementById(res2.node.id());
+
+// Assert comp2 does NOT inherit comp1's custom label
+if (comp2.data('label') === 'FirstStage') {
+  throw new Error('comp2 should NOT inherit comp1 custom label');
+}
+
+// 4. Unfold comp2 and re-fold p2
+const resUnfold2 = foldEngine.executeComponentLocalUnfold(comp2);
+if (!resUnfold2.success) throw new Error('Unfold comp2 failed');
+const resRefold2 = foldEngine.executeSinglePlaceContraction(cy.getElementById('p2'));
+if (!resRefold2.success) throw new Error('Re-fold p2 failed');
+const comp2Refolded = cy.getElementById(resRefold2.node.id());
+
+if (comp2Refolded.data('label') === 'FirstStage') {
+  throw new Error('Re-folded comp2 should NOT have label FirstStage');
+}
+
+// 5. Unfold comp1 and re-fold p1 - comp1 MUST retain 'FirstStage'
+const resUnfold1 = foldEngine.executeComponentLocalUnfold(comp1);
+if (!resUnfold1.success) throw new Error('Unfold comp1 failed');
+const resRefold1 = foldEngine.executeSinglePlaceContraction(cy.getElementById('p1'));
+if (!resRefold1.success) throw new Error('Re-fold p1 failed');
+const comp1Refolded = cy.getElementById(resRefold1.node.id());
+
+if (comp1Refolded.data('label') !== 'FirstStage') {
+  throw new Error(`Expected comp1 re-folded to retain 'FirstStage', got '${comp1Refolded.data('label')}'`);
 }
 
 console.log('PASS');
