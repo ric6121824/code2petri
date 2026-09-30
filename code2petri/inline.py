@@ -147,7 +147,7 @@ def _splice_callee_net(
     fn_name = callee_name or callee_id
     clean_fn = fn_name.replace(".", "_")
     base_compound_id = f"compound_{clean_fn}"
-    existing_compound_ids = {c["id"] for c in caller_net.compounds}
+    existing_compound_ids = {c.id for c in caller_net.compounds}
     if base_compound_id not in existing_compound_ids:
         compound_id = base_compound_id
     else:
@@ -287,7 +287,7 @@ def _inline_expand_recursive(
     net: PetriNet,
     call_sites: List[CallSite],
     symbol_table: SymbolTable,
-    max_depth: int,
+    max_depth: Optional[int],
     call_stack: Optional[Set[CallFrame]] = None,
     used_prefixes: Optional[Set[str]] = None,
     caller_function: Optional[str] = None,
@@ -304,7 +304,7 @@ def _inline_expand_recursive(
         if node.enclosing_function is None and caller_function:
             node.enclosing_function = caller_function
 
-    if max_depth <= 0:
+    if max_depth is not None and max_depth <= 0:
         return composite_net
 
     if used_prefixes is None:
@@ -361,12 +361,12 @@ def _inline_expand_recursive(
         callee_fn_name = sym.name or cs.callee_name
         callee_file_path = sym.filepath or (os.path.abspath(cs.caller_file) if cs.caller_file else "")
 
-        if max_depth > 1:
+        if max_depth is None or max_depth > 1:
             callee_net = _inline_expand_recursive(
                 net=callee_net,
                 call_sites=callee_call_sites,
                 symbol_table=symbol_table,
-                max_depth=max_depth - 1,
+                max_depth=None if max_depth is None else max_depth - 1,
                 call_stack=new_stack,
                 used_prefixes=used_prefixes,
                 caller_function=callee_fn_name,
@@ -389,7 +389,7 @@ def inline_expand(
     net: PetriNet,
     call_sites: List[CallSite],
     symbol_table: SymbolTable,
-    max_depth: int = 1,
+    max_depth: Optional[int] = 1,
     caller_function: Optional[str] = None,
 ) -> PetriNet:
     """Recursively inlines resolved callee Petri nets into caller net producing a Composite Net.
@@ -398,7 +398,7 @@ def inline_expand(
         net: The caller PetriNet instance.
         call_sites: List of CallSite records extracted from the caller net.
         symbol_table: Multi-file symbol table used for cross-file call resolution.
-        max_depth: Maximum recursion depth for expanding nested callee calls (default 1).
+        max_depth: Maximum recursion depth for expanding nested callee calls (default 1, None for unlimited).
         caller_function: Optional name of the root caller function.
 
     Returns:
@@ -417,25 +417,25 @@ def inline_expand(
 def precompute_callee_nets(
     call_sites: List[CallSite],
     symbol_table: SymbolTable,
-    max_depth: int = 1,
+    max_depth: Optional[int] = 1,
 ) -> Dict[str, Dict[str, Any]]:
     """Discovers and pre-computes raw Petri net dicts for resolved callees up to max_depth.
 
     Args:
         call_sites: List of CallSite records extracted from the caller net.
         symbol_table: Multi-file symbol table used for cross-file call resolution.
-        max_depth: Maximum recursion depth for exploring nested callee calls (default 1).
+        max_depth: Maximum recursion depth for exploring nested callee calls (default 1, None for unlimited).
 
     Returns:
         A dictionary mapping callee identifiers (fully qualified symbol names, bare names,
         and call site callee names) to their raw serialized Petri net dictionaries.
     """
     callee_nets: Dict[str, Dict[str, Any]] = {}
-    if max_depth <= 0 or not call_sites:
+    if (max_depth is not None and max_depth <= 0) or not call_sites:
         return callee_nets
 
     def _collect(cs_list: List[CallSite], current_depth: int, active_stack: Set[CallFrame]) -> None:
-        if current_depth > max_depth or not cs_list:
+        if (max_depth is not None and current_depth > max_depth) or not cs_list:
             return
 
         for cs in cs_list:
@@ -459,7 +459,7 @@ def precompute_callee_nets(
                     if cs.callee_name and cs.callee_name not in callee_nets:
                         callee_nets[cs.callee_name] = net_dict
 
-                    if current_depth < max_depth and nested_call_sites:
+                    if (max_depth is None or current_depth < max_depth) and nested_call_sites:
                         new_stack = set(active_stack)
                         new_stack.update(callee_frames)
                         _collect(nested_call_sites, current_depth + 1, new_stack)

@@ -50,7 +50,7 @@ def discover_context_files(context_paths: Sequence[str]) -> List[str]:
     return discovered
 
 
-UNLIMITED_DEPTH: int = 999
+UNLIMITED_DEPTH: Optional[int] = None
 
 IMAGE_EXTENSIONS = {"png", "svg"}
 TEXT_SERIALIZERS = {
@@ -224,7 +224,10 @@ def code2petri(
             raise AssertionError("Inline expansion requires --context to be provided.")
         if symbol_table is None:
             symbol_table = SymbolTable()
-        logger.info("Executing inline expansion with depth %d...", actual_inline_depth)
+        if actual_inline_depth is None:
+            logger.info("Executing inline expansion until fixpoint...")
+        else:
+            logger.info("Executing inline expansion with depth %d...", actual_inline_depth)
         net = inline_expand(
             net,
             call_sites,

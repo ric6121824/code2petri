@@ -653,9 +653,9 @@ class TestInlineExpansionEngine(unittest.TestCase):
         # 1. Compounds check
         self.assertEqual(len(composite_net.compounds), 1)
         comp = composite_net.compounds[0]
-        self.assertEqual(comp["function_name"], "worker_func")
-        self.assertIsNone(comp["parent"])
-        compound_id = comp["id"]
+        self.assertEqual(comp.function_name, "worker_func")
+        self.assertIsNone(comp.parent)
+        compound_id = comp.id
 
         # 2. Root caller nodes check
         main_trans = [t for t in composite_net.transitions if not t.is_inlined]
@@ -715,34 +715,34 @@ class TestInlineExpansionEngine(unittest.TestCase):
 
         # Expect 2 compounds: worker_func (parent None) and leaf_func (parent worker_func's compound)
         self.assertEqual(len(composite_net.compounds), 2)
-        worker_comp = next((c for c in composite_net.compounds if c["function_name"] == "worker_func"), None)
-        leaf_comp = next((c for c in composite_net.compounds if c["function_name"] == "leaf_func"), None)
+        worker_comp = next((c for c in composite_net.compounds if c.function_name == "worker_func"), None)
+        leaf_comp = next((c for c in composite_net.compounds if c.function_name == "leaf_func"), None)
         self.assertIsNotNone(worker_comp)
         self.assertIsNotNone(leaf_comp)
 
-        self.assertIsNone(worker_comp["parent"])
-        self.assertEqual(leaf_comp["parent"], worker_comp["id"])
+        self.assertIsNone(worker_comp.parent)
+        self.assertEqual(leaf_comp.parent, worker_comp.id)
 
         # Check leaf nodes point to leaf compound
         leaf_trans = [t for t in composite_net.transitions if "leaf_func" in t.id or t.enclosing_function == "leaf_func"]
         self.assertGreater(len(leaf_trans), 0)
         for t in leaf_trans:
-            self.assertEqual(t.parent, leaf_comp["id"])
+            self.assertEqual(t.parent, leaf_comp.id)
             self.assertEqual(t.enclosing_function, "leaf_func")
 
         # Check worker nodes (excluding leaf) point to worker compound
         worker_trans = [t for t in composite_net.transitions if t.enclosing_function == "worker_func"]
         self.assertGreater(len(worker_trans), 0)
         for t in worker_trans:
-            self.assertEqual(t.parent, worker_comp["id"])
+            self.assertEqual(t.parent, worker_comp.id)
             self.assertEqual(t.enclosing_function, "worker_func")
 
         # Check clone preserves full hierarchy
         cloned = composite_net.clone()
         self.assertEqual(len(cloned.compounds), 2)
-        cloned_leaf = next(c for c in cloned.compounds if c["function_name"] == "leaf_func")
-        cloned_worker = next(c for c in cloned.compounds if c["function_name"] == "worker_func")
-        self.assertEqual(cloned_leaf["parent"], cloned_worker["id"])
+        cloned_leaf = next(c for c in cloned.compounds if c.function_name == "leaf_func")
+        cloned_worker = next(c for c in cloned.compounds if c.function_name == "worker_func")
+        self.assertEqual(cloned_leaf.parent, cloned_worker.id)
 
     def test_composite_assembly_duplicate_calls_unique_compound_ids(self):
         """Validates that calling the same callee twice produces distinct compound IDs."""
@@ -773,7 +773,7 @@ class TestInlineExpansionEngine(unittest.TestCase):
 
         self.assertEqual(len(composite_net.compounds), 2)
         c1, c2 = composite_net.compounds[0], composite_net.compounds[1]
-        self.assertNotEqual(c1["id"], c2["id"])
+        self.assertNotEqual(c1.id, c2.id)
 
     def test_composite_assembly_duplicate_nested_calls_unique_compound_ids(self):
         """Validates that calling a function with nested callees multiple times generates unique nested compound IDs."""
@@ -807,18 +807,18 @@ class TestInlineExpansionEngine(unittest.TestCase):
 
         # 2 branch calls + 2 leaf calls = 4 compounds
         self.assertEqual(len(composite_net.compounds), 4)
-        compound_ids = [c["id"] for c in composite_net.compounds]
+        compound_ids = [c.id for c in composite_net.compounds]
         self.assertEqual(len(compound_ids), len(set(compound_ids)))
 
-        branch_comps = [c for c in composite_net.compounds if c["function_name"] == "branch"]
-        leaf_comps = [c for c in composite_net.compounds if c["function_name"] == "leaf"]
+        branch_comps = [c for c in composite_net.compounds if c.function_name == "branch"]
+        leaf_comps = [c for c in composite_net.compounds if c.function_name == "leaf"]
         self.assertEqual(len(branch_comps), 2)
         self.assertEqual(len(leaf_comps), 2)
 
         # Each leaf comp must have its parent pointing to one of the branch comps
-        branch_ids = {c["id"] for c in branch_comps}
+        branch_ids = {c.id for c in branch_comps}
         for lc in leaf_comps:
-            self.assertIn(lc["parent"], branch_ids)
+            self.assertIn(lc.parent, branch_ids)
 
     def test_decorate_node_hierarchy_helper(self):
         """Validates _decorate_node_hierarchy applies inline_expansion, parent, and enclosing_function."""

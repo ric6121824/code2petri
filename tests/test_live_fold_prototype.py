@@ -42,7 +42,7 @@ sample.arcs.forEach((a, i) => {
 });
 
 const cy = cytoscape({ elements: elements });
-const engine = new LiveFoldReductionEngine(cy);
+const engine = new LiveFoldReductionEngine(cy, { sequence: 1.0 });
 
 // 1. Initial SM score
 if (engine.calculateSMScore() !== 8.0) {
@@ -127,7 +127,7 @@ if (cNew.outgoers("edge")[0].target().id() !== "p_user_valid") {
 }
 
 // 6. PNML Serialization
-const pnml = serializeToPnml(cy, "TestExport");
+const pnml = serializeToPnml(cy, "TestExport", { includeTools: true });
 if (!pnml.includes("<pnml") || !pnml.includes("toolspecific")) {
   throw new Error("PNML export missing required elements");
 }

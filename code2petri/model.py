@@ -46,20 +46,7 @@ class CompoundContainer:
             "parent": self.parent,
         }
 
-    def __getitem__(self, key: str) -> Any:
-        return getattr(self, key)
 
-    def get(self, key: str, default: Any = None) -> Any:
-        return getattr(self, key, default)
-
-    def __contains__(self, key: str) -> bool:
-        return hasattr(self, key)
-
-    def keys(self) -> List[str]:
-        return ["id", "label", "function_name", "file", "parent"]
-
-    def items(self):
-        return self.to_dict().items()
 
 
 class NodeBase:

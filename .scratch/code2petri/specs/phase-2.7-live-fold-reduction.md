@@ -23,24 +23,30 @@ When an entire inline expansion (a compound node) is fully folded from the insid
 7. As an analyst, I want to click on a Collapsed Compound Node or opaque transition to instantly unfold it (Component-Local Unfold), without having to use a linear global undo slider that would revert my other unrelated folds.
 8. As a developer, I want to left-click a transition/component node to open a sidebar or modal, so I can view its metadata ($\tau$ weight, SM score, line number).
 9. As a developer, I want to use that sidebar/modal to rename a generated component (e.g., changing `c_04` to `calculate_tax`), so the folded graph better reflects domain semantics.
-10. As an analyst, I want to click an "Export PNML" button in the viewer that triggers a standard browser file download, so I can save my manually half-folded graph state and open it in ProM without needing a Python backend server.
+10. As an analyst, I want to click an "Export PNML" button in the viewer that triggers a client-side export, so I can save my manually half-folded graph state and open it in ProM without needing a Python backend server.
 
 ## Implementation Decisions
 
 - **Initial Assembly:** Python's `inline.py` engine (specifically a variant or flag on `inline_expand`) will pre-assemble the entire Composite Net. It will inject hierarchy metadata (`enclosing_function` or explicit `parent` pointers) into the nodes before generating the `{{DATA_JSON}}` payload. 
-- **JS Reduction Engine:** The core reduction algorithms from `fold.py` (specifically `fold_single_place_contraction`, `fold_choice`, and `fold_while`) will be rewritten in JavaScript within `template.html` (or a bundled script). 
+- **Live Fold Reduction Engine:** The core reduction algorithms from `fold.py` (specifically `fold_single_place_contraction`, `fold_choice`, and `fold_while`) along with SESE macro folds will be implemented in JavaScript within dedicated engine modules.
+- **SESE Macro Folds & Knot Isolation:**
+  - **SESE Subnet Discovery:** Bidirectional reachability traversal discovers Single-Entry Single-Exit (SESE) subgraphs bounded by candidate source and sink nodes.
+  - **Marked Graph Reduction:** Subnets where every place has $\le 1$ incoming and $\le 1$ outgoing arc can be contracted. Transitions acting as candidate boundary triggers are tagged with `contractible-marked-graph`.
+  - **State Machine Reduction:** Subnets where every transition has $\le 1$ incoming and $\le 1$ outgoing arc can be contracted into a composite component.
+  - **Well-Structured SESE Structural Fold:** Validated SESE components are contracted while preserving interface soundness. Elementary reductions are prioritized to prevent premature structural folding.
+  - **Unstructured Knot Isolation:** Non-reducible cyclic or interwoven regions are detected and isolated with visual boundary styling to maintain analysis transparency.
 - **Interaction Mapping:** 
   - Left-Click (Place): Trigger Place-Centric Live Fold.
-  - Left-Click (Transition/Component): Open sidebar for metadata inspection and node renaming.
-  - Right-Click (Transition/Component): Trigger Component-Local Unfold (non-linear local undo).
+  - Left-Click (Transition/Component): Open floating HUD popover for metadata inspection, running SM score display, node renaming, and explicit structural fold actions (e.g. "Contract Marked Graph").
+  - Right-Click (Transition/Component): Trigger Component-Local Unfold.
   - Right/Middle Mouse Hold: Canvas Pan.
 - **UI & UX Decisions (Prototype Confirmed):**
-  - **UI Layout:** The final inspector interface will use "Variant B: HUD" (Floating popover HUD near selection with compact stat pills).
-  - **Visual Affordances:** Foldability state is indicated directly via place colors (Green for Sequence, Amber for Choice, Purple for While loop).
+  - **UI Layout:** The final inspector interface will use "Variant B: HUD" (Floating popover HUD near selection with compact stat pills, including running SM score).
+  - **Visual Affordances:** Foldability state is indicated directly via place colors (Green for Sequence, Amber for Choice, Purple for While loop) and transition styling.
   - **Choice Reduction:** Implements "Idea B" (whole-node style), fusing parallel transitions into a single component while preserving the split and join places.
   - **Focus Retention:** Folding a place successfully retains selection focus on the relevant target node, so subsequent fold states (e.g. from Choice to Sequence) are instantly displayed without re-selecting.
 - **Undo Architecture:** Graph mutations in JS will not use a global state array. Instead, when a fold occurs, the newly created node's `data` dictionary will store a serialized copy of the nodes and edges it consumed. Component-Local Unfolding simply reads this data, removes the component node, and injects the stored elements back into the Cytoscape instance.
-- **Client-Side Export:** A new JS function will traverse the current Cytoscape elements array, convert the places, transitions, arcs, and initial tokens into standard PNML XML syntax, and construct a `Blob` URL attached to a hidden `<a download>` tag to force a save-as prompt.
+- **Client-Side Export:** A new JS function will traverse the current Cytoscape elements array, convert the places, transitions, arcs, and initial tokens into standard PNML XML syntax, and construct a `Blob` URL attached to a hidden `<a download>` tag to trigger a client-side export.
 - **Prototyping Strategy:** Development will begin on the `feature/live-fold-reduction-js-prototype` branch to validate the JS reduction math and the Cytoscape UI/UX feel before replacing the main Phase 2.6 infrastructure.
 
 ## Testing Decisions
@@ -53,7 +59,7 @@ When an entire inline expansion (a compound node) is fully folded from the insid
 
 ## Out of Scope
 
-- **Component-Centric Folding (Lasso / Shift-Click):** While discussed as a future enhancement for folding maximal SESE subnets in one click, the initial prototype will strictly implement Place-Centric Folding (Single-Place Contraction).
+- **Lasso/Multi-Selection Drag Folding:** While freeform lasso selection was discussed, interactive reduction is bound to place-centric triggers and transition HUD popover actions.
 - **Round-trip execution:** The exported PNML is one-way. We are not building a feature to re-import a half-folded PNML file back into the `code2petri` CLI.
 
 ## Further Notes

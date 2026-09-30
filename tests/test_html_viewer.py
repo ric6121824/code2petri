@@ -37,11 +37,8 @@ def _extract_callee_nets_data(html_content: str) -> dict:
 
 def _read_template_html() -> str:
     """Helper to read template.html content."""
-    template_path = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "template.html")
-    )
-    with open(template_path, "r", encoding="utf-8") as f:
-        return f.read()
+    from code2petri.viewer import _load_template
+    return _load_template()
 
 
 def _run_node_script(script: str):
@@ -87,7 +84,7 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_cxttap is not None, "Could not extract handleRightClickUnfold and cy.on('cxttap') from template.html"
     cxttap_handler_js = m_cxttap.group(0)
 
-    m_pnml = re.search(r'function escapeXml\(unsafe\) \{.*?\n      const downloadPnmlFile = exportClientSidePnml;', html, re.DOTALL)
+    m_pnml = re.search(r'function escapeXml\(unsafe\) \{.*?\n\s*const (?:triggerClientSideExport|downloadPnmlFile) = exportClientSidePnml;', html, re.DOTALL)
     assert m_pnml is not None, "Could not extract PNML export functions from template.html"
     pnml_js = m_pnml.group(0)
 
@@ -171,6 +168,21 @@ const btnExportPnml = {{
 }};
 const infoFilename = {{ textContent: 'sample_test.py' }};
 const headerTitle = {{ textContent: 'Sample Test' }};
+const valSm = {{ textContent: '0.0' }};
+const inspectorSm = {{ textContent: '—' }};
+const hudBtnContractMg = {{
+  style: {{ display: 'none' }},
+  _listeners: {{}},
+  addEventListener: function(evt, cb) {{
+    this._listeners[evt] = this._listeners[evt] || [];
+    this._listeners[evt].push(cb);
+  }},
+  click: function() {{
+    if (this._listeners['click']) {{
+      this._listeners['click'].forEach(cb => cb({{}}));
+    }}
+  }}
+}};
 
 const document = {{
   getElementById: function(id) {{
@@ -181,6 +193,9 @@ const document = {{
     if (id === 'inspector-type') return inspectorType;
     if (id === 'inspector-tau') return inspectorTau;
     if (id === 'inspector-line') return inspectorLine;
+    if (id === 'inspector-sm') return inspectorSm;
+    if (id === 'val-sm') return valSm;
+    if (id === 'hud-btn-contract-mg') return hudBtnContractMg;
     if (id === 'inspector-close' || id === 'btn-close-hud') return inspectorCloseBtn;
     if (id === 'btn-export-pnml') return btnExportPnml;
     if (id === 'info-filename') return infoFilename;
@@ -258,6 +273,24 @@ updateFoldableHighlights();
 let hasDragged = false;
 
 {tap_handler_js}
+
+if (hudBtnContractMg) {{
+  hudBtnContractMg.addEventListener('click', function(e) {{
+    if (typeof selectedInspectorNode !== 'undefined' && selectedInspectorNode) {{
+      const target = selectedInspectorNode;
+      closeInspector();
+      const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY['marked_graph'];
+      if (meta && typeof meta.execute === 'function') {{
+        const res = meta.execute(foldEngine, target);
+        if (res && res.success) {{
+          if (typeof updateFoldableHighlights === 'function') updateFoldableHighlights();
+          if (res.node && typeof openInspector === 'function') openInspector(res.node);
+          if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+        }}
+      }}
+    }}
+  }});
+}}
 
 {cxttap_handler_js}
 
@@ -2750,13 +2783,23 @@ console.log(JSON.stringify(result));
 
     def test_marked_graph_and_state_machine_tap_interaction_headless(self):
         """Validates that left-clicking boundary nodes triggers marked graph or state machine reduction and inspector."""
-        # 1. Tap on marked graph boundary transition
+        # 1. Tap on marked graph boundary transition strictly opens HUD, where button triggers fold (P3)
         test_logic_mg = """
 const tSrc = cy.getElementById('t_src');
-tSrc.emit('tap');
+tSrc.emit('tap', { target: tSrc });
+
+if (inspectorPanel.style.display !== 'flex') {
+  throw new Error('Inspector panel did not open upon tapping t_src');
+}
+if (!hudBtnContractMg || hudBtnContractMg.style.display === 'none') {
+  throw new Error('Contract Marked Graph button should be visible in HUD');
+}
+
+// Explicit action click in HUD (P3)
+hudBtnContractMg.click();
 
 const c01 = cy.getElementById('c_01');
-if (c01.length === 0) throw new Error('c_01 was not created upon tapping t_src');
+if (c01.length === 0) throw new Error('c_01 was not created upon contracting marked graph');
 if (c01.data('component_type') !== 'MarkedGraph') throw new Error('Expected MarkedGraph component');
 
 if (inspectorPanel.style.display !== 'flex') {
@@ -4961,7 +5004,7 @@ console.log('PASS');
         name_text = comp_t.find("{http://www.pnml.org/version-2009/grammar/pnml}name").find("{http://www.pnml.org/version-2009/grammar/pnml}text").text
         self.assertEqual(name_text, "calculate_tax (c_01)")
 
-    def test_client_side_pnml_export_triggers_browser_export_headless(self):
+    def test_client_side_pnml_export_triggers_client_side_export_headless(self):
         """Validates that clicking the Export PNML button triggers a client-side .pnml export (Ticket 42, S1)."""
         net_literal = """{
   places: [{ id: 'p0', label: 'p0', initial_tokens: 1 }, { id: 'p1', label: 'p1' }],

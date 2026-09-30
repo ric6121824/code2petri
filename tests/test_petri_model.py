@@ -687,7 +687,7 @@ class TestHierarchyMetadata(unittest.TestCase):
             file="module.py",
             parent=None,
         )
-        self.assertEqual(c["id"], "compound_a")
+        self.assertEqual(c.id, "compound_a")
         self.assertEqual(len(net.compounds), 1)
 
         # to_dict contains compounds
@@ -699,7 +699,7 @@ class TestHierarchyMetadata(unittest.TestCase):
         # clone preserves compounds and hierarchy metadata
         cloned = net.clone()
         self.assertEqual(len(cloned.compounds), 1)
-        self.assertEqual(cloned.compounds[0]["id"], "compound_a")
+        self.assertEqual(cloned.compounds[0].id, "compound_a")
         cloned_p = cloned.places[0]
         cloned_t = cloned.transitions[0]
         self.assertEqual(cloned_p.parent, "compound_a")
@@ -746,14 +746,11 @@ class TestHierarchyMetadata(unittest.TestCase):
         self.assertEqual(comp.parent, "c_main")
         self.assertEqual(comp.node_ids, {"p0", "t0"})
 
-        # Dict compatibility
-        self.assertEqual(comp["id"], "c_worker")
-        self.assertEqual(comp["function_name"], "worker")
-        self.assertEqual(comp.get("file"), "worker.py")
-        self.assertEqual(comp.get("nonexistent", "fallback"), "fallback")
-        d = dict(comp)
+        # to_dict conversion
+        d = comp.to_dict()
         self.assertEqual(d["id"], "c_worker")
         self.assertEqual(d["function_name"], "worker")
+        self.assertEqual(d["file"], "worker.py")
 
         # Integration in PetriNet
         net = PetriNet()

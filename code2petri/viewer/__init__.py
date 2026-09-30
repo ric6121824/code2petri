@@ -38,6 +38,18 @@ def _load_vendor_scripts() -> str:
     return _CACHED_VENDOR_SCRIPTS
 
 
+def _load_engine_scripts() -> str:
+    viewer_dir = _get_viewer_dir()
+    engine_dir = os.path.join(viewer_dir, "engine")
+    pnml_path = os.path.join(engine_dir, "pnml_exporter.js")
+    engine_path = os.path.join(engine_dir, "reduction_engine.js")
+    with open(pnml_path, "r", encoding="utf-8") as f:
+        pnml_content = f.read()
+    with open(engine_path, "r", encoding="utf-8") as f:
+        engine_content = f.read()
+    return f"{pnml_content}\n\n{engine_content}"
+
+
 def _load_template() -> str:
     global _CACHED_TEMPLATE
     if _CACHED_TEMPLATE is not None:
@@ -47,12 +59,13 @@ def _load_template() -> str:
     if not os.path.exists(template_path):
         raise FileNotFoundError(f"Missing HTML viewer template: {template_path}")
     with open(template_path, "r", encoding="utf-8") as f:
-        _CACHED_TEMPLATE = f.read()
+        raw_template = f.read()
+    _CACHED_TEMPLATE = raw_template.replace("<!-- {{ENGINE_SCRIPTS}} -->", _load_engine_scripts())
     return _CACHED_TEMPLATE
 
 
 def generate_html(
-    net_or_fold: Union[PetriNet, FoldResult, Any],
+    net_or_fold: Union[PetriNet, FoldResult],
     title: Optional[str] = None,
     callee_nets: Optional[Dict[str, Any]] = None,
     source_file: Optional[str] = None,
@@ -73,24 +86,9 @@ def generate_html(
     full_source_path = source_file or ""
     file_display = os.path.basename(source_file) if source_file else ""
 
-    is_composite = (
-        isinstance(net_or_fold, PetriNet)
-        and bool(getattr(net_or_fold, "compounds", None))
-    ) or (
-        isinstance(net_or_fold, dict)
-        and bool(net_or_fold.get("compounds"))
-    )
-
-    if is_composite:
-        if isinstance(net_or_fold, PetriNet):
-            comp_dict = net_or_fold.to_dict()
-            compounds = [c.to_dict() if hasattr(c, "to_dict") else dict(c) for c in net_or_fold.compounds]
-        elif isinstance(net_or_fold, dict):
-            comp_dict = net_or_fold
-            compounds = list(net_or_fold.get("compounds", []))
-        else:
-            comp_dict = {}
-            compounds = []
+    if isinstance(net_or_fold, PetriNet) and bool(net_or_fold.compounds):
+        comp_dict = net_or_fold.to_dict()
+        compounds = [c.to_dict() for c in net_or_fold.compounds]
 
         display_title = title if title is not None else "Composite Petri Net"
         mode_label = "Composite Petri Net View"
@@ -115,8 +113,8 @@ def generate_html(
             "title": display_title,
             **fold_dict,
         }
-    else:
-        net_dict = net_or_fold.to_dict() if isinstance(net_or_fold, PetriNet) else (net_or_fold if isinstance(net_or_fold, dict) else {})
+    elif isinstance(net_or_fold, PetriNet):
+        net_dict = net_or_fold.to_dict()
         display_title = title if title is not None else "Petri Net"
         mode_label = "Petri Net View"
         mode_desc = "Interactive Petri net graph representation."
@@ -128,6 +126,8 @@ def generate_html(
             "final_sm": 0.0,
             "fully_reducible": False,
         }
+    else:
+        raise TypeError(f"Expected PetriNet or FoldResult, got {type(net_or_fold).__name__}")
 
     payload["source_file"] = full_source_path
     payload["filename"] = file_display
