@@ -60,7 +60,7 @@ def _load_template() -> str:
         raise FileNotFoundError(f"Missing HTML viewer template: {template_path}")
     with open(template_path, "r", encoding="utf-8") as f:
         raw_template = f.read()
-    _CACHED_TEMPLATE = raw_template.replace("/* {{ENGINE_SCRIPTS}} */", _load_engine_scripts()).replace("<!-- {{ENGINE_SCRIPTS}} -->", _load_engine_scripts())
+    _CACHED_TEMPLATE = raw_template.replace("/* {{ENGINE_SCRIPTS}} */", _load_engine_scripts())
     return _CACHED_TEMPLATE
 
 
