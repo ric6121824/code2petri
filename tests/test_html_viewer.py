@@ -76,6 +76,10 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_tap is not None, "Could not extract cy.on('tap', 'node') from template.html"
     tap_handler_js = m_tap.group(0)
 
+    m_vp = re.search(r'function _captureViewport\(cy\) \{.*?function _restoreViewport\(cy, zoom, pan\) \{.*?\n      \}', html, re.DOTALL)
+    assert m_vp is not None, "Could not extract viewport helper functions from template.html"
+    viewport_helpers_js = m_vp.group(0)
+
     m_fold_reduce = re.search(r'function handleFoldReduction\(node, fallbackType\) \{(.*?)\n      \}', html, re.DOTALL)
     assert m_fold_reduce is not None, "Could not extract handleFoldReduction from template.html"
     fold_reduce_js = m_fold_reduce.group(0)
@@ -273,6 +277,8 @@ const foldEngine = new LiveFoldReductionEngine(cy);
 
 {update_highlights_js}
 updateFoldableHighlights();
+
+{viewport_helpers_js}
 
 {fold_reduce_js}
 
@@ -5143,17 +5149,7 @@ console.log('PASS');
             is_t_to_p = (src in trans_ids and tgt in place_ids)
             self.assertTrue(is_p_to_t or is_t_to_p, f"Arc {src} -> {tgt} violates bipartite Petri net property")
 
-    def test_template_min_zoom_allows_deep_zoom_out(self):
-        """Validates that template.html configures minZoom <= 0.01 to allow seeing large nets in full."""
-        html = _read_template_html()
-        m = re.search(r'minZoom:\s*([0-9.]+)', html)
-        self.assertIsNotNone(m, "minZoom setting not found in template.html")
-        min_zoom = float(m.group(1))
-        self.assertLessEqual(min_zoom, 0.01, f"Expected minZoom <= 0.01 for large graphs, got {min_zoom}")
-
-    def test_handle_fold_reduction_preserves_camera_viewport(self):
-        """Validates that handleFoldReduction preserves camera zoom and pan instead of resetting to fit default."""
-        net_literal = """{
+    _SIMPLE_SEQUENCE_NET_LITERAL = """{
   places: [
     { id: 'p0', label: 'p0' },
     { id: 'p1', label: 'p1' },
@@ -5170,49 +5166,124 @@ console.log('PASS');
     { source: 't1', target: 'p2' }
   ]
 }"""
+
+    def test_template_min_zoom_allows_deep_zoom_out(self):
+        """Validates that template.html configures minZoom <= 0.001 to allow seeing large nets in full."""
+        html = _read_template_html()
+        m = re.search(r'minZoom:\s*([0-9.]+)', html)
+        self.assertIsNotNone(m, "minZoom setting not found in template.html")
+        min_zoom = float(m.group(1))
+        self.assertLessEqual(min_zoom, 0.001, f"Expected minZoom <= 0.001 for large graphs, got {min_zoom}")
+
+    def test_large_net_autofit_zooms_below_point_two_without_clamping_headless(self):
+        """Validates that opening a large net allows cy.fit() on initial load to zoom below 0.2 without clamping (Ticket 44)."""
+        node_script = """
+const Module = require('module');
+const originalRequire = Module.prototype.require;
+const dagre = require('./code2petri/viewer/vendor/dagre.min.js');
+Module.prototype.require = function(path) {
+  if (path === 'dagre') return dagre;
+  return originalRequire.apply(this, arguments);
+};
+
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const cytoscapeDagre = require('./code2petri/viewer/vendor/cytoscape-dagre.js');
+cytoscape.use(cytoscapeDagre);
+
+// Construct a long sequential pipeline of 100 places and transitions
+const elements = [];
+for (let i = 0; i < 100; i++) {
+  elements.push({ group: 'nodes', data: { id: 'p' + i }, classes: 'place' });
+  elements.push({ group: 'nodes', data: { id: 't' + i }, classes: 'transition' });
+  elements.push({ group: 'edges', data: { id: 'e_pt_' + i, source: 'p' + i, target: 't' + i } });
+  if (i > 0) {
+    elements.push({ group: 'edges', data: { id: 'e_tp_' + i, source: 't' + (i - 1), target: 'p' + i } });
+  }
+}
+
+const cy = cytoscape({
+  elements: elements,
+  minZoom: 0.001,
+  maxZoom: 3.5
+});
+
+cy.layout({
+  name: 'dagre',
+  rankDir: 'TB',
+  nodeDimensionsIncludeLabels: true,
+  spacingFactor: 1.15,
+  rankSep: 40,
+  nodeSep: 35,
+  padding: 30
+}).run();
+
+cy.fit(null, 30);
+
+const fittedZoom = cy.zoom();
+if (fittedZoom >= 0.2) {
+  throw new Error(`Expected large graph fitted zoom to be < 0.2, got ${fittedZoom}`);
+}
+if (fittedZoom < 0.001) {
+  throw new Error(`Fitted zoom fell below minZoom (0.001): ${fittedZoom}`);
+}
+
+console.log('PASS: ' + fittedZoom);
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS:", proc.stdout)
+
+    def test_handle_fold_reduction_preserves_camera_viewport(self):
+        """Validates that handleFoldReduction preserves camera zoom and anchors the component node to clicked place screen pos."""
         test_logic = """
 cy.zoom(1.85);
 cy.pan({ x: 120, y: -75 });
 const initialZoom = cy.zoom();
+const initialPan = Object.assign({}, cy.pan());
 
 const p1 = cy.getElementById('p1');
+const p1PosBefore = Object.assign({}, p1.position());
+
 const foldSuccess = handleFoldReduction(p1, 'sequence');
 if (!foldSuccess) throw new Error('handleFoldReduction failed');
 
 const postZoom = cy.zoom();
+const postPan = cy.pan();
 if (Math.abs(postZoom - initialZoom) > 1e-4) {
   throw new Error(`Expected zoom to be preserved (${initialZoom}), got ${postZoom}`);
 }
+
+const c01 = cy.getElementById('c_01');
+if (!c01 || c01.length === 0) throw new Error('Could not find folded component c_01');
+const c01Pos = c01.position();
+
+// Screen position invariance: screenPos = nodePos * zoom + pan
+const p1ScreenX = p1PosBefore.x * initialZoom + initialPan.x;
+const p1ScreenY = p1PosBefore.y * initialZoom + initialPan.y;
+const c01ScreenX = c01Pos.x * postZoom + postPan.x;
+const c01ScreenY = c01Pos.y * postZoom + postPan.y;
+
+if (Math.abs(c01ScreenX - p1ScreenX) > 1.0) {
+  throw new Error(`Screen X position anchor shifted: expected ${p1ScreenX}, got ${c01ScreenX}`);
+}
+if (Math.abs(c01ScreenY - p1ScreenY) > 1.0) {
+  throw new Error(`Screen Y position anchor shifted: expected ${p1ScreenY}, got ${c01ScreenY}`);
+}
+
 console.log('PASS');
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        node_script = _setup_live_fold_test_harness(self._SIMPLE_SEQUENCE_NET_LITERAL, test_logic)
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
     def test_handle_right_click_unfold_preserves_camera_viewport(self):
-        """Validates that handleRightClickUnfold preserves camera zoom and pan without resetting to fit default."""
-        net_literal = """{
-  places: [
-    { id: 'p0', label: 'p0' },
-    { id: 'p1', label: 'p1' },
-    { id: 'p2', label: 'p2' }
-  ],
-  transitions: [
-    { id: 't0', label: 't0', tau: 1.0 },
-    { id: 't1', label: 't1', tau: 1.0 }
-  ],
-  arcs: [
-    { source: 'p0', target: 't0' },
-    { source: 't0', target: 'p1' },
-    { source: 'p1', target: 't1' },
-    { source: 't1', target: 'p2' }
-  ]
-}"""
+        """Validates that handleRightClickUnfold preserves both camera zoom and pan without resetting to fit default."""
         test_logic = """
 cy.zoom(2.15);
 cy.pan({ x: 60, y: -120 });
 const initialZoom = cy.zoom();
+const initialPan = Object.assign({}, cy.pan());
 
 const p1 = cy.getElementById('p1');
 handleFoldReduction(p1, 'sequence');
@@ -5223,12 +5294,17 @@ const unfoldSuccess = handleRightClickUnfold(comp);
 if (!unfoldSuccess) throw new Error('handleRightClickUnfold failed');
 
 const postZoom = cy.zoom();
+const postPan = cy.pan();
 if (Math.abs(postZoom - initialZoom) > 1e-4) {
   throw new Error(`Expected zoom to be preserved on unfold (${initialZoom}), got ${postZoom}`);
 }
+if (Math.abs(postPan.x - initialPan.x) > 1e-4 || Math.abs(postPan.y - initialPan.y) > 1e-4) {
+  throw new Error(`Expected pan to be preserved on unfold (${JSON.stringify(initialPan)}), got ${JSON.stringify(postPan)}`);
+}
+
 console.log('PASS');
 """
-        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        node_script = _setup_live_fold_test_harness(self._SIMPLE_SEQUENCE_NET_LITERAL, test_logic)
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
