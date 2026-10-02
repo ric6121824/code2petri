@@ -4,10 +4,10 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] Triggering a Place-Centric Fold leaves the zoom level unchanged
-- [ ] After a fold, the new component node appears at the same screen position as the place node where the fold was triggered, keeping the point of interest on screen
-- [ ] Initiating Component-Local Unfold leaves the zoom level and pan position unchanged
-- [ ] The behaviour holds whether the user is zoomed in, zoomed out, or has panned away from the default viewport
-- [ ] The layout is re-run after fold/unfold without triggering a `cy.fit()` reset
+- [x] Triggering a Place-Centric Fold leaves the zoom level unchanged
+- [x] After a fold, the new component node appears at the same screen position as the place node where the fold was triggered, keeping the point of interest on screen
+- [x] Initiating Component-Local Unfold leaves the zoom level and pan position unchanged
+- [x] The behaviour holds whether the user is zoomed in, zoomed out, or has panned away from the default viewport
+- [x] The layout is re-run after fold/unfold without triggering a `cy.fit()` reset

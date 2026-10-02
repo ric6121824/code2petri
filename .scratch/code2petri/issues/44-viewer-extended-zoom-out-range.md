@@ -4,9 +4,9 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** complete
 
-- [ ] The viewer allows zooming out to at most 0.1% zoom (minZoom ≤ 0.001)
-- [ ] When a large net is opened, `cy.fit()` on initial load shows the complete graph without clipping
-- [ ] The user can reach the full-graph overview using the scroll wheel without hitting an artificial floor
-- [ ] Scroll-wheel zoom-in behaviour and the maxZoom ceiling are unaffected
+- [x] The viewer allows zooming out to at most 0.1% zoom (minZoom ≤ 0.001)
+- [x] When a large net is opened, `cy.fit()` on initial load shows the complete graph without clipping
+- [x] The user can reach the full-graph overview using the scroll wheel without hitting an artificial floor
+- [x] Scroll-wheel zoom-in behaviour and the maxZoom ceiling are unaffected
