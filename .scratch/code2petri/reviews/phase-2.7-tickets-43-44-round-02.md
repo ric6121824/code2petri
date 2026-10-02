@@ -38,9 +38,15 @@
 
 ### (c) Baseline Smells in Diff (Judgement Calls)
 
-- **Possible Fragile Coupling / Regex Extraction ([`tests/test_html_viewer.py:79`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_html_viewer.py#L79)):**  
-  The test harness extracts helper functions via `re.search(r'function _captureViewport\(cy\) \{.*?function _restoreViewport\(cy, zoom, pan\) \{.*?\n \}', html, re.DOTALL)`. This spans from `_captureViewport` through `_restoreViewport`, implicitly coupling the test harness to the exact declaration order of those functions in `template.html`. Reordering helpers in the future would break harness extraction.  
+- **Fragile Coupling / Implicit Order Dependency in Test Regex ([`tests/test_html_viewer.py:79-82`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_html_viewer.py#L79-L82)):**  
+  The test harness extracts helper functions via `re.search(r'function _captureViewport\(cy\) \{.*?function _restoreViewport\(cy, zoom, pan\) \{.*?\n      \}', html, re.DOTALL)`. This spans from `_captureViewport` through `_restoreViewport`, implicitly coupling the test harness to the exact declaration order of those functions in `template.html`. Reordering helpers in the future would break harness extraction.  
   *(Low severity; test suite currently executes and passes cleanly.)*
+
+  > **Chosen Remediation — Architectural Module Extraction (Option 3):**  
+  > Align viewport management with the Phase 2.7 engine modularization architecture (which cleanly extracted [`reduction_engine.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/reduction_engine.js) and [`pnml_exporter.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/pnml_exporter.js)):  
+  > 1. Extract `_captureViewport`, `_computeAnchoredPan`, and `_restoreViewport` into a dedicated engine module (`code2petri/viewer/engine/viewport.js`) or attach them directly as a static utility namespace on `LiveFoldReductionEngine.viewport = { capture, computeAnchoredPan, restore }`.  
+  > 2. Inject the script bundle into `template.html` at build time via the existing `/* {{ENGINE_SCRIPTS}} */` injection point in [`code2petri/viewer/__init__.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/__init__.py).  
+  > 3. In [`tests/test_html_viewer.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_html_viewer.py), load the engine module directly in Node.js harnesses via `require()`, completely eliminating brittle multi-function regular expression slicing from HTML templates.
 
 ---
 
