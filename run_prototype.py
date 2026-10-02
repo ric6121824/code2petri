@@ -21,6 +21,7 @@ import webbrowser
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 PROTOTYPE_DIR = os.path.join(REPO_ROOT, "code2petri", "viewer", "prototype")
+ENGINE_DIR = os.path.join(REPO_ROOT, "code2petri", "viewer", "engine")
 VENDOR_DIR = os.path.join(REPO_ROOT, "code2petri", "viewer", "vendor")
 PROTOTYPE_HTML = os.path.join(PROTOTYPE_DIR, "index.html")
 
@@ -29,8 +30,8 @@ def validate_prototype_files() -> bool:
     """Verifies all required files for the prototype exist."""
     required_files = [
         PROTOTYPE_HTML,
-        os.path.join(PROTOTYPE_DIR, "reduction_engine.js"),
-        os.path.join(PROTOTYPE_DIR, "pnml_exporter.js"),
+        os.path.join(ENGINE_DIR, "reduction_engine.js"),
+        os.path.join(ENGINE_DIR, "pnml_exporter.js"),
         os.path.join(PROTOTYPE_DIR, "sample_data.js"),
         os.path.join(VENDOR_DIR, "cytoscape.min.js"),
         os.path.join(VENDOR_DIR, "dagre.min.js"),

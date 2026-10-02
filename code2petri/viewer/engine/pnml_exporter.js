@@ -218,7 +218,6 @@
 
   const triggerClientSideExport = exportClientSidePnml;
   const exportPnml = exportClientSidePnml;
-  const downloadPnmlFile = exportClientSidePnml; // Backwards-compatible alias
 
   return {
     escapeXml,
@@ -230,7 +229,6 @@
     _triggerBlobDownload,
     exportClientSidePnml,
     triggerClientSideExport,
-    exportPnml,
-    downloadPnmlFile
+    exportPnml
   };
 });

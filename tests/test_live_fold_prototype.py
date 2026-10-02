@@ -20,8 +20,8 @@ class TestLiveFoldPrototype(unittest.TestCase):
 
         test_script = """
 const cytoscape = require("./code2petri/viewer/vendor/cytoscape.min.js");
-const { LiveFoldReductionEngine } = require("./code2petri/viewer/prototype/reduction_engine.js");
-const { serializeToPnml } = require("./code2petri/viewer/prototype/pnml_exporter.js");
+const { LiveFoldReductionEngine } = require("./code2petri/viewer/engine/reduction_engine.js");
+const { serializeToPnml } = require("./code2petri/viewer/engine/pnml_exporter.js");
 
 global.window = {};
 require("./code2petri/viewer/prototype/sample_data.js");
@@ -155,7 +155,7 @@ console.log("ALL_ECOMMERCE_CHECKS_PASSED");
 
         test_script = """
 const cytoscape = require("./code2petri/viewer/vendor/cytoscape.min.js");
-const { LiveFoldReductionEngine } = require("./code2petri/viewer/prototype/reduction_engine.js");
+const { LiveFoldReductionEngine } = require("./code2petri/viewer/engine/reduction_engine.js");
 
 global.window = {};
 require("./code2petri/viewer/prototype/sample_data.js");
@@ -308,7 +308,7 @@ console.log("ALL_BIPARTITE_AND_PYTHON_CHECKS_PASSED");
 
         test_script = """
 const cytoscape = require("./code2petri/viewer/vendor/cytoscape.min.js");
-const { LiveFoldReductionEngine } = require("./code2petri/viewer/prototype/reduction_engine.js");
+const { LiveFoldReductionEngine } = require("./code2petri/viewer/engine/reduction_engine.js");
 
 global.window = {};
 require("./code2petri/viewer/prototype/sample_data.js");
@@ -453,7 +453,7 @@ console.log("ALL_CHOICE_REDUCTION_CHECKS_PASSED");
 
         test_script = """
 const cytoscape = require("./code2petri/viewer/vendor/cytoscape.min.js");
-const { LiveFoldReductionEngine } = require("./code2petri/viewer/prototype/reduction_engine.js");
+const { LiveFoldReductionEngine } = require("./code2petri/viewer/engine/reduction_engine.js");
 
 global.window = {};
 require("./code2petri/viewer/prototype/sample_data.js");

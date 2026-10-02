@@ -47,7 +47,7 @@ When an entire inline expansion (a compound node) is fully folded from the insid
   - **Focus Retention:** Folding a place successfully retains selection focus on the relevant target node, so subsequent fold states (e.g. from Choice to Sequence) are instantly displayed without re-selecting.
 - **Undo Architecture:** Graph mutations in JS will not use a global state array. Instead, when a fold occurs, the newly created node's `data` dictionary will store a serialized copy of the nodes and edges it consumed. Component-Local Unfolding simply reads this data, removes the component node, and injects the stored elements back into the Cytoscape instance.
 - **Client-Side Export:** A new JS function will traverse the current Cytoscape elements array, convert the places, transitions, arcs, and initial tokens into standard PNML XML syntax, and construct a `Blob` URL attached to a hidden `<a download>` tag to trigger a client-side export.
-- **Prototyping Strategy:** Development will begin on the `feature/live-fold-reduction-js-prototype` branch to validate the JS reduction math and the Cytoscape UI/UX feel before replacing the main Phase 2.6 infrastructure.
+- **Prototyping Strategy:** Development will begin on the `feature/live-fold-reduction-js-prototype` branch to validate the Live Fold Reduction math and the Cytoscape UI/UX feel before replacing the main Phase 2.6 infrastructure.
 
 ## Testing Decisions
 

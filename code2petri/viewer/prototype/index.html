@@ -429,8 +429,8 @@
 
   <!-- Prototype Logic Modules -->
   <script src="sample_data.js"></script>
-  <script src="reduction_engine.js"></script>
-  <script src="pnml_exporter.js"></script>
+  <script src="../engine/reduction_engine.js"></script>
+  <script src="../engine/pnml_exporter.js"></script>
 </head>
 <body>
 
@@ -1543,7 +1543,7 @@
       document.getElementById('btn-export-pnml').addEventListener('click', () => {
         const sampleKey = document.getElementById('sample-select').value;
         const filename = `${sampleKey}_folded.pnml`;
-        downloadPnmlFile(cy, filename);
+        exportClientSidePnml(cy, filename);
         showToast(`Exported current net state to '${filename}'.`, 'highlight');
       });
 

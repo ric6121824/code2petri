@@ -915,6 +915,7 @@
           const accumulatedTau = parseFloat((omega + tauSrc + tauSnk).toFixed(2));
 
           // 2. Discover parent compound container via Lowest Common Ancestor (P4)
+          const parentPlace = placeNode.data('parent') || null;
           const parentSrc = t_src.data('parent') || null;
           const parentSnk = t_snk.data('parent') || null;
           const parentId = this._findLowestCommonAncestor(parentSrc, parentSnk);
@@ -956,8 +957,8 @@
           // Check if any compound container has all its children consumed by this cross-boundary fold
           const consumedCompounds = [];
           const self = this;
-          [parentSrc, parentSnk].forEach(function(pCompId) {
-            if (pCompId && pCompId !== parentId) {
+          [parentSrc, parentSnk, parentPlace].forEach(function(pCompId) {
+            if (pCompId && pCompId !== parentId && !consumedCompounds.some(function(c) { return c.data.id === pCompId; })) {
               const pNode = self.cy.getElementById(pCompId);
               const remaining = self.cy.nodes().filter(function(n) {
                 return n.data('parent') === pCompId &&

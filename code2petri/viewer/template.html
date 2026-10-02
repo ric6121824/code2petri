@@ -1566,7 +1566,7 @@
         }
       });
 
-      <!-- {{ENGINE_SCRIPTS}} -->
+      /* {{ENGINE_SCRIPTS}} */
 
       function updateFoldableHighlights() {
         if (!cy || typeof cy.nodes !== 'function' || !foldEngine) return;
@@ -1623,6 +1623,32 @@
       const foldEngine = new LiveFoldReductionEngine(cy);
       updateFoldableHighlights();
 
+      function handleFoldReduction(node, fallbackType) {
+        if (typeof foldEngine === 'undefined' || !foldEngine) return false;
+        const foldType = foldEngine.getFoldType(node) || fallbackType;
+        if (!foldType) return false;
+        const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
+        if (!meta || typeof meta.execute !== 'function') return false;
+
+        const res = meta.execute(foldEngine, node);
+        if (res && res.success) {
+          if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
+            cy.layout(DAGRE_LAYOUT_OPTIONS).run();
+          }
+          if (typeof updateFoldableHighlights === 'function') {
+            updateFoldableHighlights();
+          }
+          if (res.node && typeof openInspector === 'function') {
+            openInspector(res.node);
+          }
+          if (typeof valSm !== 'undefined' && valSm && typeof foldEngine !== 'undefined' && foldEngine) {
+            valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+          }
+          return true;
+        }
+        return false;
+      }
+
       // Cursor feedback on hover
       cy.on('mouseover', 'node', function(evt) {
         if (isPanningDrag) return;
@@ -1641,36 +1667,12 @@
         const targetNode = evt.target;
         const targetId = targetNode.id();
 
-        function handleFoldReduction(node, fallbackType) {
-          if (typeof foldEngine === 'undefined' || !foldEngine) return false;
-          const foldType = foldEngine.getFoldType(node) || fallbackType;
-          if (!foldType) return false;
-          const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
-          if (!meta || typeof meta.execute !== 'function') return false;
-
-          const res = meta.execute(foldEngine, node);
-          if (res && res.success) {
-            if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
-              cy.layout(DAGRE_LAYOUT_OPTIONS).run();
-            }
-            if (typeof updateFoldableHighlights === 'function') {
-              updateFoldableHighlights();
-            }
-            if (res.node && typeof openInspector === 'function') {
-              openInspector(res.node);
-            }
-            if (typeof valSm !== 'undefined' && valSm && typeof foldEngine !== 'undefined' && foldEngine) {
-              valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
-            }
-            return true;
-          }
-          return false;
-        }
-
         // 1. Left-clicking an eligible place node contracts it (Single-Place Contraction, Choice, While Loop, State Machine, or Well-Structured)
         if (targetNode.hasClass('place') || targetNode.data('type') === 'Place') {
-          const fallback = typeof LiveFoldReductionEngine !== 'undefined' ? LiveFoldReductionEngine.getMatchingFoldType(targetNode) : null;
-          handleFoldReduction(targetNode, fallback);
+          if (typeof handleFoldReduction === 'function') {
+            const fallback = typeof LiveFoldReductionEngine !== 'undefined' ? LiveFoldReductionEngine.getMatchingFoldType(targetNode) : null;
+            handleFoldReduction(targetNode, fallback);
+          }
           return;
         }
 

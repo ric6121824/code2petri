@@ -76,6 +76,10 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_tap is not None, "Could not extract cy.on('tap', 'node') from template.html"
     tap_handler_js = m_tap.group(0)
 
+    m_fold_reduce = re.search(r'function handleFoldReduction\(node, fallbackType\) \{(.*?)\n      \}', html, re.DOTALL)
+    assert m_fold_reduce is not None, "Could not extract handleFoldReduction from template.html"
+    fold_reduce_js = m_fold_reduce.group(0)
+
     m_update = re.search(r'function updateFoldableHighlights\(\) \{(.*?)\n      \}', html, re.DOTALL)
     assert m_update is not None, "Could not extract updateFoldableHighlights from template.html"
     update_highlights_js = m_update.group(0)
@@ -84,7 +88,7 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_cxttap is not None, "Could not extract handleRightClickUnfold and cy.on('cxttap') from template.html"
     cxttap_handler_js = m_cxttap.group(0)
 
-    m_pnml = re.search(r'function escapeXml\(unsafe\) \{.*?\n\s*const (?:triggerClientSideExport|downloadPnmlFile) = exportClientSidePnml;', html, re.DOTALL)
+    m_pnml = re.search(r'function escapeXml\(unsafe\) \{.*?\n\s*const triggerClientSideExport = exportClientSidePnml;', html, re.DOTALL)
     assert m_pnml is not None, "Could not extract PNML export functions from template.html"
     pnml_js = m_pnml.group(0)
 
@@ -270,6 +274,8 @@ const foldEngine = new LiveFoldReductionEngine(cy);
 {update_highlights_js}
 updateFoldableHighlights();
 
+{fold_reduce_js}
+
 let hasDragged = false;
 
 {tap_handler_js}
@@ -279,15 +285,7 @@ if (hudBtnContractMg) {{
     if (typeof selectedInspectorNode !== 'undefined' && selectedInspectorNode) {{
       const target = selectedInspectorNode;
       closeInspector();
-      const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY['marked_graph'];
-      if (meta && typeof meta.execute === 'function') {{
-        const res = meta.execute(foldEngine, target);
-        if (res && res.success) {{
-          if (typeof updateFoldableHighlights === 'function') updateFoldableHighlights();
-          if (res.node && typeof openInspector === 'function') openInspector(res.node);
-          if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
-        }}
-      }}
+      handleFoldReduction(target, 'marked_graph');
     }}
   }});
 }}
@@ -3840,6 +3838,65 @@ if (inspectorType.textContent !== 'Collapsed Compound') {
 }
 if (inspectorTau.textContent !== '2.0') {
   throw new Error('Expected inspectorTau 2.0, got ' + inspectorTau.textContent);
+}
+
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_single_place_contraction_prunes_place_parent_compound_headless(self):
+        """Validates that executeSinglePlaceContraction prunes parentPlace compound container if all its children are consumed."""
+        net_literal = """{
+  compounds: [
+    { id: 'c_place_only', function_name: 'place_helper', label: 'place_helper()' }
+  ],
+  places: [
+    { id: 'p_mid', label: 'mid', initial_tokens: 0, parent: 'c_place_only' }
+  ],
+  transitions: [
+    { id: 't_src', label: 'src', tau: 1.0 },
+    { id: 't_snk', label: 'snk', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 't_src', target: 'p_mid' },
+    { source: 'p_mid', target: 't_snk' }
+  ]
+}"""
+        test_logic = """
+const pMid = cy.getElementById('p_mid');
+const cPlaceOnly = cy.getElementById('c_place_only');
+if (!cPlaceOnly.inside()) throw new Error('c_place_only should exist initially');
+
+const res = foldEngine.executeSinglePlaceContraction(pMid);
+if (!res || !res.success) throw new Error('executeSinglePlaceContraction failed');
+
+// c_place_only had only p_mid as child, which was consumed into c_01
+if (cy.getElementById('c_place_only').inside()) {
+  throw new Error('c_place_only should be pruned after p_mid is consumed');
+}
+
+// Check that c_place_only is recorded in consumedCompounds of the fold step
+const step = res.step;
+if (!step.consumedCompounds || !step.consumedCompounds.some(c => c.data.id === 'c_place_only')) {
+  throw new Error('c_place_only should be in consumedCompounds');
+}
+
+// Unfold and verify c_place_only is restored
+const c01 = cy.getElementById('c_01');
+const unfoldRes = foldEngine.executeComponentLocalUnfold(c01);
+if (!unfoldRes || !unfoldRes.success) throw new Error('executeComponentLocalUnfold failed');
+
+if (!cy.getElementById('c_place_only').inside()) {
+  throw new Error('c_place_only should be restored upon unfold');
+}
+if (!cy.getElementById('p_mid').inside()) {
+  throw new Error('p_mid should be restored upon unfold');
+}
+if (cy.getElementById('p_mid').data('parent') !== 'c_place_only') {
+  throw new Error('p_mid should have parent c_place_only upon unfold');
 }
 
 console.log('PASS');
