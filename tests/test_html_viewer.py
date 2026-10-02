@@ -76,9 +76,16 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_tap is not None, "Could not extract cy.on('tap', 'node') from template.html"
     tap_handler_js = m_tap.group(0)
 
-    m_vp = re.search(r'function _captureViewport\(cy\) \{.*?function _restoreViewport\(cy, zoom, pan\) \{.*?\n      \}', html, re.DOTALL)
-    assert m_vp is not None, "Could not extract viewport helper functions from template.html"
-    viewport_helpers_js = m_vp.group(0)
+    m_cap_vp = re.search(r'function _captureViewport\(cy\) \{(.*?)\n      \}', html, re.DOTALL)
+    assert m_cap_vp is not None, "Could not extract _captureViewport from template.html"
+
+    m_anc_pan = re.search(r'function _computeAnchoredPan\(currentPan, preFoldPlacePos, postFoldCompPos, zoom\) \{(.*?)\n      \}', html, re.DOTALL)
+    assert m_anc_pan is not None, "Could not extract _computeAnchoredPan from template.html"
+
+    m_res_vp = re.search(r'function _restoreViewport\(cy, zoom, pan\) \{(.*?)\n      \}', html, re.DOTALL)
+    assert m_res_vp is not None, "Could not extract _restoreViewport from template.html"
+
+    viewport_helpers_js = f"{m_cap_vp.group(0)}\n\n      {m_anc_pan.group(0)}\n\n      {m_res_vp.group(0)}"
 
     m_fold_reduce = re.search(r'function handleFoldReduction\(node, fallbackType\) \{(.*?)\n      \}', html, re.DOTALL)
     assert m_fold_reduce is not None, "Could not extract handleFoldReduction from template.html"
