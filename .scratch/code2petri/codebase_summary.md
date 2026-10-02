@@ -31,10 +31,13 @@ code2flow/
 │   ├── python_walker.py           # Python AST walker implementing WalkerProtocol & variable binding extraction
 │   ├── javascript_walker.py       # JavaScript Acorn AST walker implementing WalkerProtocol & variable binding extraction
 │   ├── fold.py                    # Structural component detection, fold reduction engine, & SM computation (Tickets 17-18)
-│   ├── inline.py                  # Inline expansion engine, composite net splicing, & recursion guard (Ticket 19)
-│   ├── viewer/                    # Interactive offline HTML viewer generator & embedded assets (Ticket 21)
-│   │   ├── __init__.py            # HTML generator dispatch (`generate_html`)
-│   │   ├── template.html          # Standalone Cytoscape.js player template with Dagre animations
+│   ├── inline.py                  # Inline expansion engine, composite net splicing, & parent hierarchy assembly (Tickets 19, 29)
+│   ├── viewer/                    # Interactive offline HTML viewer generator & embedded assets (Tickets 21, 29-42)
+│   │   ├── __init__.py            # HTML generator dispatch (`generate_html`) with modular script injection
+│   │   ├── template.html          # Streamlined Cytoscape.js player template with Dagre animations & floating HUD
+│   │   ├── engine/                # Extracted client-side Live Fold & PNML export engines (Phase 2.7)
+│   │   │   ├── reduction_engine.js # Ported ProM/Lassen LiveFoldReductionEngine (2,500 lines)
+│   │   │   └── pnml_exporter.js   # Client-Side PNML export serializer (236 lines)
 │   │   └── vendor/                # Embedded minified client libraries (cytoscape.min.js, dagre.min.js, cytoscape-dagre.js)
 │   └── engine.py                  # Pipeline orchestrator, CLI (`code2petri`), `--context` file discovery & Graphviz renderer
 ├── docs/                          # Architecture decision records and specifications
@@ -42,20 +45,21 @@ code2flow/
 │       ├── 0001-constructor-only-variable-resolution.md # ADR on constructor-only variable binding resolution
 │       ├── 0002-boundary-place-unification.md           # ADR on boundary place unification for bipartite graph integrity
 │       └── 0003-adopt-prom-local-reduction-algorithm.md # ADR on adopting ProM local reduction algorithms
-├── tests/                         # Comprehensive unit, integration, & validation test suites (366 passing tests)
+├── tests/                         # Comprehensive unit, integration, & validation test suites (over 400 passing tests)
 │   ├── petri_assertions.py        # Shared structural assertion utilities for Petri nets
-│   ├── test_petri_model.py        # Tests for Place, Transition, Arc, PetriNet, CallResolution, and serializers
+│   ├── test_petri_model.py        # Tests for Place, Transition, Arc, PetriNet, CompoundContainer, and serializers
 │   ├── test_walker_protocol.py    # Contract adherence & instantiation tests for WalkerProtocol & WalkResult
 │   ├── test_python_walker.py      # Python control-flow walker & variable binding unit tests
 │   ├── test_javascript_walker.py  # JavaScript control-flow walker & variable binding unit & integration tests
 │   ├── test_symbol_table.py       # Multi-file symbol table indexing and resolution unit tests
 │   ├── test_context_pipeline.py   # CLI `--context` ingestion and multi-format serialization integration tests
 │   ├── test_game_of_life_validation.py # End-to-end multi-file validation suite against GameOfLife Simulator
-│   ├── test_fold_detection.py     # Structural component detection & FoldConfig tests (Ticket 17, 23, 24)
-│   ├── test_fold_reduction.py     # Fold reduction engine & SM computation tests (Ticket 18, 23, 24)
-│   ├── test_inline_expansion.py   # Inline expansion engine & recursion guard tests (Ticket 19, 22)
+│   ├── test_fold_detection.py     # Structural component detection & FoldConfig tests (Tickets 17, 23, 24)
+│   ├── test_fold_reduction.py     # Fold reduction engine & SM computation tests (Tickets 18, 23, 24)
+│   ├── test_inline_expansion.py   # Inline expansion engine, composite assembly, & recursion guard tests (Tickets 19, 22, 29)
 │   ├── test_cli_fold_inline.py    # CLI integration tests for --fold, --inline, and headless exports (Ticket 20)
-│   ├── test_html_viewer.py        # Self-contained offline HTML viewer generation & DOM tests (Ticket 21, 25-27)
+│   ├── test_html_viewer.py        # Offline HTML viewer, composite boot, live fold, HUD, & export DOM tests (Tickets 21, 25-42, 98 tests)
+│   ├── test_live_fold_prototype.py # Headless Node.js tests for prototype runner & engine scripts (Tickets 32-42, 6 tests)
 │   ├── test_petri_if_branching.py # Python if/elif/else branching tests
 │   ├── test_petri_loops.py        # Python while/for loop tests
 │   ├── test_petri_try.py          # Python try/except/finally tests
@@ -67,8 +71,8 @@ code2flow/
 └── .scratch/code2petri/           # Local documentation, grand roadmap, specs, issues, and review logs
     ├── codebase_summary.md        # This document
     ├── grand_plan.md              # Grand roadmap from Phase 1 to Phase 6
-    ├── issues/                    # Detailed ticket task specifications (Tickets 01–28)
-    ├── specs/                     # Master phase specifications (Phases 1, 2, 2.5, 2.6)
+    ├── issues/                    # Detailed ticket task specifications (Tickets 01–42)
+    ├── specs/                     # Master phase specifications (Phases 1, 2, 2.5, 2.6, 2.7)
     └── reviews/                   # Two-axis code review audit reports
 ```
 
@@ -167,17 +171,33 @@ Splices resolved callee subnets into caller Petri nets at the data-model level:
 - **Boundary Place Unification ([ADR 0002](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0002-boundary-place-unification.md))**:
   - Callee source place is unified into caller call transition preset place; callee sink place is unified into caller call transition postset place.
   - Preserves bipartite graph validity ($F \\subseteq (P \\times T) \\cup (T \\times P)$) without illegal place-to-place arcs.
+- **Composite Net Pre-Assembly (Ticket 29)**:
+  - Generates full composite nets where inlined callees are registered as `CompoundContainer` objects with hierarchical pointers (`parent`, `enclosing_function`).
+  - Embeds parent pointers directly onto nodes and edges for Cytoscape compound layout.
 - **Recursion Guard**:
   - Maintains vertical call-stack set during recursive descent.
   - Halts expansion when callee frame is present in active stack, marking call transition with `metadata={"recursive_cycle": True}`.
   - Honors `CallSite.is_callback_loop` to halt browser game loops (`requestAnimationFrame`).
-- **Depth Capping**: Configurable via `--inline-depth=N` (defaults to 1).
+- **Depth Capping**: Configurable via `--inline-depth=N` (defaults to 1; supports `None` for recursive expansion to fixpoint).
 
 ### 8. `code2petri/viewer/` (Self-Contained Offline HTML Viewer)
 Generates single-file standalone interactive visualization using Cytoscape.js and Dagre layout:
-- **`generate_html(net_or_fold, title)`**: Inlines HTML template, minified vendor JS (`cytoscape.min.js`, `dagre.min.js`, `cytoscape-dagre.js`), and pre-computed JSON snapshots into a zero-dependency `.html` document.
-- **Interactive Controls**: Bidirectional step playback (`Fold`, `Unfold`, `Reset`), slider navigation, step counter, live SM score display, and contextual step inspection panel (`#info-panel`).
-- **Morphing Animations**: Configured with 350ms Dagre layout transitions preserving node coordinates across step snapshots for smooth visual collapse/expansion.
+- **`generate_html(net_or_fold, title)`**: Inlines `template.html`, minified vendor JS (`cytoscape.min.js`, `dagre.min.js`, `cytoscape-dagre.js`), and modular engine scripts (`reduction_engine.js`, `pnml_exporter.js`) into a zero-dependency `.html` document. Strictly typed for `Union[PetriNet, FoldResult]`.
+- **Boot-to-Composite on Load (Ticket 30)**: In composite mode, boots immediately with all inlined callees nested inside visual Cytoscape compound nodes.
+- **Floating HUD Popover (Ticket 41)**: Left-clicking a transition or component opens a metadata HUD displaying tau weight, component type, source line number, and running SM score as compact stat pills, with semantic node renaming (`applyComponentNodeRename`).
+- **Interactive Controls**: Viewport drag panning (right/middle click), cursor-anchored scroll zoom, and left-click place fold triggers.
+
+### 9. `code2petri/viewer/engine/` (Client-Side Live Fold & PNML Engines — Phase 2.7)
+Modularized browser-side execution engine extracted from `template.html` (Tickets 29–42):
+- **`LiveFoldReductionEngine` ([`reduction_engine.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/reduction_engine.js))**:
+  - **Place-Centric Live Fold**: Single-Place Contraction ($1 \to 1 \to 1$), Choice Reduction with branch symmetry multiplier $\text{diff}(X)$, and While Loop reduction.
+  - **SESE & Knot Reductions**: Bidirectional BFS reachability, Marked Graph Contraction, State Machine Contraction, Well-Structured SESE Reduction, and Unstructured Knot Isolation with ProM penalty formula ($5 \times (||F_C| - (|P_C| + |T_C|)| + 1)$).
+  - **Collapsed Compound State**: Automatically converts compound containers into compact folder tiles labeled `function_name (c_XX)` when internal logic is fully folded.
+  - **Component-Local Unfold**: Right-clicking any opaque transition or collapsed compound restores the exact consumed subgraph and boundary arcs (non-linear local undo), using Lowest Common Ancestor (LCA) to preserve parent container hierarchy.
+  - **Real-Time Structuredness Metric**: Live recalculation of transition weights ($\tau$), penalties ($\omega$), and global SM score upon every fold and unfold action.
+- **Client-Side PNML Exporter ([`pnml_exporter.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/pnml_exporter.js))**:
+  - `exportClientSidePnml(cy, filename)`: Converts on-screen Cytoscape elements (reflecting live folds and user-renamed labels) into standard ISO/IEC 15909-2 compliant PNML XML.
+  - Triggers pure client-side file download via Blob URL without server dependencies, importable directly into ProM.
 
 ---
 

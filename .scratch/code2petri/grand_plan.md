@@ -1,6 +1,6 @@
 # code2petri — Grand Roadmap to Unity/Unreal Analysis
 
-### Current State (Tickets 01–27 Complete — Phases 1, 2, 2.5 & 2.6 Delivered)
+### Current State (Tickets 01–42 Complete — Phases 1, 2, 2.5, 2.6 & 2.7 Delivered)
 
 We have a fully working, multi-language `code2petri` CLI and Python package that:
 - Parses **Python (`.py`)** and **JavaScript (`.js`)** source files, targeting individual functions, methods, callbacks, or global scripts.
@@ -26,11 +26,18 @@ We have a fully working, multi-language `code2petri` CLI and Python package that
 - Features **ProM Local Reduction Port & Interactive Compound Subnet Expansion** (Phase 2.6):
   - Ports Java ProM local reduction algorithms ([ADR 0003](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/docs/adr/0003-adopt-prom-local-reduction-algorithm.md)): Single-Place Contraction ($1 \to 1 \to 1$), Atomic Choice Collapse (1.5x symmetry multiplier), and bidirectional SESE reachability, naturally normalizing AST branch routing places without spurious unstructured penalties.
   - Resolves nested call sites inside inlined callee subnets against the `SymbolTable`, coloring them green (`#2e7d32`).
-  - Self-contained, offline Cytoscape.js HTML viewer (`code2petri/viewer/template.html`): embeds pre-computed callee net payloads (`callee_nets_json`), enabling interactive client-side compound subnet expansion on resolved calls with boundary place rewiring and Dagre animation, operating independently of the global fold slider.
-  - Overhauled viewer interaction: current file badge, dual-button viewport drag panning (right & middle click), scroll wheel zoom with cursor-anchored scaling, and left-click node dragging (`autoungrabify: false`).
+  - Self-contained, offline Cytoscape.js HTML viewer (`code2petri/viewer/template.html`): embeds pre-computed callee net payloads (`callee_nets_json`), enabling interactive client-side compound subnet expansion on resolved calls with boundary place rewiring and Dagre animation.
+- Delivers **Live Fold Reduction & Interactive Composite Viewer** (Phase 2.7):
+  - Boots into a fully-expanded composite view on load, rendering all inlined functions nested inside visual compound nodes (`enclosing_function` / `parent` hierarchy).
+  - Implements the complete suite of ProM & Lassen reduction rules directly in JavaScript: Place-Centric Live Fold (Single-Place Contraction for Sequence, Choice Reduction with branch symmetry multiplier, While Loop), plus macro SESE contractions (Marked Graph, State Machine, Well-Structured SESE, and Unstructured Knot isolation).
+  - Automates **Collapsed Compound State**: when all internal nodes of an inlined function are reduced to a single component, the container automatically transitions into a compact tile labeled `function_name (c_XX)`.
+  - Implements non-linear **Component-Local Unfold**: right-clicking any opaque transition or collapsed compound instantly restores the exact subgraph and boundary arcs consumed without disturbing folds elsewhere.
+  - Features **Floating HUD Popover**: left-clicking a transition or component opens a metadata HUD displaying tau weight, component type, source line number range, and live SM score, with editable semantic renaming (`renameNode`).
+  - Implements **Client-Side Export**: downloads the current on-screen canvas state as standard ISO/IEC 15909-2 compliant PNML without server roundtrips, ready for direct analysis in tools like ProM.
+  - Modularized frontend architecture: extracted `code2petri/viewer/engine/reduction_engine.js` (2,500 lines) and `pnml_exporter.js` (236 lines), eliminating ~3,000 lines of inlined JS from `template.html`.
 - Outputs PNML (ISO/IEC 15909 compliant XML), Graphviz DOT, JSON, PNG, SVG, and interactive self-contained offline HTML.
-- Fully verified with **366 passing unit, integration, and cross-file validation tests**, including end-to-end multi-file validation on real-world targets ([GameOfLife_Simulator](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator): `app.js` and `webgl-engine.js`).
-- Concluded code reviews through Ticket 27 with **0 Hard Violations**, **0 Missing Requirements**, and **0 Logic Defects**.
+- Fully verified with **over 400 unit, integration, and cross-file validation tests** (including 104 headless viewer DOM and prototype tests), with multi-file validation on real-world targets ([GameOfLife_Simulator](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator): `app.js` and `webgl-engine.js`).
+- Concluded code reviews through Ticket 42 with **0 Hard Violations**, **0 Missing Requirements**, and **0 Logic Defects**.
 
 ## End Goal
 
@@ -42,7 +49,7 @@ Run `code2petri` against an entire **Unity (C#)** or **Unreal Engine (C++)** pro
 
 ### Primary Validation Target
 
-**[GameOfLife_Simulator](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824@gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator)** — a 2-file JavaScript project:
+**[GameOfLife_Simulator](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator)** — a 2-file JavaScript project:
 - [app.js](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator/app.js) (182 lines): global functions (`init`, `loop`, `stepCpu`, `countNeighbors`, etc.) + event listeners
 - [webgl-engine.js](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator/webgl-engine.js) (216 lines): `WebGLEngine` class with methods (`step`, `randomize`, `drawToScreen`, etc.)
 
@@ -57,9 +64,9 @@ graph LR
     P1["Phase 1 ✅\nJS Walker +\nAbstraction Layer"] --> P2["Phase 2 ✅\nCross-File\nReference Tracing"]
     P2 --> P25["Phase 2.5 ✅\nFolding Engine,\nSM Metric & Viewer"]
     P25 --> P26["Phase 2.6 ✅\nProM Port & Interactive\nCompound Expansion"]
-    P26 --> T28["Ticket 28 ⏳\nDeep Expand All\nControls"]
-    T28 --> P3["Phase 3\nC# Walker +\nUnity Lifecycle"]
-    T28 --> P4["Phase 4\nC++ Walker +\nUnreal Lifecycle"]
+    P26 --> P27["Phase 2.7 ✅\nLive Fold Reduction,\nLocal Unfold & Export"]
+    P27 --> P3["Phase 3\nC# Walker +\nUnity Lifecycle"]
+    P27 --> P4["Phase 4\nC++ Walker +\nUnreal Lifecycle"]
     P3 --> P5["Phase 5\nProject-Scale\nComposite Nets"]
     P4 --> P5
     P5 --> P6["Phase 6 — Future\nColoured Petri Nets\nGame State Modeling"]
@@ -67,7 +74,7 @@ graph LR
     style P2 fill:#2d6a2d,color:#fff
     style P25 fill:#2d6a2d,color:#fff
     style P26 fill:#2d6a2d,color:#fff
-    style T28 fill:#148f77,color:#fff
+    style P27 fill:#2d6a2d,color:#fff
     style P6 stroke-dasharray: 5 5
 ```
 
@@ -298,17 +305,65 @@ While Phase 2.5 established baseline folding, maximal pattern matching failed on
 
 ---
 
-## Upcoming: Ticket 28 — Multi-Level Deep Expand All Resolved Calls Control
+---
 
-### Motivation & Requirements
+## Phase 2.7 — Live Fold Reduction & Interactive Viewer Architecture (Completed — Tickets 29–42)
 
-While Ticket 25 enables interactive point-and-click expansion of individual resolved calls, exploring large architectures requires manually clicking each transition. Ticket 28 provides an immediate, total unrolled project overview:
+### Motivation & Problem Statement
 
-1. **Backend Precomputation**: `precompute_callee_nets` recursively discovers and embeds callee nets to the full transitive closure across all nesting levels (guarded against recursive cycles).
-2. **Dedicated UI Control**: Adds an "Expand All" / "Collapse All" button in the viewer header next to the navigation controls.
-3. **Fixed-Point Transitive Expansion**: Clicking "Expand All" repeatedly identifies and unrolls unexpanded resolved call transitions across all visible subnets until a fixed point is reached.
-4. **Single Layout Re-run**: Runs the `dagre` layout once after full multi-level expansion finishes, laying out nested compound hierarchies cleanly without intermediate layout thrashing.
-5. **Collapse All**: Collapses all compound nodes back to the top-level root net in a single action.
+Prior to Phase 2.7, reduction logic was strictly segregated into the Python backend. The HTML viewer operated as a linear playback mechanism (the fold slider) displaying pre-computed fold steps. This imposed a rigid, top-down exploration experience:
+1. Users could not selectively fold local subnets or clean up messy knots in their preferred order.
+2. Inlined callee subnets could not be interactively reduced once opened.
+3. The linear undo slider reverted all folds globally rather than supporting non-linear, localized undo.
+4. Users could not rename opaque component nodes or export the simplified interactive net to external tools like ProM.
+
+Phase 2.7 fundamentally rearchitected the viewer around **Live Fold Reduction**, porting the entire reduction engine into JavaScript and booting directly into a fully-expanded composite view.
+
+> [!NOTE]
+> **Resolution of Ticket 28 (Deep Expand All):**  
+> Ticket 28 originally planned an "Expand All" toolbar button. In Phase 2.7, this was superseded by an architecturally superior design: **Boot-to-Composite on Load** (Tickets 29–30). The backend pre-assembles the complete composite net, embedding all nested inlined functions inside visual compound nodes from the start. Users get the full transitive call hierarchy on first open without intermediate layout thrashing.
+
+### Key Architectural Achievements (Tickets 29–42)
+
+#### 1. Backend Composite Assembly & Parent Hierarchy (Tickets 29–30)
+- [`code2petri/inline.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/inline.py) pre-assembles the entire composite net with recursive inlining, embedding parent pointers (`parent`) and function ownership (`enclosing_function`).
+- Added [`CompoundContainer`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/model.py#L49) dataclass to the Petri net domain model.
+- HTML viewer boots directly into the fully-expanded composite graph, displaying all nested inlined functions inside visual Cytoscape compound nodes on initial load.
+
+#### 2. Viewport Ergonomics & Place-Centric Live Fold (Tickets 31–34)
+- **Viewport Input Remapping (Ticket 31)**: Right/middle-click drag reserved for canvas panning, free scroll-wheel zooming, and left-click dedicated to node interactions.
+- **Single-Place Contraction for Sequence (Ticket 32)**: Left-clicking an unbranched routing place ($1 \to 1 \to 1$) dynamically contracts it into an opaque transition ($t_C$), updating transition weights ($\tau$) and component penalties ($\omega$) in real time.
+- **Choice Reduction (Ticket 33)**: Implements "whole-node style" Choice reduction, fusing parallel branches sharing input/output places into a single component with branch symmetry multiplier $\text{diff}(X)$.
+- **While Loop Reduction (Ticket 34)**: Detects elementary cycles and contracts loop body transitions into an opaque component while preserving loop head and exit places.
+
+#### 3. Macro SESE & Structural Reductions (Tickets 35–38)
+- **Bidirectional SESE Reachability (Ticket 35)**: Ported BFS forward/backward reachability intersection from Java ProM to identify Single-Entry Single-Exit (SESE) subnets in JavaScript.
+- **Marked Graph & State Machine Contractions (Ticket 36)**: Detects and contracts marked graph regions (synchronization patterns) and state machine regions (choice patterns).
+- **Well-Structured SESE Reduction (Ticket 37)**: Collapses general structured subnets free of PT/TP handles and internal cycles.
+- **Unstructured Knot Isolation (Ticket 38)**: When no structured rule applies, the engine isolates and collapses only the minimal internal SESE knot containing the irreducible cycle using ProM's penalty formula ($5 \times (||F_C| - (|P_C| + |T_C|)| + 1)$), leaving surrounding structured control flow intact.
+- Unified detection via `LiveFoldReductionEngine.STRUCTURAL_DETECTORS` strategy array following Lassen Definition 21 precedence.
+
+#### 4. Collapsed Compound State & Component-Local Unfold (Tickets 39–40)
+- **Collapsed Compound State (Ticket 39)**: When all internal nodes of an inlined function are reduced to a single component, the compound container automatically transitions into a "closed folder" tile displaying `function_name (c_XX)`.
+- **Component-Local Unfold (Ticket 40)**: Right-clicking any opaque transition or collapsed compound restores the exact subgraph and boundary arcs it consumed, without affecting folds made elsewhere on the canvas (non-linear local undo). Computes Lowest Common Ancestor (LCA) to preserve parent container hierarchy across boundaries.
+
+#### 5. Component Node Renaming HUD & Client-Side PNML Export (Tickets 41–42)
+- **Floating HUD Popover (Ticket 41)**: Left-clicking a transition or component opens a floating popover displaying tau weight, component type, source line numbers, and running SM score as compact stat pills. Includes an editable text field (`applyComponentNodeRename`) that renames the node immediately and persists the custom label across unfold and re-fold cycles.
+- **Client-Side Export (Ticket 42)**: An "Export PNML" toolbar button downloads the canvas as standard ISO/IEC 15909-2 compliant XML (`exportClientSidePnml`), faithfully reflecting live folds and renamed labels, importable into external tools like ProM without server dependencies.
+
+#### 6. Frontend Engine Modularization & Code Reviews
+- Extracted [`reduction_engine.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/reduction_engine.js) (2,500 lines) and [`pnml_exporter.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/pnml_exporter.js) (236 lines) into `code2petri/viewer/engine/`.
+- Reduced [`template.html`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/template.html) from ~4,500 lines to ~1,800 lines, eliminating the monolithic Divergent Change smell.
+- Concluded 3 rounds of comprehensive two-axis code reviews with **0 Hard Standards Violations**, **0 Missing Requirements**, and **0 Logic Defects**.
+
+### Deliverables Summary
+
+- [`code2petri/viewer/engine/reduction_engine.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/reduction_engine.js) — Full JavaScript live fold reduction engine
+- [`code2petri/viewer/engine/pnml_exporter.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/pnml_exporter.js) — Client-side PNML XML serializer & export utility
+- [`code2petri/viewer/template.html`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/template.html) — Streamlined HTML viewer with HUD popover, composite boot, and live fold triggers
+- [`code2petri/model.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/model.py) — `CompoundContainer` domain model
+- [`code2petri/inline.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/inline.py) — Composite net assembly with parent hierarchy injection
+- Test suites: **104 passing tests** in [`tests/test_html_viewer.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_html_viewer.py) and [`tests/test_live_fold_prototype.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_live_fold_prototype.py); over 400 total tests passing repository-wide.
 
 ---
 
@@ -632,13 +687,16 @@ graph TD
     P26B --> P26C["2.6C: ProM loops\n& SESE port ✅"]
     P26C --> P26D["2.6D: Interactive compound\nexpansion & controls ✅"]
     
-    P26D --> T28["Ticket 28: Deep\nExpand All control ⏳"]
+    P26D --> P27A["2.7A: Composite boot &\nparent hierarchy ✅"]
+    P27A --> P27B["2.7B: JS Live Fold &\nSESE macro engines ✅"]
+    P27B --> P27C["2.7C: Component-Local Unfold &\nCollapsed Compound ✅"]
+    P27C --> P27D["2.7D: Renaming HUD &\nClient-Side Export ✅"]
     
-    T28 --> P3A["3A: C# walker"]
+    P27D --> P3A["3A: C# walker"]
     P3A --> P3B["3B: Unity lifecycle"]
     P3B --> P3C["3C: Unity call patterns"]
     
-    T28 --> P4A["4A: C++ walker"]
+    P27D --> P4A["4A: C++ walker"]
     P4A --> P4B["4B: UE preprocessor"]
     P4B --> P4C["4C: UE lifecycle"]
     P4C --> P4D["4D: UE event dispatchers"]
@@ -670,11 +728,11 @@ graph TD
     style P26B fill:#2d6a2d,color:#fff
     style P26C fill:#2d6a2d,color:#fff
     style P26D fill:#2d6a2d,color:#fff
-    style T28 fill:#148f77,color:#fff
+    style P27A fill:#2d6a2d,color:#fff
+    style P27B fill:#2d6a2d,color:#fff
+    style P27C fill:#2d6a2d,color:#fff
+    style P27D fill:#2d6a2d,color:#fff
     style P3A fill:#b7950b,color:#fff
-    style P3B fill:#b7950b,color:#fff
-    style P3C fill:#b7950b,color:#fff
-    style P4A fill:#a04000,color:#fff
     style P3B fill:#b7950b,color:#fff
     style P3C fill:#b7950b,color:#fff
     style P4A fill:#a04000,color:#fff
@@ -727,9 +785,8 @@ graph TD
 > → Evaluate after first attempt on a real UE project.
 
 > [!NOTE]
-> **Q4 (Phase 2.5C): Client-side selective folding.**
-> The v1 viewer only plays back pre-computed greedy fold steps. Selective folding (click a component → fold just that one) requires reimplementing the fold algorithm in JavaScript.
-> → Evaluate as a stretch goal after v1 viewer ships.
+> **Q4 (Phase 2.5C / Phase 2.7): Client-side selective folding & local unfold.**
+> **Resolved & Delivered in Phase 2.7 (Tickets 29–42):** Full client-side Live Fold Reduction engine implemented in JavaScript with Place-Centric folding, SESE macro contractions, non-linear Component-Local Unfold, HUD node renaming, and client-side PNML export.
 
 > [!NOTE]
 > **Q5 (Phase 5B): How to define "system" boundaries for system-level nets.**
@@ -744,10 +801,10 @@ graph TD
 | Phase 2 — Cross-file tracing | 5 tickets (Tickets 11–15) | 6 review rounds | ✅ Complete |
 | Phase 2.5 — Structural folding & viewer | 6 tickets (Tickets 16–21) | 3 review rounds | ✅ Complete |
 | Phase 2.6 — ProM port & compound expansion | 6 tickets (Tickets 22–27) | 4 review rounds | ✅ Complete |
-| Ticket 28 — Deep Expand All control | 1 ticket (Ticket 28) | 1 review round | ⏳ Active Next |
-| Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned |
+| Phase 2.7 — Live Fold Reduction & Viewer | 14 tickets (Tickets 29–42) | 12 review rounds | ✅ Complete |
+| Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned Next |
 | Phase 4 — C++ + Unreal | 5–6 tickets | 3–4 sessions | Planned |
 | Phase 5 — Project-scale | 4–5 tickets | 2–3 sessions | Planned |
-| **Phases 1–5 Total** | **~31–36 tickets** | **~15–21 sessions** | |
+| **Phases 1–5 Total** | **~44–50 tickets** | **~25–30 sessions** | |
 | Phase 6 — CPN (future) | 4–6 tickets | 3–5 sessions | Future |
-| **Grand Total (incl. future)** | **~35–42 tickets** | **~18–26 sessions** | |
+| **Grand Total (incl. future)** | **~48–56 tickets** | **~28–35 sessions** | |
