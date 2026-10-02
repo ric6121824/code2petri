@@ -76,17 +76,6 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_tap is not None, "Could not extract cy.on('tap', 'node') from template.html"
     tap_handler_js = m_tap.group(0)
 
-    m_cap_vp = re.search(r'function _captureViewport\(cy\) \{(.*?)\n      \}', html, re.DOTALL)
-    assert m_cap_vp is not None, "Could not extract _captureViewport from template.html"
-
-    m_anc_pan = re.search(r'function _computeAnchoredPan\(currentPan, preFoldPlacePos, postFoldCompPos, zoom\) \{(.*?)\n      \}', html, re.DOTALL)
-    assert m_anc_pan is not None, "Could not extract _computeAnchoredPan from template.html"
-
-    m_res_vp = re.search(r'function _restoreViewport\(cy, zoom, pan\) \{(.*?)\n      \}', html, re.DOTALL)
-    assert m_res_vp is not None, "Could not extract _restoreViewport from template.html"
-
-    viewport_helpers_js = f"{m_cap_vp.group(0)}\n\n      {m_anc_pan.group(0)}\n\n      {m_res_vp.group(0)}"
-
     m_fold_reduce = re.search(r'function handleFoldReduction\(node, fallbackType\) \{(.*?)\n      \}', html, re.DOTALL)
     assert m_fold_reduce is not None, "Could not extract handleFoldReduction from template.html"
     fold_reduce_js = m_fold_reduce.group(0)
@@ -105,6 +94,10 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
 
     return f"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const {{ _captureViewport, _computeAnchoredPan, _restoreViewport }} = require('./code2petri/viewer/engine/viewport.js');
+global._captureViewport = _captureViewport;
+global._computeAnchoredPan = _computeAnchoredPan;
+global._restoreViewport = _restoreViewport;
 
 {net_to_elements_js}
 {sese_js}
@@ -284,8 +277,6 @@ const foldEngine = new LiveFoldReductionEngine(cy);
 
 {update_highlights_js}
 updateFoldableHighlights();
-
-{viewport_helpers_js}
 
 {fold_reduce_js}
 
@@ -5313,6 +5304,100 @@ console.log('PASS');
 """
         node_script = _setup_live_fold_test_harness(self._SIMPLE_SEQUENCE_NET_LITERAL, test_logic)
         proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+
+
+class TestViewportModule(unittest.TestCase):
+    """Unit tests for the modularized code2petri/viewer/engine/viewport.js module."""
+
+    def test_engine_scripts_bundle_contains_viewport(self):
+        """Verifies that _load_engine_scripts() includes the viewport module."""
+        from code2petri.viewer import _load_engine_scripts, _load_template
+        scripts = _load_engine_scripts()
+        self.assertIn("Viewport Management Module for code2petri", scripts)
+        self.assertIn("_captureViewport", scripts)
+        self.assertIn("_computeAnchoredPan", scripts)
+        self.assertIn("_restoreViewport", scripts)
+
+        template = _load_template()
+        self.assertIn("Viewport Management Module for code2petri", template)
+
+    def test_viewport_module_node_exports(self):
+        """Verifies that viewport.js exports all expected functions under CommonJS / Node.js."""
+        script = """
+const vp = require('./code2petri/viewer/engine/viewport.js');
+const expectedFns = [
+  '_captureViewport',
+  '_computeAnchoredPan',
+  '_restoreViewport',
+  'captureViewport',
+  'computeAnchoredPan',
+  'restoreViewport'
+];
+for (const fn of expectedFns) {
+  if (typeof vp[fn] !== 'function') {
+    throw new Error(`Missing expected export function: ${fn}`);
+  }
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_viewport_engine_attachment(self):
+        """Verifies that viewport.js attaches to LiveFoldReductionEngine.viewport when engine is loaded."""
+        script = """
+const { LiveFoldReductionEngine } = require('./code2petri/viewer/engine/reduction_engine.js');
+global.LiveFoldReductionEngine = LiveFoldReductionEngine;
+const vp = require('./code2petri/viewer/engine/viewport.js');
+
+if (!LiveFoldReductionEngine.viewport) {
+  throw new Error('LiveFoldReductionEngine.viewport was not attached');
+}
+if (typeof LiveFoldReductionEngine.viewport.capture !== 'function') {
+  throw new Error('LiveFoldReductionEngine.viewport.capture is not a function');
+}
+if (typeof LiveFoldReductionEngine.viewport.computeAnchoredPan !== 'function') {
+  throw new Error('LiveFoldReductionEngine.viewport.computeAnchoredPan is not a function');
+}
+if (typeof LiveFoldReductionEngine.viewport.restore !== 'function') {
+  throw new Error('LiveFoldReductionEngine.viewport.restore is not a function');
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_compute_anchored_pan_math_invariance(self):
+        """Verifies that _computeAnchoredPan maintains screen coordinate invariance."""
+        script = """
+const { _computeAnchoredPan } = require('./code2petri/viewer/engine/viewport.js');
+
+const zoom = 1.75;
+const currentPan = { x: 100, y: -50 };
+const preFoldPos = { x: 200, y: 150 };
+const postFoldPos = { x: 240, y: 180 };
+
+const anchoredPan = _computeAnchoredPan(currentPan, preFoldPos, postFoldPos, zoom);
+
+const preScreenX = preFoldPos.x * zoom + currentPan.x;
+const preScreenY = preFoldPos.y * zoom + currentPan.y;
+const postScreenX = postFoldPos.x * zoom + anchoredPan.x;
+const postScreenY = postFoldPos.y * zoom + anchoredPan.y;
+
+if (Math.abs(preScreenX - postScreenX) > 1e-6) {
+  throw new Error(`Screen X mismatch: ${preScreenX} vs ${postScreenX}`);
+}
+if (Math.abs(preScreenY - postScreenY) > 1e-6) {
+  throw new Error(`Screen Y mismatch: ${preScreenY} vs ${postScreenY}`);
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 

@@ -1623,32 +1623,6 @@
       const foldEngine = new LiveFoldReductionEngine(cy);
       updateFoldableHighlights();
 
-      function _captureViewport(cy) {
-        if (!cy) return { zoom: 1, pan: { x: 0, y: 0 } };
-        const zoom = typeof cy.zoom === 'function' ? cy.zoom() : 1;
-        const pan = (typeof cy.pan === 'function' && cy.pan()) ? Object.assign({}, cy.pan()) : { x: 0, y: 0 };
-        return { zoom: zoom, pan: pan };
-      }
-
-      function _computeAnchoredPan(currentPan, preFoldPlacePos, postFoldCompPos, zoom) {
-        if (!currentPan) return { x: 0, y: 0 };
-        if (!preFoldPlacePos || !postFoldCompPos) return Object.assign({}, currentPan);
-        return {
-          x: currentPan.x + (preFoldPlacePos.x - postFoldCompPos.x) * zoom,
-          y: currentPan.y + (preFoldPlacePos.y - postFoldCompPos.y) * zoom
-        };
-      }
-
-      function _restoreViewport(cy, zoom, pan) {
-        if (!cy) return;
-        if (typeof cy.viewport === 'function') {
-          cy.viewport({ zoom: zoom, pan: pan });
-        } else {
-          if (typeof cy.zoom === 'function') cy.zoom(zoom);
-          if (typeof cy.pan === 'function') cy.pan(pan);
-        }
-      }
-
       function handleFoldReduction(node, fallbackType) {
         if (typeof foldEngine === 'undefined' || !foldEngine) return false;
         const foldType = foldEngine.getFoldType(node) || fallbackType;

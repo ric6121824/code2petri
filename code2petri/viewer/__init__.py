@@ -43,11 +43,14 @@ def _load_engine_scripts() -> str:
     engine_dir = os.path.join(viewer_dir, "engine")
     pnml_path = os.path.join(engine_dir, "pnml_exporter.js")
     engine_path = os.path.join(engine_dir, "reduction_engine.js")
+    viewport_path = os.path.join(engine_dir, "viewport.js")
     with open(pnml_path, "r", encoding="utf-8") as f:
         pnml_content = f.read()
     with open(engine_path, "r", encoding="utf-8") as f:
         engine_content = f.read()
-    return f"{pnml_content}\n\n{engine_content}"
+    with open(viewport_path, "r", encoding="utf-8") as f:
+        viewport_content = f.read()
+    return f"{pnml_content}\n\n{engine_content}\n\n{viewport_content}"
 
 
 def _load_template() -> str:
