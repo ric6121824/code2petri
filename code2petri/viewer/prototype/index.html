@@ -913,7 +913,7 @@
             nodeDimensionsIncludeLabels: true,
             spacingFactor: 1.2
           },
-          minZoom: 0.2,
+          minZoom: 0.001,
           maxZoom: 3.5,
           wheelSensitivity: 0.25,
           autoungrabify: false,
@@ -932,15 +932,26 @@
       }
 
       function runLayout(animate = true) {
+        const currentZoom = typeof cy.zoom === 'function' ? cy.zoom() : null;
+        const currentPan = (typeof cy.pan === 'function' && cy.pan()) ? Object.assign({}, cy.pan()) : null;
         const layout = cy.layout({
           name: 'dagre',
           rankDir: 'TB',
           nodeDimensionsIncludeLabels: true,
           spacingFactor: 1.2,
           animate: animate,
-          animationDuration: 300
+          animationDuration: 300,
+          fit: false
         });
         layout.run();
+        if (currentZoom !== null && currentPan !== null) {
+          if (typeof cy.viewport === 'function') {
+            cy.viewport({ zoom: currentZoom, pan: currentPan });
+          } else {
+            if (typeof cy.zoom === 'function') cy.zoom(currentZoom);
+            if (typeof cy.pan === 'function') cy.pan(currentPan);
+          }
+        }
         updateContractibleHighlights();
       }
 

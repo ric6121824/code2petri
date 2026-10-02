@@ -5143,6 +5143,96 @@ console.log('PASS');
             is_t_to_p = (src in trans_ids and tgt in place_ids)
             self.assertTrue(is_p_to_t or is_t_to_p, f"Arc {src} -> {tgt} violates bipartite Petri net property")
 
+    def test_template_min_zoom_allows_deep_zoom_out(self):
+        """Validates that template.html configures minZoom <= 0.01 to allow seeing large nets in full."""
+        html = _read_template_html()
+        m = re.search(r'minZoom:\s*([0-9.]+)', html)
+        self.assertIsNotNone(m, "minZoom setting not found in template.html")
+        min_zoom = float(m.group(1))
+        self.assertLessEqual(min_zoom, 0.01, f"Expected minZoom <= 0.01 for large graphs, got {min_zoom}")
+
+    def test_handle_fold_reduction_preserves_camera_viewport(self):
+        """Validates that handleFoldReduction preserves camera zoom and pan instead of resetting to fit default."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'p0' },
+    { id: 'p1', label: 'p1' },
+    { id: 'p2', label: 'p2' }
+  ],
+  transitions: [
+    { id: 't0', label: 't0', tau: 1.0 },
+    { id: 't1', label: 't1', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+cy.zoom(1.85);
+cy.pan({ x: 120, y: -75 });
+const initialZoom = cy.zoom();
+
+const p1 = cy.getElementById('p1');
+const foldSuccess = handleFoldReduction(p1, 'sequence');
+if (!foldSuccess) throw new Error('handleFoldReduction failed');
+
+const postZoom = cy.zoom();
+if (Math.abs(postZoom - initialZoom) > 1e-4) {
+  throw new Error(`Expected zoom to be preserved (${initialZoom}), got ${postZoom}`);
+}
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_handle_right_click_unfold_preserves_camera_viewport(self):
+        """Validates that handleRightClickUnfold preserves camera zoom and pan without resetting to fit default."""
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'p0' },
+    { id: 'p1', label: 'p1' },
+    { id: 'p2', label: 'p2' }
+  ],
+  transitions: [
+    { id: 't0', label: 't0', tau: 1.0 },
+    { id: 't1', label: 't1', tau: 1.0 }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+cy.zoom(2.15);
+cy.pan({ x: 60, y: -120 });
+const initialZoom = cy.zoom();
+
+const p1 = cy.getElementById('p1');
+handleFoldReduction(p1, 'sequence');
+const comp = cy.getElementById('c_01');
+if (!comp || comp.length === 0) throw new Error('Could not find folded component c_01');
+
+const unfoldSuccess = handleRightClickUnfold(comp);
+if (!unfoldSuccess) throw new Error('handleRightClickUnfold failed');
+
+const postZoom = cy.zoom();
+if (Math.abs(postZoom - initialZoom) > 1e-4) {
+  throw new Error(`Expected zoom to be preserved on unfold (${initialZoom}), got ${postZoom}`);
+}
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

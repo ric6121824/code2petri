@@ -1221,7 +1221,7 @@
           }
         ],
         layout: DAGRE_LAYOUT_OPTIONS,
-        minZoom: 0.2,
+        minZoom: 0.001,
         maxZoom: 3.5,
         wheelSensitivity: 0.25,
         autoungrabify: false,
@@ -1630,11 +1630,35 @@
         const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
         if (!meta || typeof meta.execute !== 'function') return false;
 
+        const currentZoom = typeof cy.zoom === 'function' ? cy.zoom() : null;
+        const currentPan = (typeof cy.pan === 'function' && cy.pan()) ? Object.assign({}, cy.pan()) : null;
+        const oldPos = (node && typeof node.position === 'function' && node.position()) ? Object.assign({}, node.position()) : null;
+
         const res = meta.execute(foldEngine, node);
         if (res && res.success) {
           if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
-            cy.layout(DAGRE_LAYOUT_OPTIONS).run();
+            cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
           }
+
+          if (currentZoom !== null && currentPan !== null) {
+            let targetPan = currentPan;
+            if (oldPos && res.node && typeof res.node.position === 'function') {
+              const newPos = res.node.position();
+              if (newPos && typeof newPos.x === 'number' && typeof newPos.y === 'number') {
+                targetPan = {
+                  x: currentPan.x + (oldPos.x - newPos.x) * currentZoom,
+                  y: currentPan.y + (oldPos.y - newPos.y) * currentZoom
+                };
+              }
+            }
+            if (typeof cy.viewport === 'function') {
+              cy.viewport({ zoom: currentZoom, pan: targetPan });
+            } else {
+              if (typeof cy.zoom === 'function') cy.zoom(currentZoom);
+              if (typeof cy.pan === 'function') cy.pan(targetPan);
+            }
+          }
+
           if (typeof updateFoldableHighlights === 'function') {
             updateFoldableHighlights();
           }
@@ -1724,10 +1748,21 @@
 
       function handleRightClickUnfold(node) {
         if (typeof foldEngine === 'undefined' || !foldEngine || !node) return false;
+        const currentZoom = typeof cy.zoom === 'function' ? cy.zoom() : null;
+        const currentPan = (typeof cy.pan === 'function' && cy.pan()) ? Object.assign({}, cy.pan()) : null;
+
         const res = foldEngine.executeComponentLocalUnfold(node);
         if (res && res.success) {
           if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
-            cy.layout(DAGRE_LAYOUT_OPTIONS).run();
+            cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
+          }
+          if (currentZoom !== null && currentPan !== null) {
+            if (typeof cy.viewport === 'function') {
+              cy.viewport({ zoom: currentZoom, pan: currentPan });
+            } else {
+              if (typeof cy.zoom === 'function') cy.zoom(currentZoom);
+              if (typeof cy.pan === 'function') cy.pan(currentPan);
+            }
           }
           if (typeof updateFoldableHighlights === 'function') {
             updateFoldableHighlights();
