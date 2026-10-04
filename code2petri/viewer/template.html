@@ -1639,8 +1639,8 @@
             cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
           }
 
-          const postFoldCompPos = (res.node && typeof res.node.position === 'function') ? res.node.position() : null;
-          const targetPan = computeAnchoredPan(viewportBefore.pan, preFoldPlacePos, postFoldCompPos, viewportBefore.zoom);
+          const postFoldTransitionPos = (res.node && typeof res.node.position === 'function') ? res.node.position() : null;
+          const targetPan = computeAnchoredPan(viewportBefore.pan, preFoldPlacePos, postFoldTransitionPos, viewportBefore.zoom);
           restoreViewport(cy, viewportBefore.zoom, targetPan);
 
           if (typeof updateFoldableHighlights === 'function') {

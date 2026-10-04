@@ -38,16 +38,16 @@
    *
    * @param {{ x: number, y: number }} currentPan
    * @param {{ x: number, y: number }} preFoldPlacePos
-   * @param {{ x: number, y: number }} postFoldCompPos
+   * @param {{ x: number, y: number }} postFoldTransitionPos
    * @param {number} zoom
    * @returns {{ x: number, y: number }}
    */
-  function computeAnchoredPan(currentPan, preFoldPlacePos, postFoldCompPos, zoom) {
+  function computeAnchoredPan(currentPan, preFoldPlacePos, postFoldTransitionPos, zoom) {
     if (!currentPan) return { x: 0, y: 0 };
-    if (!preFoldPlacePos || !postFoldCompPos) return Object.assign({}, currentPan);
+    if (!preFoldPlacePos || !postFoldTransitionPos) return Object.assign({}, currentPan);
     return {
-      x: currentPan.x + (preFoldPlacePos.x - postFoldCompPos.x) * zoom,
-      y: currentPan.y + (preFoldPlacePos.y - postFoldCompPos.y) * zoom
+      x: currentPan.x + (preFoldPlacePos.x - postFoldTransitionPos.x) * zoom,
+      y: currentPan.y + (preFoldPlacePos.y - postFoldTransitionPos.y) * zoom
     };
   }
 
@@ -70,10 +70,7 @@
   const viewportExports = {
     captureViewport,
     computeAnchoredPan,
-    restoreViewport,
-    _captureViewport: captureViewport,
-    _computeAnchoredPan: computeAnchoredPan,
-    _restoreViewport: restoreViewport
+    restoreViewport
   };
 
   const globalScope = typeof globalThis !== 'undefined' ? globalThis : (typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : null));

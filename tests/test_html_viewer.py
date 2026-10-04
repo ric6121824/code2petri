@@ -94,13 +94,10 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
 
     return f"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
-const {{ captureViewport, computeAnchoredPan, restoreViewport, _captureViewport, _computeAnchoredPan, _restoreViewport }} = require('./code2petri/viewer/engine/viewport.js');
+const {{ captureViewport, computeAnchoredPan, restoreViewport }} = require('./code2petri/viewer/engine/viewport.js');
 global.captureViewport = captureViewport;
 global.computeAnchoredPan = computeAnchoredPan;
 global.restoreViewport = restoreViewport;
-global._captureViewport = _captureViewport;
-global._computeAnchoredPan = _computeAnchoredPan;
-global._restoreViewport = _restoreViewport;
 
 {net_to_elements_js}
 {sese_js}
@@ -5334,10 +5331,7 @@ const vp = require('./code2petri/viewer/engine/viewport.js');
 const expectedFns = [
   'captureViewport',
   'computeAnchoredPan',
-  'restoreViewport',
-  '_captureViewport',
-  '_computeAnchoredPan',
-  '_restoreViewport'
+  'restoreViewport'
 ];
 for (const fn of expectedFns) {
   if (typeof vp[fn] !== 'function') {
@@ -5378,24 +5372,19 @@ console.log('PASS');
     def test_compute_anchored_pan_math_invariance(self):
         """Verifies that computeAnchoredPan maintains screen coordinate invariance."""
         script = """
-const { computeAnchoredPan, _computeAnchoredPan } = require('./code2petri/viewer/engine/viewport.js');
+const { computeAnchoredPan } = require('./code2petri/viewer/engine/viewport.js');
 
 const zoom = 1.75;
 const currentPan = { x: 100, y: -50 };
 const preFoldPos = { x: 200, y: 150 };
-const postFoldPos = { x: 240, y: 180 };
+const postFoldTransitionPos = { x: 240, y: 180 };
 
-const anchoredPan = computeAnchoredPan(currentPan, preFoldPos, postFoldPos, zoom);
-const anchoredPanLegacy = _computeAnchoredPan(currentPan, preFoldPos, postFoldPos, zoom);
-
-if (anchoredPan.x !== anchoredPanLegacy.x || anchoredPan.y !== anchoredPanLegacy.y) {
-  throw new Error('Legacy alias and canonical computeAnchoredPan returned different results');
-}
+const anchoredPan = computeAnchoredPan(currentPan, preFoldPos, postFoldTransitionPos, zoom);
 
 const preScreenX = preFoldPos.x * zoom + currentPan.x;
 const preScreenY = preFoldPos.y * zoom + currentPan.y;
-const postScreenX = postFoldPos.x * zoom + anchoredPan.x;
-const postScreenY = postFoldPos.y * zoom + anchoredPan.y;
+const postScreenX = postFoldTransitionPos.x * zoom + anchoredPan.x;
+const postScreenY = postFoldTransitionPos.y * zoom + anchoredPan.y;
 
 if (Math.abs(preScreenX - postScreenX) > 1e-6) {
   throw new Error(`Screen X mismatch: ${preScreenX} vs ${postScreenX}`);
