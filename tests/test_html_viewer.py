@@ -94,7 +94,10 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
 
     return f"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
-const {{ _captureViewport, _computeAnchoredPan, _restoreViewport }} = require('./code2petri/viewer/engine/viewport.js');
+const {{ captureViewport, computeAnchoredPan, restoreViewport, _captureViewport, _computeAnchoredPan, _restoreViewport }} = require('./code2petri/viewer/engine/viewport.js');
+global.captureViewport = captureViewport;
+global.computeAnchoredPan = computeAnchoredPan;
+global.restoreViewport = restoreViewport;
 global._captureViewport = _captureViewport;
 global._computeAnchoredPan = _computeAnchoredPan;
 global._restoreViewport = _restoreViewport;
@@ -5317,9 +5320,9 @@ class TestViewportModule(unittest.TestCase):
         from code2petri.viewer import _load_engine_scripts, _load_template
         scripts = _load_engine_scripts()
         self.assertIn("Viewport Management Module for code2petri", scripts)
-        self.assertIn("_captureViewport", scripts)
-        self.assertIn("_computeAnchoredPan", scripts)
-        self.assertIn("_restoreViewport", scripts)
+        self.assertIn("captureViewport", scripts)
+        self.assertIn("computeAnchoredPan", scripts)
+        self.assertIn("restoreViewport", scripts)
 
         template = _load_template()
         self.assertIn("Viewport Management Module for code2petri", template)
@@ -5329,12 +5332,12 @@ class TestViewportModule(unittest.TestCase):
         script = """
 const vp = require('./code2petri/viewer/engine/viewport.js');
 const expectedFns = [
-  '_captureViewport',
-  '_computeAnchoredPan',
-  '_restoreViewport',
   'captureViewport',
   'computeAnchoredPan',
-  'restoreViewport'
+  'restoreViewport',
+  '_captureViewport',
+  '_computeAnchoredPan',
+  '_restoreViewport'
 ];
 for (const fn of expectedFns) {
   if (typeof vp[fn] !== 'function') {
@@ -5373,16 +5376,21 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
     def test_compute_anchored_pan_math_invariance(self):
-        """Verifies that _computeAnchoredPan maintains screen coordinate invariance."""
+        """Verifies that computeAnchoredPan maintains screen coordinate invariance."""
         script = """
-const { _computeAnchoredPan } = require('./code2petri/viewer/engine/viewport.js');
+const { computeAnchoredPan, _computeAnchoredPan } = require('./code2petri/viewer/engine/viewport.js');
 
 const zoom = 1.75;
 const currentPan = { x: 100, y: -50 };
 const preFoldPos = { x: 200, y: 150 };
 const postFoldPos = { x: 240, y: 180 };
 
-const anchoredPan = _computeAnchoredPan(currentPan, preFoldPos, postFoldPos, zoom);
+const anchoredPan = computeAnchoredPan(currentPan, preFoldPos, postFoldPos, zoom);
+const anchoredPanLegacy = _computeAnchoredPan(currentPan, preFoldPos, postFoldPos, zoom);
+
+if (anchoredPan.x !== anchoredPanLegacy.x || anchoredPan.y !== anchoredPanLegacy.y) {
+  throw new Error('Legacy alias and canonical computeAnchoredPan returned different results');
+}
 
 const preScreenX = preFoldPos.x * zoom + currentPan.x;
 const preScreenY = preFoldPos.y * zoom + currentPan.y;

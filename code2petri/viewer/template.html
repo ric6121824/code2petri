@@ -1630,7 +1630,7 @@
         const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
         if (!meta || typeof meta.execute !== 'function') return false;
 
-        const viewportBefore = _captureViewport(cy);
+        const viewportBefore = captureViewport(cy);
         const preFoldPlacePos = (node && typeof node.position === 'function' && node.position()) ? Object.assign({}, node.position()) : null;
 
         const res = meta.execute(foldEngine, node);
@@ -1640,8 +1640,8 @@
           }
 
           const postFoldCompPos = (res.node && typeof res.node.position === 'function') ? res.node.position() : null;
-          const targetPan = _computeAnchoredPan(viewportBefore.pan, preFoldPlacePos, postFoldCompPos, viewportBefore.zoom);
-          _restoreViewport(cy, viewportBefore.zoom, targetPan);
+          const targetPan = computeAnchoredPan(viewportBefore.pan, preFoldPlacePos, postFoldCompPos, viewportBefore.zoom);
+          restoreViewport(cy, viewportBefore.zoom, targetPan);
 
           if (typeof updateFoldableHighlights === 'function') {
             updateFoldableHighlights();
@@ -1732,14 +1732,14 @@
 
       function handleRightClickUnfold(node) {
         if (typeof foldEngine === 'undefined' || !foldEngine || !node) return false;
-        const viewportBefore = _captureViewport(cy);
+        const viewportBefore = captureViewport(cy);
 
         const res = foldEngine.executeComponentLocalUnfold(node);
         if (res && res.success) {
           if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
             cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
           }
-          _restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
+          restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
           if (typeof updateFoldableHighlights === 'function') {
             updateFoldableHighlights();
           }
