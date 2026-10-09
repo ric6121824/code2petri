@@ -110,12 +110,15 @@
     }
     #main-container {
       flex: 1;
+      display: flex;
+      min-height: 0;
       position: relative;
       width: 100%;
       height: 100%;
     }
     #cy {
-      width: 100%;
+      flex: 1;
+      min-width: 0;
       height: 100%;
       background-color: #ffffff;
     }
@@ -134,26 +137,15 @@
       backdrop-filter: blur(4px);
     }
     #inspector-panel {
-      position: absolute;
-      top: 20px;
-      right: 20px;
-      width: 300px;
-      background: rgba(255, 255, 255, 0.98);
-      border: 1px solid #c8d1d9;
-      border-radius: 10px;
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
-      backdrop-filter: blur(10px);
-      z-index: 18;
-      display: none;
+      flex: 0 0 320px;
+      height: 100%;
+      background: #ffffff;
+      border-left: 1px solid #d0d7de;
+      display: flex;
       flex-direction: column;
-      overflow: hidden;
+      overflow-y: auto;
       font-size: 12px;
       color: #24292e;
-      animation: popoverFade 0.15s ease-out;
-    }
-    @keyframes popoverFade {
-      from { opacity: 0; transform: translateY(-4px); }
-      to { opacity: 1; transform: translateY(0); }
     }
     .inspector-header {
       padding: 10px 14px;
@@ -188,6 +180,11 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
+    }
+    .inspector-empty {
+      color: #6a737d;
+      line-height: 1.5;
+      padding: 8px 0;
     }
     .inspector-row {
       display: flex;
@@ -245,7 +242,7 @@
     }
     .inspector-stat-pills {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 6px;
       margin-top: 2px;
     }
@@ -430,43 +427,55 @@
       </div>
     </div>
 
-    <div id="inspector-panel" class="inspector-panel hud-popover" style="display: none;">
+    <aside id="inspector-panel" class="inspector-panel" aria-label="Node inspector">
       <div class="inspector-header">
-        <span class="inspector-title" id="hud-title">Component Node Renaming</span>
-        <button id="inspector-close" class="inspector-close-btn" title="Close inspector">✕</button>
+        <span class="inspector-title" id="hud-title">Node Inspector</span>
+        <button id="inspector-close" class="inspector-close-btn" title="Clear inspection">✕</button>
       </div>
       <div class="inspector-body">
-        <div class="inspector-row">
-          <label class="inspector-label" for="hud-input-label">Name:</label>
-          <div class="inspector-input-group">
-            <input id="hud-input-label" class="inspector-input" type="text" placeholder="Component name" />
-            <button id="hud-btn-save" class="inspector-save-btn" title="Save name">Save</button>
+        <p id="inspector-empty" class="inspector-empty">Select a transition or component to inspect it.</p>
+        <div id="inspector-content" style="display: none;">
+          <div class="inspector-row">
+            <label class="inspector-label" for="hud-input-label">Name:</label>
+            <div class="inspector-input-group">
+              <input id="hud-input-label" class="inspector-input" type="text" placeholder="Component name" />
+              <button id="hud-btn-save" class="inspector-save-btn" title="Save name">Save</button>
+            </div>
+            <span id="inspector-label" class="inspector-val" style="display: none;"></span>
           </div>
-          <span id="inspector-label" class="inspector-val" style="display: none;"></span>
-        </div>
-        <div class="inspector-stat-pills">
-          <div class="stat-pill">
-            <span class="pill-key">Tau (τ):</span>
-            <span id="inspector-tau" class="pill-val">1.0</span>
+          <div class="inspector-stat-pills">
+            <div class="stat-pill">
+              <span class="pill-key">Node ID:</span>
+              <span id="inspector-id" class="pill-val">—</span>
+            </div>
+            <div class="stat-pill">
+              <span class="pill-key">Transition Weight (τ):</span>
+              <span id="inspector-tau" class="pill-val">—</span>
+            </div>
+            <div class="stat-pill">
+              <span class="pill-key">Component Penalty (ω):</span>
+              <span id="inspector-omega" class="pill-val">—</span>
+            </div>
+            <div class="stat-pill">
+              <span class="pill-key">Type:</span>
+              <span id="inspector-type" class="pill-val">—</span>
+            </div>
+            <div class="stat-pill">
+              <span class="pill-key">Line:</span>
+              <span id="inspector-line" class="pill-val">—</span>
+            </div>
+            <div class="stat-pill">
+              <span class="pill-key">SM Score:</span>
+              <span id="inspector-sm" class="pill-val">—</span>
+            </div>
           </div>
-          <div class="stat-pill">
-            <span class="pill-key">Type:</span>
-            <span id="inspector-type" class="pill-val">—</span>
+          <div class="inspector-actions" style="margin-top: 8px;">
+            <button id="hud-btn-contract-mg" class="btn btn-primary" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px;">Contract Marked Graph</button>
+            <button id="hud-btn-unfold" class="btn" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px; margin-top: 6px;">Component-Local Unfold</button>
           </div>
-          <div class="stat-pill">
-            <span class="pill-key">Line:</span>
-            <span id="inspector-line" class="pill-val">—</span>
-          </div>
-          <div class="stat-pill">
-            <span class="pill-key">SM Score:</span>
-            <span id="inspector-sm" class="pill-val">—</span>
-          </div>
-        </div>
-        <div class="inspector-actions" style="margin-top: 8px;">
-          <button id="hud-btn-contract-mg" class="btn btn-primary" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px;">Contract Marked Graph</button>
         </div>
       </div>
-    </div>
+    </aside>
   </div>
 
   <!-- INLINED VENDOR LIBRARIES -->
@@ -683,7 +692,9 @@
             resolved: t.resolved,
             resolved_to: t.resolved_to,
             target_file: t.target_file,
-            component_type: meta.component_type
+            component_type: meta.component_type,
+            omega: meta.omega !== undefined ? meta.omega : t.omega,
+            source_line: meta.source_line !== undefined ? meta.source_line : t.source_line
           };
           if (encFn) {
             nodeData.enclosing_function = encFn;
@@ -1351,13 +1362,18 @@
 
       // Inspector panel DOM elements and functions
       const inspectorPanel = document.getElementById('inspector-panel');
+      const inspectorEmpty = document.getElementById('inspector-empty');
+      const inspectorContent = document.getElementById('inspector-content');
       const inspectorLabel = document.getElementById('inspector-label');
       const inspectorInput = document.getElementById('hud-input-label');
       const inspectorSaveBtn = document.getElementById('hud-btn-save');
+      const inspectorId = document.getElementById('inspector-id');
       const inspectorType = document.getElementById('inspector-type');
       const inspectorTau = document.getElementById('inspector-tau');
+      const inspectorOmega = document.getElementById('inspector-omega');
       const inspectorLine = document.getElementById('inspector-line');
       const inspectorCloseBtn = document.getElementById('inspector-close');
+      const hudBtnUnfold = document.getElementById('hud-btn-unfold');
 
       function getInspectorData(node) {
         const rawLabel = node.data('custom_name') || node.data('raw_label') || node.data('label') || node.id();
@@ -1408,11 +1424,17 @@
           }
         }
         const lineStr = (lineNo !== null && lineNo !== undefined && lineNo !== '') ? String(lineNo) : '—';
+        const rawOmega = node.data('omega');
+        const omegaStr = (rawOmega !== null && rawOmega !== undefined && rawOmega !== '')
+          ? (Number.isInteger(Number(rawOmega)) ? Number(rawOmega).toFixed(1) : String(rawOmega))
+          : '—';
 
         return {
+          id: node.id(),
           label: rawLabel,
           componentType: compType,
           tau: tauStr,
+          omega: omegaStr,
           lineNumber: lineStr
         };
       }
@@ -1423,13 +1445,18 @@
         const doc = typeof document !== 'undefined' ? document : null;
         return {
           panelEl: typeof inspectorPanel !== 'undefined' && inspectorPanel ? inspectorPanel : (doc ? doc.getElementById('inspector-panel') : null),
+          emptyEl: typeof inspectorEmpty !== 'undefined' && inspectorEmpty ? inspectorEmpty : (doc ? doc.getElementById('inspector-empty') : null),
+          contentEl: typeof inspectorContent !== 'undefined' && inspectorContent ? inspectorContent : (doc ? doc.getElementById('inspector-content') : null),
           inputEl: typeof inspectorInput !== 'undefined' && inspectorInput ? inspectorInput : (doc ? doc.getElementById('hud-input-label') : null),
           labelEl: typeof inspectorLabel !== 'undefined' && inspectorLabel ? inspectorLabel : (doc ? doc.getElementById('inspector-label') : null),
+          idEl: typeof inspectorId !== 'undefined' && inspectorId ? inspectorId : (doc ? doc.getElementById('inspector-id') : null),
           tauEl: typeof inspectorTau !== 'undefined' && inspectorTau ? inspectorTau : (doc ? doc.getElementById('inspector-tau') : null),
+          omegaEl: typeof inspectorOmega !== 'undefined' && inspectorOmega ? inspectorOmega : (doc ? doc.getElementById('inspector-omega') : null),
           typeEl: typeof inspectorType !== 'undefined' && inspectorType ? inspectorType : (doc ? doc.getElementById('inspector-type') : null),
           lineEl: typeof inspectorLine !== 'undefined' && inspectorLine ? inspectorLine : (doc ? doc.getElementById('inspector-line') : null),
           smEl: typeof inspectorSm !== 'undefined' && inspectorSm ? inspectorSm : (doc ? doc.getElementById('inspector-sm') : null),
           contractMgBtnEl: typeof hudBtnContractMg !== 'undefined' && hudBtnContractMg ? hudBtnContractMg : (doc ? doc.getElementById('hud-btn-contract-mg') : null),
+          unfoldBtnEl: typeof hudBtnUnfold !== 'undefined' && hudBtnUnfold ? hudBtnUnfold : (doc ? doc.getElementById('hud-btn-unfold') : null),
           saveBtnEl: typeof inspectorSaveBtn !== 'undefined' && inspectorSaveBtn ? inspectorSaveBtn : (doc ? doc.getElementById('hud-btn-save') : null),
           closeBtnEl: typeof inspectorCloseBtn !== 'undefined' && inspectorCloseBtn ? inspectorCloseBtn : (doc ? doc.getElementById('inspector-close') : null)
         };
@@ -1461,7 +1488,9 @@
 
         if (els.labelEl) els.labelEl.textContent = data.label;
         if (els.inputEl) els.inputEl.value = data.label;
+        if (els.idEl) els.idEl.textContent = data.id;
         if (els.tauEl) els.tauEl.textContent = data.tau;
+        if (els.omegaEl) els.omegaEl.textContent = data.omega;
         if (els.typeEl) els.typeEl.textContent = data.componentType;
         if (els.lineEl) els.lineEl.textContent = data.lineNumber;
         if (els.smEl) {
@@ -1472,49 +1501,37 @@
           const isContractibleMg = node && typeof node.hasClass === 'function' && node.hasClass('contractible-marked-graph');
           els.contractMgBtnEl.style.display = isContractibleMg ? 'block' : 'none';
         }
-
-        // Position floating HUD near selected node
-        if (node && typeof node.renderedPosition === 'function') {
-          try {
-            const rpos = node.renderedPosition();
-            if (rpos && typeof rpos.x === 'number' && typeof rpos.y === 'number') {
-              const nodeW = typeof node.renderedOuterWidth === 'function' ? node.renderedOuterWidth() : 40;
-              const nodeH = typeof node.renderedOuterHeight === 'function' ? node.renderedOuterHeight() : 40;
-              let left = rpos.x + nodeW / 2 + 16;
-              let top = rpos.y - 40;
-
-              const containerW = (typeof cy !== 'undefined' && cy.width && cy.width() > 0) ? cy.width() : 800;
-              const containerH = (typeof cy !== 'undefined' && cy.height && cy.height() > 0) ? cy.height() : 600;
-              const hudW = 300;
-              const hudH = 180;
-
-              if (left + hudW > containerW - 16) {
-                left = Math.max(16, rpos.x - nodeW / 2 - hudW - 16);
-              }
-              if (top + hudH > containerH - 16) {
-                top = Math.max(16, containerH - hudH - 16);
-              }
-              if (top < 16) top = 16;
-              if (left < 16) left = 16;
-
-              els.panelEl.style.left = left + 'px';
-              els.panelEl.style.top = top + 'px';
-              els.panelEl.style.right = 'auto';
-            }
-          } catch (e) {}
+        if (els.unfoldBtnEl) {
+          const canUnfold = node && (
+            node.data('is_opaque') === true ||
+            node.data('is_collapsed_compound') === true ||
+            (typeof node.hasClass === 'function' && node.hasClass('collapsed-compound'))
+          );
+          els.unfoldBtnEl.style.display = canUnfold ? 'block' : 'none';
         }
 
         els.panelEl.style.display = 'flex';
+        if (els.emptyEl) els.emptyEl.style.display = 'none';
+        if (els.contentEl) els.contentEl.style.display = 'block';
       }
 
       function closeInspector() {
         const els = _resolveHudElements();
         if (els.panelEl) {
-          els.panelEl.style.display = 'none';
+          els.panelEl.style.display = 'flex';
         }
-        if (typeof selectedInspectorNode !== 'undefined' && selectedInspectorNode && typeof selectedInspectorNode.inside === 'function' && selectedInspectorNode.inside() && els.inputEl) {
-          els.inputEl.value = selectedInspectorNode.data('label') || '';
-        }
+        if (els.emptyEl) els.emptyEl.style.display = 'block';
+        if (els.contentEl) els.contentEl.style.display = 'none';
+        if (els.inputEl) els.inputEl.value = '';
+        if (els.labelEl) els.labelEl.textContent = '';
+        if (els.idEl) els.idEl.textContent = '—';
+        if (els.tauEl) els.tauEl.textContent = '—';
+        if (els.omegaEl) els.omegaEl.textContent = '—';
+        if (els.typeEl) els.typeEl.textContent = '—';
+        if (els.lineEl) els.lineEl.textContent = '—';
+        if (els.smEl) els.smEl.textContent = '—';
+        if (els.contractMgBtnEl) els.contractMgBtnEl.style.display = 'none';
+        if (els.unfoldBtnEl) els.unfoldBtnEl.style.display = 'none';
         if (typeof selectedInspectorNode !== 'undefined') {
           selectedInspectorNode = null;
         }
@@ -1535,6 +1552,15 @@
             const target = selectedInspectorNode;
             closeInspector();
             handleFoldReduction(target, 'marked_graph');
+          }
+        });
+      }
+
+      if (hudEls.unfoldBtnEl) {
+        hudEls.unfoldBtnEl.addEventListener('click', function(e) {
+          if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+          if (selectedInspectorNode) {
+            handleRightClickUnfold(selectedInspectorNode);
           }
         });
       }
