@@ -611,7 +611,7 @@ if (infoFileBox.style.display !== 'none') {
         # Verify Cytoscape canvas settings
         self.assertIn("autoungrabify: false", html_content)
         self.assertIn("userPanningEnabled: false", html_content)
-        self.assertIn("boxSelectionEnabled: false", html_content)
+        self.assertIn("boxSelectionEnabled: true", html_content)
 
         # Verify contextmenu and auxclick suppression on canvas
         self.assertIn("'contextmenu'", html_content)
@@ -5744,6 +5744,316 @@ console.log('PASS');
 """
         node_script = _setup_live_fold_test_harness(net_literal, test_logic)
         proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+
+class TestFoldEntireFunction(unittest.TestCase):
+    def test_compound_inspector_offers_action_and_reports_completion(self):
+        html = _read_template_html()
+        self.assertIn('id="hud-btn-fold-entire-function"', html)
+        self.assertIn('id="inspector-action-result"', html)
+        self.assertIn("foldEngine.executeFoldEntireFunction(compoundNode)", html)
+
+        action_match = re.search(
+            r"function handleFoldEntireFunction\(compoundNode\) \{.*?"
+            r"if \(hudEls\.foldEntireFunctionBtnEl\) \{.*?\n      \}",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(action_match, "Could not find the compound inspector action")
+        net_literal = """{
+  compounds: [
+    { id: 'function_process', function_name: 'process', label: 'process()' }
+  ],
+  places: [
+    { id: 'p0', label: 'start' },
+    { id: 'p1', label: 'middle', parent: 'function_process' },
+    { id: 'p2', label: 'end' }
+  ],
+  transitions: [
+    { id: 't0', label: 'first', parent: 'function_process' },
+    { id: 't1', label: 'second', parent: 'function_process' }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = f"""
+const inspectorActionResult = {{ textContent: '' }};
+const hudBtnFoldEntireFunction = {{
+  style: {{ display: 'none' }},
+  listener: null,
+  addEventListener: function(name, listener) {{ this.listener = listener; }}
+}};
+const hudEls = {{ foldEntireFunctionBtnEl: hudBtnFoldEntireFunction }};
+const DAGRE_LAYOUT_OPTIONS = {{ name: 'dagre' }};
+let layoutCount = 0;
+cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
+cy.zoom(1.5);
+cy.pan({{ x: 31, y: -12 }});
+{action_match.group(0)}
+const compound = cy.getElementById('function_process');
+openInspector(compound);
+if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('Compound fold action was hidden');
+hudBtnFoldEntireFunction.listener({{ stopPropagation: function() {{}} }});
+if (!compound.hasClass('collapsed-compound')) throw new Error('Compound was not collapsed');
+if (hudBtnFoldEntireFunction.style.display !== 'none') throw new Error('Completed compound action remained enabled');
+if (!inspectorActionResult.textContent.includes('fully collapsed')) throw new Error('Completion was not reported');
+if (layoutCount !== 1) throw new Error('Expected one final layout');
+if (cy.zoom() !== 1.5 || cy.pan().x !== 31 || cy.pan().y !== -12) throw new Error('Camera changed');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net_literal, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_fold_entire_function_repeats_until_compound_is_collapsed(self):
+        net_literal = """{
+  compounds: [
+    { id: 'function_process', function_name: 'process', label: 'process()' }
+  ],
+  places: [
+    { id: 'p0', label: 'start' },
+    { id: 'p1', label: 'middle', parent: 'function_process' },
+    { id: 'p2', label: 'end' }
+  ],
+  transitions: [
+    { id: 't0', label: 'first', parent: 'function_process' },
+    { id: 't1', label: 'second', parent: 'function_process' }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+const result = foldEngine.executeFoldEntireFunction('function_process');
+const compound = cy.getElementById('function_process');
+if (!result.success || !result.complete || result.folded.length !== 1) {
+  throw new Error('Expected one local fold to complete the function: ' + JSON.stringify(result));
+}
+if (!compound.hasClass('collapsed-compound')) {
+  throw new Error('Function compound did not enter its collapsed state');
+}
+if (result.passes < 1) throw new Error('No batch pass was run');
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+
+class TestFoldStateSnapshotValidation(unittest.TestCase):
+    def test_generated_viewer_wires_offline_open_without_relayout(self):
+        from code2petri.viewer import _load_template
+
+        html = _load_template()
+        self.assertIn('id="btn-open-session"', html)
+        self.assertIn('id="input-open-session" type="file" accept=".json,application/json"', html)
+        self.assertIn("restoreFoldStateSnapshot(parseFoldStateSnapshot(reader.result))", html)
+        restore_body = re.search(
+            r"function restoreFoldStateSnapshot\(snapshot\) \{(.*?)(?=\n      if \(btnOpenSession)",
+            html,
+            re.S,
+        )
+        self.assertIsNotNone(restore_body)
+        self.assertNotIn("applyLayout", restore_body.group(1))
+        self.assertIn("restoreViewport(cy, snapshot.viewport.zoom, snapshot.viewport.pan)", restore_body.group(1))
+
+    def test_restore_replaces_graph_and_context_without_layout(self):
+        html = _read_template_html()
+        restore_match = re.search(
+            r"function restoreFoldStateSnapshot\(snapshot\) \{.*?(?=\n      if \(btnOpenSession)",
+            html,
+            re.S,
+        )
+        self.assertIsNotNone(restore_match)
+        script = r"""
+const { parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const snapshot = parseFoldStateSnapshot({
+  schemaVersion: 1, snapshotType: 'code2petri-fold-state',
+  elements: [{ group: 'nodes', data: { id: 'restored' }, classes: 'place' }],
+  engine: { stepCounter: 5, cfg: { sequence: 1, choice: 2, loop: 3 }, rememberedCustomNames: [['c_05', 'kept']] },
+  viewport: { zoom: 1.5, pan: { x: 20, y: -8 } },
+  document: {
+    title: 'Restored Doc', sourceFile: '/src/restored.py', filename: 'restored.py', functionName: 'run', mode: 'composite',
+    originalNet: { places: [{ id: 'start' }], transitions: [], arcs: [] },
+    compounds: [], foldSteps: [], finalSm: 1, fullyReducible: true,
+    calleeNets: { helper: { places: [], transitions: [], arcs: [] } }, expandedNodes: [],
+    playback: { currentStep: 0, totalSteps: 0 }
+  }
+});
+let graph = [{ data: { id: 'old' } }];
+let viewport = { zoom: 2, pan: { x: 0, y: 0 } };
+let layoutCount = 0;
+let closedInspector = 0;
+const cy = {
+  elements: () => ({ jsons: () => graph.slice(), remove: () => { graph = []; } }),
+  add: (items) => { graph = graph.concat(items); },
+  nodes: () => ({ unselect: () => {} })
+};
+const captureViewport = () => viewport;
+const restoreViewport = (_, zoom, pan) => { viewport = { zoom, pan: { ...pan } }; };
+let payload = {};
+let initialNet = { places: [], transitions: [], arcs: [] };
+let foldSteps = [];
+let totalSteps = 0;
+let currentStep = 0;
+let stepNets = [];
+let initialSm = 0;
+let isFoldMode = false;
+const calleeNetsMap = {};
+const expandedNodes = new Map();
+const foldEngine = { cfg: {}, stepCounter: 0, rememberedCustomNames: new Map(), calculateSMScore: () => 3.6 };
+const foldControls = { style: {} }, badgeSm = { style: {} }, valSm = { textContent: '' };
+const setActiveDocumentMetadata = (metadata) => { global.activeDocument = metadata; };
+const closeInspector = () => { closedInspector++; };
+const updateFoldableHighlights = () => {};
+const updateBatchPlaceFoldControls = () => {};
+const updateUI = () => {};
+global.document = { title: '', querySelector: () => ({ textContent: '' }) };
+__RESTORE_FUNCTION__
+restoreFoldStateSnapshot(snapshot);
+if (graph.length !== 1 || graph[0].data.id !== 'restored') throw new Error('Graph was not replaced');
+if (layoutCount !== 0) throw new Error('Restore unexpectedly ran a layout');
+if (viewport.zoom !== 1.5 || viewport.pan.x !== 20 || viewport.pan.y !== -8) throw new Error('Viewport was not restored');
+if (payload.title !== 'Restored Doc' || global.document.title !== 'Restored Doc - code2petri Viewer') throw new Error('Document identity was not restored');
+if (foldEngine.stepCounter !== 5 || foldEngine.cfg.choice !== 2 || !foldEngine.rememberedCustomNames.has('c_05')) throw new Error('Engine state was not restored');
+if (initialNet.places[0].id !== 'start' || !calleeNetsMap.helper || closedInspector !== 1) throw new Error('Document context or inspector state was not restored');
+console.log('PASS');
+""".replace('__RESTORE_FUNCTION__', restore_match.group(0))
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_fold_save_open_continue_and_unfold_round_trip(self):
+        script = r"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const { LiveFoldReductionEngine } = require('./code2petri/viewer/engine/reduction_engine.js');
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const sourceElements = [];
+for (let i = 0; i < 5; i++) {
+  sourceElements.push({ group: 'nodes', data: { id: 'p' + i, type: 'Place', label: 'p' + i }, classes: 'place', position: { x: i * 100, y: 0 } });
+}
+for (let i = 0; i < 4; i++) {
+  sourceElements.push({ group: 'nodes', data: { id: 't' + i, type: 'Transition', label: 't' + i, tau: 1.5 }, classes: 'transition' });
+  sourceElements.push({ group: 'edges', data: { id: 'a' + (i * 2), source: 'p' + i, target: 't' + i, weight: 2 } });
+  sourceElements.push({ group: 'edges', data: { id: 'a' + (i * 2 + 1), source: 't' + i, target: 'p' + (i + 1), weight: 2 } });
+}
+const cy1 = cytoscape({ elements: sourceElements });
+const engine1 = new LiveFoldReductionEngine(cy1, { choice: 1.25, loop: 4.5 });
+const first = engine1.executeSinglePlaceContraction(cy1.getElementById('p1'));
+if (!first.success) throw new Error('initial fold failed');
+engine1.renameNode(first.node, 'Semantic Inner Name');
+const second = engine1.executeSinglePlaceContraction(cy1.getElementById('p2'));
+if (!second.success) throw new Error('nested fold failed');
+const doc = {
+  title: 'Round Trip', sourceFile: '/src/round_trip.py', filename: 'round_trip.py', functionName: 'run', mode: 'composite',
+  originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
+  calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
+};
+const snapshot = parseFoldStateSnapshot(serializeFoldStateSnapshot({ cy: cy1, engine: engine1, document: doc }));
+const cy2 = cytoscape({ elements: snapshot.elements });
+const engine2 = new LiveFoldReductionEngine(cy2);
+engine2.cfg = snapshot.engine.cfg;
+engine2.stepCounter = snapshot.engine.stepCounter;
+engine2.rememberedCustomNames = new Map(snapshot.engine.rememberedCustomNames);
+const continued = engine2.executeSinglePlaceContraction(cy2.getElementById('p3'));
+if (!continued.success) throw new Error('post-open folding failed: ' + continued.reason);
+const continuedId = continued.node.id();
+if (continuedId === second.node.id()) throw new Error('new component ID collided with restored component');
+const openAgain = parseFoldStateSnapshot(serializeFoldStateSnapshot({ cy: cy2, engine: engine2, document: doc }));
+const cy3 = cytoscape({ elements: openAgain.elements });
+const engine3 = new LiveFoldReductionEngine(cy3);
+engine3.cfg = openAgain.engine.cfg;
+engine3.stepCounter = openAgain.engine.stepCounter;
+engine3.rememberedCustomNames = new Map(openAgain.engine.rememberedCustomNames);
+let component = cy3.getElementById(continuedId);
+for (const expectedId of [continuedId, second.node.id(), first.node.id()]) {
+  component = cy3.getElementById(expectedId);
+  const result = engine3.executeComponentLocalUnfold(component);
+  if (!result.success) throw new Error('component-local unfold failed for ' + expectedId + ': ' + result.reason);
+}
+if (cy3.getElementById('p1').length === 0 || cy3.getElementById('p2').length === 0 || cy3.getElementById('p3').length === 0) {
+  throw new Error('nested original topology was not restored');
+}
+if (engine3.rememberedCustomNames.get(first.node.id()) !== 'Semantic Inner Name') {
+  throw new Error('unfolded semantic name was not remembered');
+}
+console.log('PASS');
+""";
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_snapshot_parser_validates_graph_context_and_restorable_component_ids(self):
+        script = r"""
+const { parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const snapshot = {
+  schemaVersion: 1,
+  snapshotType: 'code2petri-fold-state',
+  elements: [
+    { group: 'nodes', data: { id: 'p0' }, classes: 'place' },
+    { group: 'nodes', data: { id: 't0', consumedSubnet: {
+      nodes: [{ group: 'nodes', data: { id: 'c_07', consumedSubnet: { nodes: [] } } }],
+      internalEdges: [], boundaryInArcs: [], boundaryOutArcs: []
+    } }, classes: 'transition' },
+    { group: 'edges', data: { id: 'a0', source: 'p0', target: 't0' } }
+  ],
+  engine: {
+    stepCounter: 1,
+    cfg: { sequence: 0, choice: 1, loop: 3 },
+    rememberedCustomNames: [['c_07', 'semantic name']]
+  },
+  viewport: { zoom: 1.5, pan: { x: 12, y: -4 } },
+  document: {
+    title: 'Flow', sourceFile: '/src/flow.py', filename: 'flow.py', functionName: 'run',
+    mode: 'composite',
+    originalNet: { places: [{ id: 'p0' }], transitions: [{ id: 't0' }], arcs: [] },
+    compounds: [], foldSteps: [], finalSm: 1, fullyReducible: true,
+    calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
+  }
+};
+const parsed = parseFoldStateSnapshot(JSON.stringify(snapshot));
+if (parsed.engine.stepCounter !== 7) throw new Error('Component allocation high-water mark was not restored');
+if (parsed.document.functionName !== 'run' || parsed.elements.length !== 3) throw new Error('Snapshot context was lost');
+let invalidRejected = false;
+try {
+  parseFoldStateSnapshot(JSON.stringify({ ...snapshot, schemaVersion: 2 }));
+} catch (error) {
+  invalidRejected = /version/i.test(error.message);
+}
+if (!invalidRejected) throw new Error('Unsupported version was accepted');
+const dangling = JSON.parse(JSON.stringify(snapshot));
+dangling.elements[2].data.target = 'missing-node';
+let graphRejected = false;
+try {
+  parseFoldStateSnapshot(dangling);
+} catch (error) {
+  graphRejected = /edge|reference/i.test(error.message);
+}
+if (!graphRejected) throw new Error('Graph with a dangling edge was accepted');
+const danglingRestore = JSON.parse(JSON.stringify(snapshot));
+danglingRestore.elements[1].data.consumedSubnet.internalEdges.push({
+  group: 'edges', data: { id: 'bad-restoration-edge', source: 'missing-node', target: 'c_07' }
+});
+let restorationRejected = false;
+try {
+  parseFoldStateSnapshot(danglingRestore);
+} catch (error) {
+  restorationRejected = /restoration record references/i.test(error.message);
+}
+if (!restorationRejected) throw new Error('Restoration record with a dangling edge was accepted');
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 

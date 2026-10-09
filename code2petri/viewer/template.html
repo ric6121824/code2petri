@@ -415,8 +415,10 @@
         <span class="value sm-score" id="val-sm">0.0</span>
       </div>
 
+      <button class="btn" id="btn-open-session" title="Open a saved Fold State Snapshot">Open Session...</button>
       <button class="btn" id="btn-save-session" title="Download the current Fold State Snapshot">Save Session</button>
       <button class="btn" id="btn-export-pnml" title="Export current net state to ISO/IEC 15909-2 PNML">Export PNML</button>
+      <input id="input-open-session" type="file" accept=".json,application/json" style="display: none;" />
     </div>
   </header>
 
@@ -492,7 +494,9 @@
           </div>
           <div class="inspector-actions" style="margin-top: 8px;">
             <button id="hud-btn-contract-mg" class="btn btn-primary" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px;">Contract Marked Graph</button>
+            <button id="hud-btn-fold-entire-function" class="btn btn-primary" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px; margin-top: 6px;">Fold Entire Function</button>
             <button id="hud-btn-unfold" class="btn" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px; margin-top: 6px;">Component-Local Unfold</button>
+            <p id="inspector-action-result" class="selection-fold-result" aria-live="polite"></p>
           </div>
         </div>
       </div>
@@ -585,14 +589,14 @@
       window.code2petriViewer.setActiveDocumentMetadata = setActiveDocumentMetadata;
       setActiveDocumentMetadata(activeDocument);
 
-      const isFoldMode = payload.mode === "fold" && Array.isArray(payload.fold_steps) && payload.fold_steps.length > 0;
-      const initialNet = payload.composite_net || payload.initial_net || { places: [], transitions: [], arcs: [] };
-      const foldSteps = payload.fold_steps || [];
-      const totalSteps = foldSteps.length;
+      let isFoldMode = payload.mode === "fold" && Array.isArray(payload.fold_steps) && payload.fold_steps.length > 0;
+      let initialNet = payload.composite_net || payload.initial_net || { places: [], transitions: [], arcs: [] };
+      let foldSteps = payload.fold_steps || [];
+      let totalSteps = foldSteps.length;
       let currentStep = 0;
 
       // Elements cache for each step
-      const stepNets = [initialNet];
+      let stepNets = [initialNet];
       for (let i = 0; i < foldSteps.length; i++) {
         stepNets.push(foldSteps[i].net || initialNet);
       }
@@ -1445,6 +1449,8 @@
       const inspectorLine = document.getElementById('inspector-line');
       const inspectorCloseBtn = document.getElementById('inspector-close');
       const hudBtnUnfold = document.getElementById('hud-btn-unfold');
+      const hudBtnFoldEntireFunction = document.getElementById('hud-btn-fold-entire-function');
+      const inspectorActionResult = document.getElementById('inspector-action-result');
 
       function getInspectorData(node) {
         const rawLabel = node.data('custom_name') || node.data('raw_label') || node.data('label') || node.id();
@@ -1528,6 +1534,8 @@
           smEl: typeof inspectorSm !== 'undefined' && inspectorSm ? inspectorSm : (doc ? doc.getElementById('inspector-sm') : null),
           contractMgBtnEl: typeof hudBtnContractMg !== 'undefined' && hudBtnContractMg ? hudBtnContractMg : (doc ? doc.getElementById('hud-btn-contract-mg') : null),
           unfoldBtnEl: typeof hudBtnUnfold !== 'undefined' && hudBtnUnfold ? hudBtnUnfold : (doc ? doc.getElementById('hud-btn-unfold') : null),
+          foldEntireFunctionBtnEl: typeof hudBtnFoldEntireFunction !== 'undefined' && hudBtnFoldEntireFunction ? hudBtnFoldEntireFunction : (doc ? doc.getElementById('hud-btn-fold-entire-function') : null),
+          actionResultEl: typeof inspectorActionResult !== 'undefined' && inspectorActionResult ? inspectorActionResult : (doc ? doc.getElementById('inspector-action-result') : null),
           saveBtnEl: typeof inspectorSaveBtn !== 'undefined' && inspectorSaveBtn ? inspectorSaveBtn : (doc ? doc.getElementById('hud-btn-save') : null),
           closeBtnEl: typeof inspectorCloseBtn !== 'undefined' && inspectorCloseBtn ? inspectorCloseBtn : (doc ? doc.getElementById('inspector-close') : null)
         };
@@ -1572,6 +1580,12 @@
           const isContractibleMg = node && typeof node.hasClass === 'function' && node.hasClass('contractible-marked-graph');
           els.contractMgBtnEl.style.display = isContractibleMg ? 'block' : 'none';
         }
+        if (els.foldEntireFunctionBtnEl) {
+          const isFoldableCompound = node && typeof node.hasClass === 'function' && node.hasClass('compound') &&
+            !(typeof foldEngine !== 'undefined' && foldEngine && foldEngine.isFunctionFoldedIntoSingleComponent(node));
+          els.foldEntireFunctionBtnEl.style.display = isFoldableCompound ? 'block' : 'none';
+        }
+        if (els.actionResultEl) els.actionResultEl.textContent = '';
         if (els.unfoldBtnEl) {
           const canUnfold = node && (
             node.data('is_opaque') === true ||
@@ -1603,6 +1617,8 @@
         if (els.smEl) els.smEl.textContent = '—';
         if (els.contractMgBtnEl) els.contractMgBtnEl.style.display = 'none';
         if (els.unfoldBtnEl) els.unfoldBtnEl.style.display = 'none';
+        if (els.foldEntireFunctionBtnEl) els.foldEntireFunctionBtnEl.style.display = 'none';
+        if (els.actionResultEl) els.actionResultEl.textContent = '';
         if (typeof selectedInspectorNode !== 'undefined') {
           selectedInspectorNode = null;
         }
@@ -1633,6 +1649,36 @@
           if (selectedInspectorNode) {
             handleRightClickUnfold(selectedInspectorNode);
           }
+        });
+      }
+
+      function handleFoldEntireFunction(compoundNode) {
+        if (!foldEngine || !compoundNode || !compoundNode.inside()) return null;
+        const viewportBefore = captureViewport(cy);
+        const result = foldEngine.executeFoldEntireFunction(compoundNode);
+        if (result.success) {
+          if (cy.elements().length > 0 && typeof cy.layout === 'function') {
+            cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false, animate: false })).run();
+          }
+          restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
+          updateFoldableHighlights();
+          openInspector(compoundNode);
+          if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+        }
+        const els = _resolveHudElements();
+        if (els.actionResultEl) {
+          const skippedSummary = result.skipped.length > 0
+            ? ` Skipped: ${result.skipped.map(function(item) { return `${item.placeId} (${item.reason})`; }).join('; ')}.`
+            : '';
+          els.actionResultEl.textContent = result.message + skippedSummary;
+        }
+        return result;
+      }
+
+      if (hudEls.foldEntireFunctionBtnEl) {
+        hudEls.foldEntireFunctionBtnEl.addEventListener('click', function(e) {
+          if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+          if (selectedInspectorNode) handleFoldEntireFunction(selectedInspectorNode);
         });
       }
 
@@ -1860,7 +1906,7 @@
 
       // Compute initial SM score from initial net transitions
       const initialTransitions = initialNet.transitions || [];
-      const initialSm = initialTransitions.reduce(function(acc, t) {
+      let initialSm = initialTransitions.reduce(function(acc, t) {
         const meta = t.metadata || {};
         const tau = meta.tau !== undefined ? Number(meta.tau) : (t.tau !== undefined ? Number(t.tau) : 1.0);
         return acc + (isNaN(tau) ? 1.0 : tau);
@@ -1872,6 +1918,8 @@
       const btnFold = document.getElementById('btn-fold');
       const btnUnfold = document.getElementById('btn-unfold');
       const btnReset = document.getElementById('btn-reset');
+      const btnOpenSession = document.getElementById('btn-open-session');
+      const inputOpenSession = document.getElementById('input-open-session');
       const btnSaveSession = document.getElementById('btn-save-session');
       const btnExportPnml = document.getElementById('btn-export-pnml');
       const selectionFoldControls = document.getElementById('selection-fold-controls');
@@ -1889,9 +1937,6 @@
       } else {
         foldControls.style.display = 'none';
         if (payload.mode === "composite") {
-          if (foldControls.parentNode) {
-            foldControls.remove();
-          }
           if (badgeSm) {
             badgeSm.style.display = 'flex';
             if (valSm) {
@@ -2072,6 +2117,103 @@
             engine: foldEngine,
             document: getFoldStateDocumentContext()
           });
+        });
+      }
+
+      function restoreFoldStateSnapshot(snapshot) {
+        if (!snapshot || !Array.isArray(snapshot.elements) || !snapshot.document) {
+          throw new Error('Invalid Fold State Snapshot: validated snapshot required');
+        }
+        const doc = snapshot.document;
+        const nextElements = snapshot.elements.map(function(element) {
+          return JSON.parse(JSON.stringify(element));
+        });
+
+        // Replace graph and all document/playback state only after parsing has fully validated.
+        const previousElements = cy.elements().jsons();
+        const previousViewport = captureViewport(cy);
+        cy.elements().remove();
+        try {
+          cy.add(nextElements);
+        } catch (error) {
+          cy.elements().remove();
+          cy.add(previousElements);
+          restoreViewport(cy, previousViewport.zoom, previousViewport.pan);
+          throw error;
+        }
+        payload.title = doc.title;
+        payload.source_file = doc.sourceFile;
+        payload.filename = doc.filename;
+        payload.function_name = doc.functionName;
+        payload.mode = doc.mode;
+        payload.initial_net = doc.originalNet;
+        payload.composite_net = doc.originalNet;
+        payload.compounds = doc.compounds || doc.originalNet.compounds || [];
+        payload.fold_steps = doc.foldSteps;
+        payload.final_sm = doc.finalSm;
+        payload.fully_reducible = doc.fullyReducible;
+        document.title = doc.title + ' - code2petri Viewer';
+        const headerTitle = document.querySelector('.header-title');
+        if (headerTitle) headerTitle.textContent = doc.title;
+        initialNet = doc.originalNet;
+        foldSteps = doc.foldSteps;
+        totalSteps = foldSteps.length;
+        currentStep = Math.min(doc.playback.currentStep, totalSteps);
+        stepNets = [initialNet];
+        foldSteps.forEach(function(step) { stepNets.push(step.net || initialNet); });
+        initialSm = (initialNet.transitions || []).reduce(function(acc, transition) {
+          const metadata = transition.metadata || {};
+          const tau = metadata.tau !== undefined ? Number(metadata.tau) :
+            (transition.tau !== undefined ? Number(transition.tau) : 1.0);
+          return acc + (Number.isNaN(tau) ? 1.0 : tau);
+        }, 0.0);
+        Object.keys(calleeNetsMap).forEach(function(key) { delete calleeNetsMap[key]; });
+        Object.assign(calleeNetsMap, doc.calleeNets);
+        expandedNodes.clear();
+        doc.expandedNodes.forEach(function(entry) { expandedNodes.set(entry[0], entry[1]); });
+        foldEngine.cfg = Object.assign({}, snapshot.engine.cfg);
+        foldEngine.stepCounter = snapshot.engine.stepCounter;
+        foldEngine.rememberedCustomNames = new Map(snapshot.engine.rememberedCustomNames);
+        setActiveDocumentMetadata({
+          source_file: doc.sourceFile,
+          filename: doc.filename,
+          function_name: doc.functionName
+        });
+        isFoldMode = doc.mode === 'fold' && totalSteps > 0;
+        if (foldControls) foldControls.style.display = isFoldMode ? 'flex' : 'none';
+        if (badgeSm) badgeSm.style.display = (isFoldMode || doc.mode === 'composite') ? 'flex' : 'none';
+        if (isFoldMode) updateUI();
+        if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+        cy.nodes(':selected').unselect();
+        closeInspector();
+        updateFoldableHighlights();
+        updateBatchPlaceFoldControls();
+        restoreViewport(cy, snapshot.viewport.zoom, snapshot.viewport.pan);
+      }
+
+      if (btnOpenSession && inputOpenSession) {
+        btnOpenSession.addEventListener('click', function(event) {
+          if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+          inputOpenSession.click();
+        });
+        inputOpenSession.addEventListener('change', function() {
+          const file = inputOpenSession.files && inputOpenSession.files[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = function() {
+            try {
+              restoreFoldStateSnapshot(parseFoldStateSnapshot(reader.result));
+            } catch (error) {
+              alert(error && error.message ? error.message : 'Could not open Fold State Snapshot.');
+            } finally {
+              inputOpenSession.value = '';
+            }
+          };
+          reader.onerror = function() {
+            alert('Could not read the selected Fold State Snapshot.');
+            inputOpenSession.value = '';
+          };
+          reader.readAsText(file);
         });
       }
 

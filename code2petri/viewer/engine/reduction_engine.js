@@ -1265,6 +1265,69 @@
           };
         }
 
+        executeFoldEntireFunction(compoundIdOrNode) {
+          const compoundId = typeof compoundIdOrNode === 'string'
+            ? compoundIdOrNode
+            : (compoundIdOrNode && typeof compoundIdOrNode.id === 'function' ? compoundIdOrNode.id() : null);
+          const folded = [];
+          const skipped = [];
+          let passes = 0;
+          const compound = compoundId ? this.cy.getElementById(compoundId) : null;
+
+          if (!compound || compound.length === 0 || !compound.hasClass('compound')) {
+            return {
+              success: false,
+              complete: false,
+              passes: passes,
+              folded: folded,
+              skipped: skipped,
+              message: 'The selected function compound no longer exists.'
+            };
+          }
+
+          if (this.isFunctionFoldedIntoSingleComponent(compound)) {
+            return {
+              success: false,
+              complete: true,
+              passes: passes,
+              folded: folded,
+              skipped: skipped,
+              message: 'This function is already fully collapsed.'
+            };
+          }
+
+          while (compound.inside() && !this.isFunctionFoldedIntoSingleComponent(compound)) {
+            const descendantPlaces = compound.descendants().filter(function(node) {
+              return node.hasClass('place');
+            });
+            if (descendantPlaces.length === 0) break;
+
+            const passResult = this.executeBatchFold(descendantPlaces.map(function(place) {
+              return place.id();
+            }));
+            passes++;
+            folded.push.apply(folded, passResult.folded);
+            skipped.push.apply(skipped, passResult.skipped);
+
+            if (this.isFunctionFoldedIntoSingleComponent(compound) || !passResult.success) break;
+          }
+
+          const complete = compound.inside() && this.isFunctionFoldedIntoSingleComponent(compound);
+          const success = folded.length > 0;
+          return {
+            success: success,
+            complete: complete,
+            passes: passes,
+            folded: folded,
+            skipped: skipped,
+            message: complete
+              ? `Function '${compoundId}' is fully collapsed after ${folded.length} reduction${folded.length === 1 ? '' : 's'}.`
+              : success
+                ? `Function '${compoundId}' remains partially folded after ${folded.length} reduction${folded.length === 1 ? '' : 's'}; no further eligible places were found.`
+                : `No progress folding function '${compoundId}'; no eligible descendant places were found.`
+          };
+        }
+
         isPendingLoopHead(placeNode) {
           if (!placeNode || !placeNode.inside || !placeNode.inside()) return false;
           if (!placeNode.hasClass('place')) return false;
