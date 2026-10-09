@@ -39,16 +39,13 @@
         Object.keys(value.data).forEach(function(dataKey) {
           if (dataKey === 'consumedSubgraph') return;
           if (dataKey === 'consumedSubnet') {
-            const canonical = value.data.consumedSubnet || value.data.consumedSubgraph;
-            data.consumedSubnet = _cloneSnapshotValue(canonical);
+            data.consumedSubnet = _cloneSnapshotValue(value.data.consumedSubnet);
           } else {
             data[dataKey] = _cloneSnapshotValue(value.data[dataKey]);
           }
         });
         if (!Object.prototype.hasOwnProperty.call(value.data, 'consumedSubnet') &&
             Object.prototype.hasOwnProperty.call(value.data, 'consumedSubgraph')) {
-          data.consumedSubnet = _cloneSnapshotValue(value.data.consumedSubgraph);
-        } else if (!value.data.consumedSubnet && value.data.consumedSubgraph) {
           data.consumedSubnet = _cloneSnapshotValue(value.data.consumedSubgraph);
         }
         clone.data = data;
@@ -159,7 +156,14 @@
       edgeReferences.push(data.parent);
     }
 
-    const consumed = data.consumedSubnet || data.consumedSubgraph;
+    const hasCanonicalRestoration = Object.prototype.hasOwnProperty.call(data, 'consumedSubnet');
+    const hasLegacyRestoration = Object.prototype.hasOwnProperty.call(data, 'consumedSubgraph');
+    const consumed = hasCanonicalRestoration
+      ? data.consumedSubnet
+      : data.consumedSubgraph;
+    if ((hasCanonicalRestoration || hasLegacyRestoration) && !_isObject(consumed)) {
+      _invalidSnapshot('restoration record must be an object');
+    }
     if (!_isObject(consumed) || visited.has(consumed)) return;
     visited.add(consumed);
     ['nodes', 'consumedCompounds'].forEach(function(key) {

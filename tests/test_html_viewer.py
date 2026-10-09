@@ -6145,22 +6145,30 @@ for (let i = 0; i < 13; i++) {
 }
 const cy = cytoscape({ elements });
 const engine = new LiveFoldReductionEngine(cy);
-for (let i = 1; i <= 12; i++) {
-  const result = engine.executeSinglePlaceContraction(cy.getElementById('p' + i));
-  if (!result.success) throw new Error('fold ' + i + ' failed: ' + result.reason);
-}
-if (cy.nodes().length !== 3) throw new Error('expected 3 visible nodes, got ' + cy.nodes().length);
 const documentContext = {
   title: 'Nested', sourceFile: '', filename: 'nested.pnml', functionName: '', mode: 'composite',
   originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
   calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
 };
 global.Blob = function(parts, options) { this.content = parts.join(''); this.type = options.type; };
-const startedAt = Date.now();
-const result = downloadFoldStateSnapshot({ cy, engine, document: documentContext, downloadBlob: () => {} });
-const elapsedMs = Date.now() - startedAt;
+const measurements = [];
+let result = null;
+for (let i = 1; i <= 12; i++) {
+  const foldResult = engine.executeSinglePlaceContraction(cy.getElementById('p' + i));
+  if (!foldResult.success) throw new Error('fold ' + i + ' failed: ' + foldResult.reason);
+  if ([3, 6, 9, 12].includes(i)) {
+    const startedAt = Date.now();
+    result = downloadFoldStateSnapshot({ cy, engine, document: documentContext, downloadBlob: () => {} });
+    measurements.push({ depth: i, bytes: Buffer.byteLength(result.json, 'utf8'), elapsedMs: Date.now() - startedAt });
+  }
+}
+if (cy.nodes().length !== 3) throw new Error('expected 3 visible nodes, got ' + cy.nodes().length);
 const bytes = Buffer.byteLength(result.json, 'utf8');
 if (bytes >= 100 * 1024) throw new Error('nested download too large: ' + bytes + ' bytes');
+if (measurements.length !== 4 || measurements.some(item => item.bytes >= 100 * 1024)) throw new Error('a smaller nested snapshot grew unexpectedly');
+for (let i = 1; i < measurements.length; i++) {
+  if (measurements[i].bytes > measurements[i - 1].bytes * 4) throw new Error('nested snapshot size grew recursively');
+}
 if (/\n\s+"/.test(result.json)) throw new Error('download JSON is indented');
 function assertCanonical(value) {
   if (!value || typeof value !== 'object') return;
@@ -6189,11 +6197,12 @@ for (let i = 0; i < 13; i++) {
     throw new Error('edge metadata was not restored at ' + i);
   }
 }
-console.log('PASS ' + bytes + ' bytes in ' + elapsedMs + ' ms');
+console.log('PASS ' + JSON.stringify(measurements));
 """
         proc = _run_node_script(script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
-        self.assertRegex(proc.stdout, r"PASS \d+ bytes in \d+ ms")
+        print(proc.stdout.strip())
+        self.assertRegex(proc.stdout, r"PASS \[\{\"depth\":3,\"bytes\":\d+,\"elapsedMs\":\d+\}")
 
     def test_snapshot_capture_normalizes_legacy_aliases_without_mutating_live_data(self):
         """Legacy-only and dual-field restoration records canonicalize on capture."""
@@ -6301,6 +6310,38 @@ try {
   restorationRejected = /restoration record references/i.test(error.message);
 }
 if (!restorationRejected) throw new Error('Restoration record with a dangling edge was accepted');
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_present_canonical_restoration_field_takes_precedence_even_when_invalid(self):
+        """A malformed canonical field must not be silently replaced by its legacy alias."""
+        script = r"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const legacy = { nodes: [], internalEdges: [], boundaryInArcs: [], boundaryOutArcs: [] };
+const cy = cytoscape({ elements: [{
+  group: 'nodes', data: { id: 'both-owner', consumedSubnet: null, consumedSubgraph: legacy }
+}] });
+const engine = { stepCounter: 0, cfg: {}, rememberedCustomNames: new Map() };
+const documentContext = {
+  title: 'Dual Field', sourceFile: '', filename: 'dual.pnml', functionName: '', mode: 'composite',
+  originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
+  calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
+};
+const snapshot = serializeFoldStateSnapshot({ cy, engine, document: documentContext });
+const saved = snapshot.elements[0].data;
+if (!Object.prototype.hasOwnProperty.call(saved, 'consumedSubnet') || saved.consumedSubnet !== null) {
+  throw new Error('capture did not preserve the present canonical field');
+}
+if (Object.prototype.hasOwnProperty.call(saved, 'consumedSubgraph')) throw new Error('legacy alias was retained');
+let rejected = false;
+try { parseFoldStateSnapshot(JSON.stringify(snapshot)); } catch (error) {
+  rejected = /Invalid Fold State Snapshot/.test(error.message);
+}
+if (!rejected) throw new Error('parser replaced malformed canonical data with legacy data');
 console.log('PASS');
 """
         proc = _run_node_script(script)
