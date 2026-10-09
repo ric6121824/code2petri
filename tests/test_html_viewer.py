@@ -6128,6 +6128,121 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+    def test_deeply_nested_session_download_is_compact_and_lossless(self):
+        """Ticket 51: production download keeps one restoration branch and unfolds all levels."""
+        script = r"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const { LiveFoldReductionEngine } = require('./code2petri/viewer/engine/reduction_engine.js');
+const { downloadFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const elements = [];
+for (let i = 0; i < 14; i++) {
+  elements.push({ group: 'nodes', data: { id: 'p' + i, type: 'Place', label: 'p' + i }, classes: 'place', position: { x: i * 10, y: i } });
+}
+for (let i = 0; i < 13; i++) {
+  elements.push({ group: 'nodes', data: { id: 't' + i, type: 'Transition', label: 't' + i, tau: 1.5 }, classes: 'transition' });
+  elements.push({ group: 'edges', data: { id: 'a' + (i * 2), source: 'p' + i, target: 't' + i, weight: 3 } });
+  elements.push({ group: 'edges', data: { id: 'a' + (i * 2 + 1), source: 't' + i, target: 'p' + (i + 1), weight: 3 } });
+}
+const cy = cytoscape({ elements });
+const engine = new LiveFoldReductionEngine(cy);
+for (let i = 1; i <= 12; i++) {
+  const result = engine.executeSinglePlaceContraction(cy.getElementById('p' + i));
+  if (!result.success) throw new Error('fold ' + i + ' failed: ' + result.reason);
+}
+if (cy.nodes().length !== 3) throw new Error('expected 3 visible nodes, got ' + cy.nodes().length);
+const documentContext = {
+  title: 'Nested', sourceFile: '', filename: 'nested.pnml', functionName: '', mode: 'composite',
+  originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
+  calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
+};
+global.Blob = function(parts, options) { this.content = parts.join(''); this.type = options.type; };
+const startedAt = Date.now();
+const result = downloadFoldStateSnapshot({ cy, engine, document: documentContext, downloadBlob: () => {} });
+const elapsedMs = Date.now() - startedAt;
+const bytes = Buffer.byteLength(result.json, 'utf8');
+if (bytes >= 100 * 1024) throw new Error('nested download too large: ' + bytes + ' bytes');
+if (/\n\s+"/.test(result.json)) throw new Error('download JSON is indented');
+function assertCanonical(value) {
+  if (!value || typeof value !== 'object') return;
+  if (value.group === 'nodes' && value.data && Object.prototype.hasOwnProperty.call(value.data, 'consumedSubgraph')) {
+    throw new Error('legacy consumedSubgraph alias was serialized for ' + value.data.id);
+  }
+  Object.keys(value).forEach(key => assertCanonical(value[key]));
+}
+assertCanonical(result.snapshot);
+const restored = parseFoldStateSnapshot(result.json);
+const cy2 = cytoscape({ elements: restored.elements });
+const engine2 = new LiveFoldReductionEngine(cy2);
+engine2.cfg = restored.engine.cfg;
+engine2.stepCounter = restored.engine.stepCounter;
+engine2.rememberedCustomNames = new Map(restored.engine.rememberedCustomNames);
+for (let i = 12; i >= 1; i--) {
+  const component = cy2.getElementById('c_' + String(i).padStart(2, '0'));
+  const unfolded = engine2.executeComponentLocalUnfold(component);
+  if (!unfolded.success) throw new Error('unfold ' + i + ' failed: ' + unfolded.reason);
+}
+if (cy2.nodes().length !== 27 || cy2.edges().length !== 26) throw new Error('original graph size was not restored');
+for (let i = 0; i < 14; i++) if (cy2.getElementById('p' + i).length !== 1) throw new Error('missing p' + i);
+for (let i = 0; i < 13; i++) {
+  if (cy2.getElementById('t' + i).length !== 1) throw new Error('missing t' + i);
+  if (cy2.getElementById('a' + (i * 2)).data('weight') !== 3 || cy2.getElementById('a' + (i * 2 + 1)).data('weight') !== 3) {
+    throw new Error('edge metadata was not restored at ' + i);
+  }
+}
+console.log('PASS ' + bytes + ' bytes in ' + elapsedMs + ' ms');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertRegex(proc.stdout, r"PASS \d+ bytes in \d+ ms")
+
+    def test_snapshot_capture_normalizes_legacy_aliases_without_mutating_live_data(self):
+        """Legacy-only and dual-field restoration records canonicalize on capture."""
+        script = r"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const { serializeFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const child = id => ({ group: 'nodes', data: { id }, classes: 'transition' });
+const legacy = { nodes: [child('legacy-hidden')], internalEdges: [], boundaryInArcs: [], boundaryOutArcs: [] };
+const canonical = { nodes: [child('canonical-hidden')], internalEdges: [], boundaryInArcs: [], boundaryOutArcs: [] };
+const nestedLegacy = { nodes: [{ group: 'nodes', data: { id: 'nested-owner', consumedSubgraph: { nodes: [child('deep-hidden')] } } }], internalEdges: [], boundaryInArcs: [], boundaryOutArcs: [] };
+const cy = cytoscape({ elements: [
+  { group: 'nodes', data: { id: 'legacy-owner', consumedSubgraph: legacy }, classes: 'transition' },
+  { group: 'nodes', data: { id: 'canonical-owner', consumedSubnet: canonical }, classes: 'transition' },
+  { group: 'nodes', data: { id: 'both-owner', consumedSubnet: canonical, consumedSubgraph: legacy }, classes: 'transition' },
+  { group: 'nodes', data: { id: 'nested-owner-root', consumedSubnet: nestedLegacy, metadata: { consumedSubgraph: 'user metadata' } }, classes: 'transition' }
+] });
+const engine = { stepCounter: 0, cfg: {}, rememberedCustomNames: new Map() };
+const documentContext = {
+  title: 'Legacy', sourceFile: '', filename: 'legacy.pnml', functionName: '', mode: 'composite',
+  originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
+  calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
+};
+const snapshot = serializeFoldStateSnapshot({ cy, engine, document: documentContext });
+const byId = id => snapshot.elements.find(el => el.data && el.data.id === id).data;
+function findRestorableNode(value, id) {
+  if (!value || typeof value !== 'object') return null;
+  if (value.group === 'nodes' && value.data && value.data.id === id) return value.data;
+  for (const key of Object.keys(value)) {
+    const found = findRestorableNode(value[key], id);
+    if (found) return found;
+  }
+  return null;
+}
+if (!byId('legacy-owner').consumedSubnet.nodes.some(n => n.data.id === 'legacy-hidden')) throw new Error('legacy-only history missing');
+if (!byId('canonical-owner').consumedSubnet.nodes.some(n => n.data.id === 'canonical-hidden')) throw new Error('canonical-only history missing');
+if (byId('both-owner').consumedSubnet.nodes[0].data.id !== 'canonical-hidden') throw new Error('canonical field did not take precedence');
+if (Object.prototype.hasOwnProperty.call(byId('legacy-owner'), 'consumedSubgraph')) throw new Error('legacy field remained at top level');
+const nestedOwner = findRestorableNode(snapshot, 'nested-owner');
+if (!nestedOwner || Object.prototype.hasOwnProperty.call(nestedOwner, 'consumedSubgraph')) throw new Error('nested legacy field remained');
+if (byId('nested-owner-root').metadata.consumedSubgraph !== 'user metadata') throw new Error('ordinary user metadata was rewritten');
+if (!cy.getElementById('legacy-owner').data('consumedSubgraph')) throw new Error('live graph alias was mutated');
+snapshot.elements.find(el => el.data.id === 'legacy-owner').data.consumedSubnet.nodes[0].data.id = 'snapshot-edit';
+if (cy.getElementById('legacy-owner').data('consumedSubgraph').nodes[0].data.id !== 'legacy-hidden') throw new Error('snapshot is not detached from live graph');
+console.log('PASS');
+""";
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_snapshot_parser_validates_graph_context_and_restorable_component_ids(self):
         script = r"""
 const { parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');

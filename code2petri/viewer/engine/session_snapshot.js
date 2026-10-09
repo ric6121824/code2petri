@@ -22,6 +22,43 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  // Detach snapshot values while normalizing restoration aliases before they can
+  // multiply through recursive JSON cloning. On disk, consumedSubnet is canonical.
+  function _cloneSnapshotValue(value) {
+    if (Array.isArray(value)) return value.map(_cloneSnapshotValue);
+    if (!_isObject(value)) return value;
+
+    const isNodeRecord = value.group === 'nodes' && _isObject(value.data);
+    const hasRestoration = isNodeRecord &&
+      (Object.prototype.hasOwnProperty.call(value.data, 'consumedSubnet') ||
+       Object.prototype.hasOwnProperty.call(value.data, 'consumedSubgraph'));
+    const clone = {};
+    Object.keys(value).forEach(function(key) {
+      if (hasRestoration && key === 'data') {
+        const data = {};
+        Object.keys(value.data).forEach(function(dataKey) {
+          if (dataKey === 'consumedSubgraph') return;
+          if (dataKey === 'consumedSubnet') {
+            const canonical = value.data.consumedSubnet || value.data.consumedSubgraph;
+            data.consumedSubnet = _cloneSnapshotValue(canonical);
+          } else {
+            data[dataKey] = _cloneSnapshotValue(value.data[dataKey]);
+          }
+        });
+        if (!Object.prototype.hasOwnProperty.call(value.data, 'consumedSubnet') &&
+            Object.prototype.hasOwnProperty.call(value.data, 'consumedSubgraph')) {
+          data.consumedSubnet = _cloneSnapshotValue(value.data.consumedSubgraph);
+        } else if (!value.data.consumedSubnet && value.data.consumedSubgraph) {
+          data.consumedSubnet = _cloneSnapshotValue(value.data.consumedSubgraph);
+        }
+        clone.data = data;
+      } else {
+        clone[key] = _cloneSnapshotValue(value[key]);
+      }
+    });
+    return clone;
+  }
+
   function _rememberedCustomNameEntries(engine) {
     if (!engine || !(engine.rememberedCustomNames instanceof Map)) return [];
     return Array.from(engine.rememberedCustomNames.entries()).map(function(entry) {
@@ -54,14 +91,14 @@
     return {
       schemaVersion: SCHEMA_VERSION,
       snapshotType: SNAPSHOT_TYPE,
-      elements: _cloneJson(cy.elements().jsons()),
+      elements: _cloneSnapshotValue(cy.elements().jsons()),
       engine: {
         stepCounter: Number(engine.stepCounter) || 0,
         cfg: _cloneJson(engine.cfg || {}),
         rememberedCustomNames: _cloneJson(_rememberedCustomNameEntries(engine))
       },
       viewport: _cloneJson(viewport),
-      document: _cloneJson(opts.document || {})
+      document: _cloneSnapshotValue(opts.document || {})
     };
   }
 
@@ -393,7 +430,7 @@
   function downloadFoldStateSnapshot(options) {
     const opts = options || {};
     const snapshot = serializeFoldStateSnapshot(opts);
-    const json = JSON.stringify(snapshot, null, 2);
+    const json = JSON.stringify(snapshot);
     const title = opts.document && opts.document.title;
     const filename = opts.filename || getFoldStateSnapshotFilename(title);
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
