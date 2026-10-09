@@ -405,6 +405,7 @@
         <span class="value sm-score" id="val-sm">0.0</span>
       </div>
 
+      <button class="btn" id="btn-save-session" title="Download the current Fold State Snapshot">Save Session</button>
       <button class="btn" id="btn-export-pnml" title="Export current net state to ISO/IEC 15909-2 PNML">Export PNML</button>
     </div>
   </header>
@@ -1774,6 +1775,7 @@
       const btnFold = document.getElementById('btn-fold');
       const btnUnfold = document.getElementById('btn-unfold');
       const btnReset = document.getElementById('btn-reset');
+      const btnSaveSession = document.getElementById('btn-save-session');
       const btnExportPnml = document.getElementById('btn-export-pnml');
       const valStep = document.getElementById('val-step');
       const valSm = document.getElementById('val-sm');
@@ -1885,6 +1887,40 @@
       if (btnReset) {
         btnReset.addEventListener('click', function() {
           renderStep(0);
+        });
+      }
+
+      function getFoldStateDocumentContext() {
+        const originalNet = payload.composite_net || payload.initial_net || initialNet;
+        const compounds = payload.compounds || (originalNet && originalNet.compounds) || [];
+        const rootCompound = compounds.find(function(compound) { return !compound.parent; }) || null;
+        return {
+          title: payload.title || {{TITLE_JSON}},
+          sourceFile: payload.source_file || '',
+          filename: payload.filename || '',
+          functionName: payload.function_name ||
+            (payload.composite_net && payload.composite_net.function_name) ||
+            (rootCompound && rootCompound.function_name) || '',
+          mode: payload.mode || 'no-fold',
+          originalNet: originalNet,
+          compounds: compounds,
+          foldSteps: foldSteps,
+          finalSm: payload.final_sm,
+          fullyReducible: payload.fully_reducible,
+          calleeNets: calleeNetsMap,
+          expandedNodes: Array.from(expandedNodes.entries()),
+          playback: { currentStep: currentStep, totalSteps: totalSteps }
+        };
+      }
+
+      if (btnSaveSession) {
+        btnSaveSession.addEventListener('click', function(e) {
+          if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+          downloadFoldStateSnapshot({
+            cy: cy,
+            engine: foldEngine,
+            document: getFoldStateDocumentContext()
+          });
         });
       }
 

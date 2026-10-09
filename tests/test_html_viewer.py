@@ -5147,6 +5147,127 @@ console.log('PASS');
             is_t_to_p = (src in trans_ids and tgt in place_ids)
             self.assertTrue(is_p_to_t or is_t_to_p, f"Arc {src} -> {tgt} violates bipartite Petri net property")
 
+    # =========================================================================
+    # Ticket 48 — Save Session as a Fold State Snapshot
+    # =========================================================================
+
+    def test_save_session_button_visible_in_generated_viewer(self):
+        """The generated offline viewer exposes Save Session in every viewer mode."""
+        net = PetriNet()
+        net.add_place("p0", "start", initial_tokens=1)
+        net.add_transition("t0", "run")
+
+        html_content = generate_html(net, title="Order Flow")
+
+        self.assertIn('id="btn-save-session"', html_content)
+        self.assertIn('Save Session', html_content)
+        self.assertIn("btnSaveSession.addEventListener('click'", html_content)
+
+    def test_fold_state_snapshot_download_preserves_live_and_restoration_state(self):
+        """Saving after fold/rename/unfold captures resumable state without mutating the viewer."""
+        script = r"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const { LiveFoldReductionEngine } = require('./code2petri/viewer/engine/reduction_engine.js');
+const { serializeFoldStateSnapshot, downloadFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+
+const cy = cytoscape({ elements: [
+  { group: 'nodes', data: { id: 'p0', type: 'Place' }, classes: 'place', position: { x: 0, y: 0 } },
+  { group: 'nodes', data: { id: 'p1', type: 'Place' }, classes: 'place', position: { x: 100, y: 20 } },
+  { group: 'nodes', data: { id: 'p2', type: 'Place' }, classes: 'place', position: { x: 200, y: 40 } },
+  { group: 'nodes', data: { id: 'p3', type: 'Place' }, classes: 'place', position: { x: 300, y: 60 } },
+  { group: 'nodes', data: { id: 't0', type: 'Transition', tau: 1 }, classes: 'transition' },
+  { group: 'nodes', data: { id: 't1', type: 'Transition', tau: 1 }, classes: 'transition' },
+  { group: 'nodes', data: { id: 't2', type: 'Transition', tau: 1 }, classes: 'transition' },
+  { group: 'edges', data: { id: 'a0', source: 'p0', target: 't0' } },
+  { group: 'edges', data: { id: 'a1', source: 't0', target: 'p1' } },
+  { group: 'edges', data: { id: 'a2', source: 'p1', target: 't1' } },
+  { group: 'edges', data: { id: 'a3', source: 't1', target: 'p2' } },
+  { group: 'edges', data: { id: 'a4', source: 'p2', target: 't2' } },
+  { group: 'edges', data: { id: 'a5', source: 't2', target: 'p3' } }
+] });
+const engine = new LiveFoldReductionEngine(cy, { choice: 1.25, loop: 4.5 });
+
+const first = engine.executeSinglePlaceContraction(cy.getElementById('p1'));
+if (!first.success) throw new Error('first fold failed: ' + first.reason);
+engine.renameNode(first.node, 'Validate Order');
+const unfolded = engine.executeComponentLocalUnfold(first.node);
+if (!unfolded.success) throw new Error('unfold failed: ' + unfolded.reason);
+const second = engine.executeSinglePlaceContraction(cy.getElementById('p1'));
+if (!second.success) throw new Error('second fold failed: ' + second.reason);
+const third = engine.executeSinglePlaceContraction(cy.getElementById('p2'));
+if (!third.success) throw new Error('nested fold failed: ' + third.reason);
+
+const liveComponent = third.node;
+liveComponent.position({ x: 412.5, y: 207.25 });
+liveComponent.select();
+cy.add({
+  group: 'nodes',
+  data: {
+    id: 'compound_checkout', label: 'checkout()', function_name: 'checkout',
+    is_compound: true, is_collapsed_compound: true, collapsed_opaque_id: liveComponent.id()
+  },
+  classes: 'compound collapsed-compound',
+  position: { x: 360, y: 160 }
+});
+cy.zoom(1.75);
+cy.pan({ x: 83, y: -41 });
+
+const documentContext = {
+  title: 'Order Flow', sourceFile: '/src/orders.py', filename: 'orders.py',
+  functionName: 'process_order', mode: 'composite',
+  originalNet: { places: [{ id: 'p0' }], transitions: [{ id: 't0' }], arcs: [] },
+  compounds: [{ id: 'compound_process_order', function_name: 'process_order' }],
+  foldSteps: [{ component_type: 'Sequence' }], finalSm: 9.5, fullyReducible: true,
+  calleeNets: { helper: { places: [], transitions: [], arcs: [] } },
+  expandedNodes: [['call_helper', { calleeName: 'helper' }]],
+  playback: { currentStep: 1, totalSteps: 1 }
+};
+
+const graphBefore = JSON.stringify(cy.elements().jsons());
+const viewportBefore = { zoom: cy.zoom(), pan: Object.assign({}, cy.pan()) };
+const selectedBefore = cy.$(':selected').map(n => n.id());
+const snapshot = serializeFoldStateSnapshot({ cy, engine, document: documentContext });
+
+if (snapshot.schemaVersion !== 1 || snapshot.snapshotType !== 'code2petri-fold-state') throw new Error('wrong schema identity');
+if (snapshot.engine.stepCounter !== 3) throw new Error('step counter not retained');
+if (snapshot.engine.cfg.choice !== 1.25 || snapshot.engine.cfg.loop !== 4.5) throw new Error('Fold Config not retained');
+if (!snapshot.engine.rememberedCustomNames.some(entry => entry[1] === 'Validate Order')) throw new Error('remembered name missing');
+if (snapshot.viewport.zoom !== 1.75 || snapshot.viewport.pan.x !== 83 || snapshot.viewport.pan.y !== -41) throw new Error('viewport missing');
+if (snapshot.document.functionName !== 'process_order' || snapshot.document.sourceFile !== '/src/orders.py') throw new Error('identity missing');
+if (!snapshot.document.originalNet || !snapshot.document.calleeNets.helper || snapshot.document.playback.currentStep !== 1) throw new Error('context missing');
+const savedLive = snapshot.elements.find(el => el.group === 'nodes' && el.data.id === liveComponent.id());
+if (!savedLive) throw new Error('live component missing');
+if (savedLive.position.x !== 412.5 || savedLive.position.y !== 207.25) throw new Error('position missing');
+if (typeof savedLive.data.tau !== 'number' || typeof savedLive.data.omega !== 'number') throw new Error('weights or penalties missing');
+if (!savedLive.data.consumedSubnet || !savedLive.data.consumedSubnet.nodes.some(n => n.data && n.data.consumedSubnet)) {
+  throw new Error('nested consumed subnet missing');
+}
+const savedCompound = snapshot.elements.find(el => el.group === 'nodes' && el.data.id === 'compound_checkout');
+if (!savedCompound || !savedCompound.classes.includes('collapsed-compound') || !savedCompound.data.is_collapsed_compound) {
+  throw new Error('Collapsed Compound State missing');
+}
+if (JSON.stringify(cy.elements().jsons()) !== graphBefore) throw new Error('saving mutated graph');
+if (cy.zoom() !== viewportBefore.zoom || cy.pan().x !== viewportBefore.pan.x || cy.pan().y !== viewportBefore.pan.y) throw new Error('saving mutated viewport');
+if (JSON.stringify(cy.$(':selected').map(n => n.id())) !== JSON.stringify(selectedBefore)) throw new Error('saving mutated selection');
+
+let blob = null;
+let filename = null;
+global.Blob = function(parts, options) { this.content = parts.join(''); this.type = options.type; blob = this; };
+const download = downloadFoldStateSnapshot({
+  cy, engine, document: documentContext,
+  downloadBlob: function(createdBlob, createdFilename) { blob = createdBlob; filename = createdFilename; }
+});
+const parsed = JSON.parse(download.json);
+if (filename !== 'Order Flow_session.json') throw new Error('wrong filename: ' + filename);
+if (!blob || blob.type !== 'application/json;charset=utf-8') throw new Error('wrong Blob type');
+if (parsed.elements.length !== snapshot.elements.length) throw new Error('download payload differs');
+if (download.json.includes('CLIENT-SIDE APPLICATION LOGIC') || download.json.includes('<script')) throw new Error('viewer code leaked');
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     _SIMPLE_SEQUENCE_NET_LITERAL = """{
   places: [
     { id: 'p0', label: 'p0' },
@@ -5401,8 +5522,5 @@ console.log('PASS');
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
 
 
