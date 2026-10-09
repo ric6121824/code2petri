@@ -2114,11 +2114,16 @@
       if (btnSaveSession) {
         btnSaveSession.addEventListener('click', function(e) {
           if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-          downloadFoldStateSnapshot({
-            cy: cy,
-            engine: foldEngine,
-            document: getFoldStateDocumentContext()
-          });
+          try {
+            downloadFoldStateSnapshot({
+              cy: cy,
+              engine: foldEngine,
+              document: getFoldStateDocumentContext()
+            });
+          } catch (error) {
+            alert('Could not save Fold State Snapshot: ' +
+              (error && error.message ? error.message : 'Unknown download error'));
+          }
         });
       }
 

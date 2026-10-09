@@ -6308,6 +6308,85 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
 
+class TestSessionDownloadLifecycle(unittest.TestCase):
+    def test_production_download_helper_retains_independent_urls_and_cleans_up(self):
+        """Actual helper clicks real mocked anchors and releases each URL after a bounded grace period."""
+        script = r"""
+const { downloadFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const callbacks = [];
+const urls = new Map();
+const removed = [];
+const anchors = [];
+global.setTimeout = (callback, delay) => { callbacks.push({ callback, delay }); return callbacks.length; };
+global.Blob = function(parts, options) { this.bytes = parts.join(''); this.type = options.type; };
+global.URL = {
+  createObjectURL(blob) { const url = 'blob:' + (urls.size + 1); urls.set(url, blob.bytes); return url; },
+  revokeObjectURL(url) { urls.delete(url); }
+};
+global.document = {
+  body: {
+    appendChild(anchor) { anchor.attached = true; },
+    removeChild(anchor) { anchor.attached = false; removed.push(anchor); }
+  },
+  createElement(tag) {
+    const anchor = { tagName: tag, click() { this.clickedUrl = this.href; this.clickedBytes = urls.get(this.href); } };
+    anchors.push(anchor);
+    return anchor;
+  }
+};
+const cy = { elements: () => ({ jsons: () => [] }), zoom: () => 1, pan: () => ({ x: 0, y: 0 }) };
+const engine = { stepCounter: 0, cfg: {}, rememberedCustomNames: new Map() };
+const doc = { title: 'Rapid', sourceFile: '', filename: '', functionName: '', mode: 'no-fold' };
+const one = downloadFoldStateSnapshot({ cy, engine, document: doc });
+const two = downloadFoldStateSnapshot({ cy, engine, document: doc });
+if (anchors.length !== 2 || anchors.some(a => !a.attached && !removed.includes(a))) throw new Error('anchor lifecycle incomplete');
+if (anchors[0].clickedUrl === anchors[1].clickedUrl) throw new Error('downloads did not get independent URLs');
+if (anchors[0].download !== one.filename || anchors[1].download !== two.filename) throw new Error('download filename missing');
+for (const anchor of anchors) {
+  if (!anchor.clickedBytes || JSON.stringify(JSON.parse(anchor.clickedBytes)) !== anchor.clickedBytes) throw new Error('incomplete or invalid downloaded bytes');
+}
+if (callbacks.length !== 2 || callbacks.some(item => item.delay < 1000 || item.delay > 60000)) throw new Error('cleanup is not bounded');
+if (urls.size !== 2) throw new Error('URL revoked before browser had a grace period');
+callbacks[0].callback();
+if (urls.size !== 1 || !urls.has(anchors[1].clickedUrl)) throw new Error('one download cleanup interrupted another');
+callbacks[1].callback();
+if (urls.size !== 0 || removed.length !== 2) throw new Error('download resources leaked');
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_production_download_helper_reports_failures_and_cleans_partial_resources(self):
+        script = r"""
+const { downloadFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const revoked = [];
+global.Blob = function(parts) { this.bytes = parts.join(''); };
+global.URL = { createObjectURL: () => 'blob:failure', revokeObjectURL: url => revoked.push(url) };
+let removed = 0;
+global.document = {
+  body: { appendChild() {}, removeChild() { removed++; } },
+  createElement: () => ({ click() { throw new Error('blocked click'); } })
+};
+const cy = { elements: () => ({ jsons: () => [] }), zoom: () => 1, pan: () => ({ x: 0, y: 0 }) };
+const engine = { stepCounter: 0, cfg: {}, rememberedCustomNames: new Map() };
+const doc = { title: 'Failure', sourceFile: '', filename: '', functionName: '', mode: 'no-fold' };
+let message = '';
+try { downloadFoldStateSnapshot({ cy, engine, document: doc }); } catch (error) { message = error.message; }
+if (message !== 'blocked click' || revoked[0] !== 'blob:failure' || removed !== 1) throw new Error('detectable helper failure was hidden or leaked resources');
+let allocations = 0;
+URL.createObjectURL = () => { allocations++; return 'blob:unreleased'; };
+URL.revokeObjectURL = undefined;
+let unsupported = '';
+try { downloadFoldStateSnapshot({ cy, engine, document: doc }); } catch (error) { unsupported = error.message; }
+if (!/cannot create a session download/i.test(unsupported) || allocations !== 0) throw new Error('helper allocated a URL without a cleanup capability');
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+
 class TestViewportModule(unittest.TestCase):
     """Unit tests for the modularized code2petri/viewer/engine/viewport.js module."""
 

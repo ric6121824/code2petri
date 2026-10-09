@@ -406,20 +406,48 @@
   }
 
   function _downloadBlob(blob, filename) {
-    if (typeof document === 'undefined' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return;
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    if (document.body && typeof document.body.appendChild === 'function') {
-      document.body.appendChild(anchor);
-      anchor.click();
-      document.body.removeChild(anchor);
-    } else if (typeof anchor.click === 'function') {
-      anchor.click();
+    if (typeof document === 'undefined' || typeof URL === 'undefined' ||
+        typeof URL.createObjectURL !== 'function' || typeof URL.revokeObjectURL !== 'function') {
+      throw new Error('This browser cannot create a session download');
     }
-    if (typeof URL.revokeObjectURL === 'function') {
-      setTimeout(function() { URL.revokeObjectURL(url); }, 100);
+
+    // Browsers do not expose a completion event for an anchor download. Keep
+    // each URL alive independently for a conservative, bounded grace period;
+    // this is an initiation safeguard, not proof that the file was written.
+    const URL_GRACE_PERIOD_MS = 30000;
+    const url = URL.createObjectURL(blob);
+    let anchor = null;
+    let attached = false;
+    let released = false;
+    function releaseUrl() {
+      if (released) return;
+      released = true;
+      URL.revokeObjectURL(url);
+    }
+    function removeAnchor() {
+      if (!attached || !document.body || typeof document.body.removeChild !== 'function') return;
+      attached = false;
+      document.body.removeChild(anchor);
+    }
+
+    try {
+      anchor = document.createElement('a');
+      if (!anchor || typeof anchor.click !== 'function') {
+        throw new Error('This browser cannot initiate a session download');
+      }
+      anchor.href = url;
+      anchor.download = filename;
+      if (document.body && typeof document.body.appendChild === 'function') {
+        attached = true;
+        document.body.appendChild(anchor);
+      }
+      anchor.click();
+      removeAnchor();
+      setTimeout(releaseUrl, URL_GRACE_PERIOD_MS);
+    } catch (error) {
+      try { removeAnchor(); } catch (_) { /* Keep the initiating error visible. */ }
+      try { releaseUrl(); } catch (_) { /* Best-effort cleanup after a failed initiation. */ }
+      throw error;
     }
   }
 
@@ -433,6 +461,7 @@
     const json = JSON.stringify(snapshot);
     const title = opts.document && opts.document.title;
     const filename = opts.filename || getFoldStateSnapshotFilename(title);
+    if (typeof Blob !== 'function') throw new Error('This browser cannot create a session download');
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
     const downloadBlob = opts.downloadBlob || _downloadBlob;
     downloadBlob(blob, filename);
