@@ -6208,15 +6208,16 @@ console.log('PASS ' + JSON.stringify(measurements));
         """Legacy-only and dual-field restoration records canonicalize on capture."""
         script = r"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
-const { serializeFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
 const child = id => ({ group: 'nodes', data: { id }, classes: 'transition' });
 const legacy = { nodes: [child('legacy-hidden')], internalEdges: [], boundaryInArcs: [], boundaryOutArcs: [] };
 const canonical = { nodes: [child('canonical-hidden')], internalEdges: [], boundaryInArcs: [], boundaryOutArcs: [] };
+const canonicalBoth = { nodes: [child('both-hidden')], internalEdges: [], boundaryInArcs: [], boundaryOutArcs: [] };
 const nestedLegacy = { nodes: [{ group: 'nodes', data: { id: 'nested-owner', consumedSubgraph: { nodes: [child('deep-hidden')] } } }], internalEdges: [], boundaryInArcs: [], boundaryOutArcs: [] };
 const cy = cytoscape({ elements: [
   { group: 'nodes', data: { id: 'legacy-owner', consumedSubgraph: legacy }, classes: 'transition' },
   { group: 'nodes', data: { id: 'canonical-owner', consumedSubnet: canonical }, classes: 'transition' },
-  { group: 'nodes', data: { id: 'both-owner', consumedSubnet: canonical, consumedSubgraph: legacy }, classes: 'transition' },
+  { group: 'nodes', data: { id: 'both-owner', consumedSubnet: canonicalBoth, consumedSubgraph: legacy }, classes: 'transition' },
   { group: 'nodes', data: { id: 'nested-owner-root', consumedSubnet: nestedLegacy, metadata: { consumedSubgraph: 'user metadata' } }, classes: 'transition' }
 ] });
 const engine = { stepCounter: 0, cfg: {}, rememberedCustomNames: new Map() };
@@ -6238,7 +6239,7 @@ function findRestorableNode(value, id) {
 }
 if (!byId('legacy-owner').consumedSubnet.nodes.some(n => n.data.id === 'legacy-hidden')) throw new Error('legacy-only history missing');
 if (!byId('canonical-owner').consumedSubnet.nodes.some(n => n.data.id === 'canonical-hidden')) throw new Error('canonical-only history missing');
-if (byId('both-owner').consumedSubnet.nodes[0].data.id !== 'canonical-hidden') throw new Error('canonical field did not take precedence');
+if (byId('both-owner').consumedSubnet.nodes[0].data.id !== 'both-hidden') throw new Error('canonical field did not take precedence');
 if (Object.prototype.hasOwnProperty.call(byId('legacy-owner'), 'consumedSubgraph')) throw new Error('legacy field remained at top level');
 const nestedOwner = findRestorableNode(snapshot, 'nested-owner');
 if (!nestedOwner || Object.prototype.hasOwnProperty.call(nestedOwner, 'consumedSubgraph')) throw new Error('nested legacy field remained');
@@ -6246,6 +6247,45 @@ if (byId('nested-owner-root').metadata.consumedSubgraph !== 'user metadata') thr
 if (!cy.getElementById('legacy-owner').data('consumedSubgraph')) throw new Error('live graph alias was mutated');
 snapshot.elements.find(el => el.data.id === 'legacy-owner').data.consumedSubnet.nodes[0].data.id = 'snapshot-edit';
 if (cy.getElementById('legacy-owner').data('consumedSubgraph').nodes[0].data.id !== 'legacy-hidden') throw new Error('snapshot is not detached from live graph');
+function transformRestoration(value, mode, nestedOnly) {
+  if (Array.isArray(value)) return value.forEach(item => transformRestoration(item, mode, nestedOnly));
+  if (!value || typeof value !== 'object') return;
+  if (value.group === 'nodes' && value.data) {
+    const data = value.data;
+    const isTarget = !nestedOnly || data.id === 'nested-owner';
+    if (isTarget && Object.prototype.hasOwnProperty.call(data, 'consumedSubnet')) {
+      if (mode === 'legacy') {
+        data.consumedSubgraph = data.consumedSubnet;
+        delete data.consumedSubnet;
+      } else if (mode === 'both') {
+        data.consumedSubgraph = legacy;
+      }
+    }
+  }
+  Object.keys(value).forEach(key => transformRestoration(value[key], mode, nestedOnly));
+}
+const legacyInput = JSON.parse(JSON.stringify(snapshot));
+transformRestoration(legacyInput, 'legacy', false);
+const bothInput = JSON.parse(JSON.stringify(snapshot));
+transformRestoration(bothInput, 'both', false);
+const mixedInput = JSON.parse(JSON.stringify(snapshot));
+transformRestoration(mixedInput, 'legacy', true);
+function assertCanonical(value) {
+  if (!value || typeof value !== 'object') return;
+  if (value.group === 'nodes' && value.data && Object.prototype.hasOwnProperty.call(value.data, 'consumedSubgraph')) {
+    throw new Error('resave retained legacy restoration alias');
+  }
+  Object.keys(value).forEach(key => assertCanonical(value[key]));
+}
+for (const input of [legacyInput, bothInput, mixedInput]) {
+  const opened = parseFoldStateSnapshot(JSON.stringify(input));
+  const reopenedCy = cytoscape({ elements: opened.elements });
+  const resaved = serializeFoldStateSnapshot({ cy: reopenedCy, engine, document: documentContext });
+  assertCanonical(resaved);
+}
+const bothParsed = parseFoldStateSnapshot(JSON.stringify(bothInput));
+const bothNode = bothParsed.elements.find(element => element.data.id === 'canonical-owner').data;
+if (bothNode.consumedSubnet.nodes[0].data.id !== 'canonical-hidden') throw new Error('canonical history lost precedence');
 console.log('PASS');
 """;
         proc = _run_node_script(script)
