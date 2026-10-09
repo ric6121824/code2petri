@@ -1657,20 +1657,12 @@
         const viewportBefore = captureViewport(cy);
         const result = foldEngine.executeFoldEntireFunction(compoundNode);
         if (result.success) {
-          if (cy.elements().length > 0 && typeof cy.layout === 'function') {
-            cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false, animate: false })).run();
-          }
-          restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
-          updateFoldableHighlights();
+          refreshFoldActionView(viewportBefore);
           openInspector(compoundNode);
-          if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
         }
         const els = _resolveHudElements();
         if (els.actionResultEl) {
-          const skippedSummary = result.skipped.length > 0
-            ? ` Skipped: ${result.skipped.map(function(item) { return `${item.placeId} (${item.reason})`; }).join('; ')}.`
-            : '';
-          els.actionResultEl.textContent = result.message + skippedSummary;
+          els.actionResultEl.textContent = formatFoldActionResult(result);
         }
         return result;
       }
@@ -2039,6 +2031,22 @@
         return cy.nodes('.place:selected').map(function(place) { return place.id(); });
       }
 
+      function refreshFoldActionView(viewportBefore) {
+        if (cy.elements().length > 0 && typeof cy.layout === 'function') {
+          cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false, animate: false })).run();
+        }
+        restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
+        updateFoldableHighlights();
+        if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+      }
+
+      function formatFoldActionResult(result) {
+        const skippedSummary = result.skipped.length > 0
+          ? ` Skipped: ${result.skipped.map(function(item) { return `${item.placeId} (${item.reason})`; }).join('; ')}.`
+          : '';
+        return result.message + skippedSummary;
+      }
+
       function updateBatchPlaceFoldControls() {
         if (!selectionFoldControls || !btnFoldSelectedPlaces) return;
         const selectedPlaceCount = getSelectedPlaceIds().length;
@@ -2055,24 +2063,16 @@
         const viewportBefore = captureViewport(cy);
         const result = foldEngine.executeBatchFold(selectedPlaceIds);
         if (result.folded.length > 0) {
-          if (cy.elements().length > 0 && typeof cy.layout === 'function') {
-            cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false, animate: false })).run();
-          }
-          restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
-          updateFoldableHighlights();
+          refreshFoldActionView(viewportBefore);
           if (selectedInspectorNode && selectedInspectorNode.inside()) {
             openInspector(selectedInspectorNode);
           } else {
             closeInspector();
           }
-          if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
         }
 
         if (batchFoldResult) {
-          const skippedSummary = result.skipped.length > 0
-            ? ` Skipped: ${result.skipped.map(function(item) { return `${item.placeId} (${item.reason})`; }).join('; ')}.`
-            : '';
-          batchFoldResult.textContent = result.message + skippedSummary;
+          batchFoldResult.textContent = formatFoldActionResult(result);
         }
         updateBatchPlaceFoldControls();
       }

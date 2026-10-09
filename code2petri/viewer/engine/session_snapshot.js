@@ -162,15 +162,93 @@
     ['title', 'sourceFile', 'filename', 'functionName', 'mode'].forEach(function(key) {
       _requireString(documentContext[key], 'document.' + key);
     });
+    function validateCompounds(compounds, description, nodeIds) {
+      if (!Array.isArray(compounds)) _invalidSnapshot(description + ' must be an array');
+      compounds.forEach(function(compound, index) {
+        const compoundDescription = description + '[' + index + ']';
+        if (!_isObject(compound)) _invalidSnapshot(compoundDescription + ' must be an object');
+        _requireString(compound.id, compoundDescription + '.id');
+        if (nodeIds && nodeIds.has(compound.id)) {
+          _invalidSnapshot(description + ' contains duplicate node ID ' + compound.id);
+        }
+        if (nodeIds) nodeIds.add(compound.id);
+        if (compound.parent !== undefined && compound.parent !== null) {
+          _requireString(compound.parent, compoundDescription + '.parent');
+        }
+        ['label', 'function_name', 'file'].forEach(function(key) {
+          if (compound[key] !== undefined && compound[key] !== null) {
+            _requireString(compound[key], compoundDescription + '.' + key);
+          }
+        });
+      });
+    }
+
     function validateNet(net, description) {
       if (!_isObject(net) || !Array.isArray(net.places) ||
           !Array.isArray(net.transitions) || !Array.isArray(net.arcs)) {
         _invalidSnapshot(description + ' must contain places, transitions, and arcs arrays');
       }
+      const nodeIds = new Set();
+      const edgeIds = new Set();
+      function validateNodeRecord(record, group, index) {
+        const recordDescription = description + '.' + group + '[' + index + ']';
+        if (!_isObject(record)) _invalidSnapshot(recordDescription + ' must be an object');
+        _requireString(record.id, recordDescription + '.id');
+        if (nodeIds.has(record.id)) _invalidSnapshot(description + ' contains duplicate node ID ' + record.id);
+        nodeIds.add(record.id);
+        ['label', 'parent', 'enclosing_function'].forEach(function(key) {
+          if (record[key] !== undefined && record[key] !== null) {
+            _requireString(record[key], recordDescription + '.' + key);
+          }
+        });
+        if (record.metadata !== undefined && record.metadata !== null && !_isObject(record.metadata)) {
+          _invalidSnapshot(recordDescription + '.metadata must be an object');
+        }
+        if (group === 'transitions') {
+          const metadata = record.metadata || {};
+          ['tau', 'omega'].forEach(function(key) {
+            [record[key], metadata[key]].forEach(function(value) {
+              if (value !== undefined && value !== null && !Number.isFinite(Number(value))) {
+                _invalidSnapshot(recordDescription + '.' + key + ' must be numeric');
+              }
+            });
+          });
+        } else if (record.initial_tokens !== undefined && record.initial_tokens !== null &&
+                   !Number.isFinite(Number(record.initial_tokens))) {
+          _invalidSnapshot(recordDescription + '.initial_tokens must be numeric');
+        }
+      }
+      net.places.forEach(function(record, index) { validateNodeRecord(record, 'places', index); });
+      net.transitions.forEach(function(record, index) { validateNodeRecord(record, 'transitions', index); });
+      if (net.compounds !== undefined) validateCompounds(net.compounds, description + '.compounds', nodeIds);
+      function endpointId(endpoint, arcDescription, name) {
+        const id = typeof endpoint === 'string'
+          ? endpoint
+          : (_isObject(endpoint) ? endpoint.id : null);
+        _requireString(id, arcDescription + '.' + name);
+        if (!nodeIds.has(id)) _invalidSnapshot(arcDescription + '.' + name + ' references a missing node');
+        return id;
+      }
+      net.arcs.forEach(function(arc, index) {
+        const arcDescription = description + '.arcs[' + index + ']';
+        if (!_isObject(arc)) _invalidSnapshot(arcDescription + ' must be an object');
+        const sourceId = endpointId(arc.source, arcDescription, 'source');
+        const targetId = endpointId(arc.target, arcDescription, 'target');
+        const edgeId = arc.id === undefined || arc.id === null
+          ? 'arc_' + index + '_' + sourceId + '_' + targetId
+          : arc.id;
+        _requireString(edgeId, arcDescription + '.id');
+        if (edgeIds.has(edgeId)) _invalidSnapshot(description + ' contains duplicate arc ID ' + edgeId);
+        edgeIds.add(edgeId);
+        if (arc.weight !== undefined && arc.weight !== null && !Number.isFinite(Number(arc.weight))) {
+          _invalidSnapshot(arcDescription + '.weight must be numeric');
+        }
+      });
     }
     validateNet(documentContext.originalNet, 'document.originalNet');
-    if (documentContext.compounds !== undefined && !Array.isArray(documentContext.compounds)) {
-      _invalidSnapshot('document.compounds must be an array');
+    if (documentContext.compounds !== undefined) {
+      // These containers may be supplied separately from the net, so validate their shape here.
+      validateCompounds(documentContext.compounds, 'document.compounds');
     }
     if (!Array.isArray(documentContext.foldSteps)) _invalidSnapshot('document.foldSteps must be an array');
     documentContext.foldSteps.forEach(function(step, index) {
@@ -178,10 +256,10 @@
       if (!_isObject(step)) _invalidSnapshot(description + ' must be an object');
       if (step.net !== undefined) validateNet(step.net, description + '.net');
       ['component_type', 'opaque_transition'].forEach(function(key) {
-        if (step[key] !== undefined) _requireString(step[key], description + '.' + key);
+        if (step[key] !== undefined && step[key] !== null) _requireString(step[key], description + '.' + key);
       });
       ['sm_score', 'omega', 'tau'].forEach(function(key) {
-        if (step[key] !== undefined) _requireFiniteNumber(step[key], description + '.' + key);
+        if (step[key] !== undefined && step[key] !== null) _requireFiniteNumber(step[key], description + '.' + key);
       });
     });
     if (!_isObject(documentContext.calleeNets)) _invalidSnapshot('document.calleeNets must be an object');

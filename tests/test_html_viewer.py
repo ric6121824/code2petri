@@ -5813,6 +5813,13 @@ class TestFoldEntireFunction(unittest.TestCase):
             re.DOTALL,
         )
         self.assertIsNotNone(action_match, "Could not find the compound inspector action")
+        fold_helpers = re.search(
+            r"function refreshFoldActionView\(viewportBefore\) \{.*?"
+            r"function formatFoldActionResult\(result\) \{.*?\n      \}",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(fold_helpers, "Could not find shared fold-action helpers")
         net_literal = """{
   compounds: [
     { id: 'function_process', function_name: 'process', label: 'process()' }
@@ -5847,6 +5854,7 @@ cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
 cy.zoom(1.5);
 cy.pan({{ x: 31, y: -12 }});
 {action_match.group(0)}
+{fold_helpers.group(0)}
 const compound = cy.getElementById('function_process');
 openInspector(compound);
 if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('Compound fold action was hidden');
@@ -5926,7 +5934,7 @@ class TestFoldStateSnapshotValidation(unittest.TestCase):
         self.assertIsNotNone(open_handler)
         script = r"""
 const { parseFoldStateSnapshot: parseSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
-const invalidSnapshot = JSON.stringify({
+let invalidSnapshot = JSON.stringify({
   schemaVersion: 1, snapshotType: 'code2petri-fold-state', elements: [],
   engine: { stepCounter: 0, cfg: {}, rememberedCustomNames: [] },
   viewport: { zoom: 1, pan: { x: 0, y: 0 } },
@@ -5954,6 +5962,15 @@ __OPEN_HANDLER__
 inputOpenSession.listeners.change();
 if (restoreCalls !== 0 || activeGraph !== 'previous-session') throw new Error('Invalid session replaced the active graph');
 if (!shownError.includes('Invalid Fold State Snapshot')) throw new Error('Invalid session error was not shown');
+const invalidNetSnapshot = JSON.parse(invalidSnapshot);
+invalidNetSnapshot.document.foldSteps = [];
+invalidNetSnapshot.document.playback = { currentStep: 0, totalSteps: 0 };
+invalidNetSnapshot.document.originalNet.transitions = [null];
+invalidSnapshot = JSON.stringify(invalidNetSnapshot);
+shownError = '';
+inputOpenSession.listeners.change();
+if (restoreCalls !== 0 || activeGraph !== 'previous-session') throw new Error('Invalid net entry replaced the active graph');
+if (!shownError.includes('Invalid Fold State Snapshot')) throw new Error('Invalid net entry error was not shown');
 console.log('PASS');
 """.replace('__OPEN_HANDLER__', open_handler.group(0))
         proc = _run_node_script(script)
