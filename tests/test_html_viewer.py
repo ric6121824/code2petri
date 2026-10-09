@@ -472,6 +472,96 @@ class TestHTMLViewerGenerator(unittest.TestCase):
         self.assertEqual(embedded_data["filename"], "my_module.py")
         self.assertEqual(embedded_data["source_file"], "/path/to/my_module.py")
 
+    def test_generate_html_displays_named_root_function_identity(self):
+        """The generated viewer identifies its root function alongside the source file."""
+        html_content = generate_html(
+            self.net,
+            source_file="/path/to/my_module.py",
+            function_name="process_order",
+        )
+
+        embedded_data = _extract_embedded_data(html_content)
+        self.assertEqual(
+            embedded_data["document"],
+            {
+                "source_file": "/path/to/my_module.py",
+                "filename": "my_module.py",
+                "function_name": "process_order",
+            },
+        )
+        self.assertIn('id="info-function-name"', html_content)
+        self.assertIn(">process_order</span>", html_content)
+
+    def test_generate_html_displays_unavailable_when_root_function_is_missing(self):
+        """Missing root metadata is explicit instead of guessed from the file name."""
+        html_content = generate_html(self.net, source_file="/path/to/process_order.py")
+        embedded_data = _extract_embedded_data(html_content)
+        self.assertEqual(embedded_data["document"]["function_name"], "Unavailable")
+        self.assertIn(">Unavailable</span>", html_content)
+
+    def test_info_panel_tracks_active_document_metadata(self):
+        """Session restoration can refresh the browser-visible document identity."""
+        html_content = generate_html(self.net)
+
+        self.assertIn("window.code2petriViewer.setActiveDocumentMetadata", html_content)
+        self.assertIn("infoFilename.textContent = activeDocument.filename", html_content)
+        self.assertIn("infoFunctionName.textContent = activeDocument.function_name", html_content)
+
+    def test_active_document_metadata_update_rerenders_visible_identity(self):
+        """The public viewer metadata boundary rerenders both visible identity rows."""
+        html_content = generate_html(self.net)
+        match = re.search(
+            r"const unavailableFunctionName = 'Unavailable';.*?"
+            r"setActiveDocumentMetadata\(activeDocument\);",
+            html_content,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+
+        node_script = """
+const payload = {
+  document: {
+    source_file: '/initial/source.py',
+    filename: 'source.py',
+    function_name: 'initial_root'
+  }
+};
+const infoFileBox = { style: {} };
+const infoFilename = { textContent: '', title: '' };
+const infoFunctionName = { textContent: '', title: '' };
+const elements = {
+  'info-file-box': infoFileBox,
+  'info-filename': infoFilename,
+  'info-function-name': infoFunctionName
+};
+const document = { getElementById: id => elements[id] || null };
+const window = {};
+""" + match.group(0) + """
+if (infoFunctionName.textContent !== 'initial_root') {
+  throw new Error('Initial root function did not render');
+}
+window.code2petriViewer.setActiveDocumentMetadata({
+  source_file: '/restored/very/long/path/restored.py',
+  filename: 'restored.py',
+  function_name: 'Processor.run'
+});
+if (infoFilename.textContent !== 'restored.py' || infoFilename.title !== '/restored/very/long/path/restored.py') {
+  throw new Error('Restored source identity did not render');
+}
+if (infoFunctionName.textContent !== 'Processor.run') {
+  throw new Error('Restored root function did not render');
+}
+window.code2petriViewer.setActiveDocumentMetadata({});
+if (infoFunctionName.textContent !== 'Unavailable') {
+  throw new Error('Missing restored function metadata was not explicit');
+}
+if (infoFileBox.style.display !== 'none') {
+  throw new Error('Missing restored file metadata did not hide the file row');
+}
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     def test_generate_html_without_source_file(self):
         """Validates that omitting source_file defaults to empty string and hides info-file-box."""
         html_content = generate_html(self.net)
@@ -696,8 +786,53 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
         data = _extract_embedded_data(content)
         self.assertEqual(data["filename"], "app.js")
         self.assertEqual(data["source_file"], self.app_js)
+        self.assertEqual(data["document"]["function_name"], "stepCpu")
         self.assertIn("app.js", content)
+        self.assertIn(">stepCpu</span>", content)
         self.assertIn('id="info-filename"', content)
+
+    def test_cli_engine_displays_canonical_global_scope_identity(self):
+        """The viewer translates the CLI's global-scope token into its canonical name."""
+        source_path = os.path.join(self.temp_dir.name, "module_scope.py")
+        out_html = os.path.join(self.temp_dir.name, "module_scope.html")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write("result = 1\n")
+
+        code2petri(
+            source_path=source_path,
+            target_function="(global)",
+            output_file=out_html,
+        )
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        data = _extract_embedded_data(content)
+        self.assertEqual(data["document"]["function_name"], "Global Scope")
+        self.assertIn(">Global Scope</span>", content)
+        self.assertNotIn(">(global)</span>", content)
+
+    def test_cli_engine_preserves_qualified_method_identity(self):
+        """Qualified root method names remain intact in the viewer identity."""
+        source_path = os.path.join(self.temp_dir.name, "processor.py")
+        out_html = os.path.join(self.temp_dir.name, "processor.html")
+        with open(source_path, "w", encoding="utf-8") as f:
+            f.write(
+                "class Processor:\n"
+                "    def run(self):\n"
+                "        return 1\n"
+            )
+
+        code2petri(
+            source_path=source_path,
+            target_function="Processor.run",
+            output_file=out_html,
+        )
+        with open(out_html, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        data = _extract_embedded_data(content)
+        self.assertEqual(data["document"]["function_name"], "Processor.run")
+        self.assertIn(">Processor.run</span>", content)
 
     def test_cli_main_embeds_source_filename_in_html(self):
         """Validates that CLI main with HTML output propagates source filename to the viewer."""

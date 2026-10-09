@@ -303,7 +303,7 @@
       font-weight: 700;
       color: #0366d6;
     }
-    .info-file-box {
+    .info-identity-row {
       display: flex;
       align-items: center;
       gap: 6px;
@@ -312,18 +312,21 @@
       border-bottom: 1px solid #e9ecef;
       font-size: 12px;
     }
-    .info-file-label {
+    .info-identity-label {
       font-weight: 600;
       color: #6c757d;
       text-transform: uppercase;
       font-size: 10px;
       letter-spacing: 0.5px;
+      flex: 0 0 auto;
     }
-    .info-filename {
+    .info-identity-value {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-weight: 600;
       color: #0366d6;
       word-break: break-all;
+      min-width: 0;
+      overflow-wrap: anywhere;
     }
     #info-panel h4 {
       margin-bottom: 6px;
@@ -413,9 +416,13 @@
     <div id="cy"></div>
 
     <div id="info-panel">
-      <div id="info-file-box" class="info-file-box" style="{{FILE_BOX_STYLE}}">
-        <span class="info-file-label">File:</span>
-        <span id="info-filename" class="info-filename" title="{{SOURCE_FILE}}">{{FILENAME}}</span>
+      <div id="info-file-box" class="info-identity-row" style="{{FILE_BOX_STYLE}}">
+        <span class="info-identity-label">File:</span>
+        <span id="info-filename" class="info-identity-value" title="{{SOURCE_FILE}}">{{FILENAME}}</span>
+      </div>
+      <div id="info-function-box" class="info-identity-row">
+        <span class="info-identity-label">Function:</span>
+        <span id="info-function-name" class="info-identity-value">{{FUNCTION_NAME}}</span>
       </div>
       <h4 id="info-step-title">{{MODE_LABEL}}</h4>
       <p id="info-step-desc">{{MODE_DESC}}</p>
@@ -503,6 +510,56 @@
         console.error("Could not parse code2petri-data:", e);
         return;
       }
+
+      const unavailableFunctionName = 'Unavailable';
+      let activeDocument = Object.assign({
+        source_file: '',
+        filename: '',
+        function_name: unavailableFunctionName
+      }, payload.document || {
+        source_file: payload.source_file || '',
+        filename: payload.filename || '',
+        function_name: unavailableFunctionName
+      });
+
+      function setActiveDocumentMetadata(documentMetadata) {
+        const nextDocument = documentMetadata && typeof documentMetadata === 'object'
+          ? documentMetadata
+          : {};
+        activeDocument = Object.assign({
+          source_file: '',
+          filename: '',
+          function_name: unavailableFunctionName
+        }, nextDocument);
+        if (!activeDocument.function_name) {
+          activeDocument.function_name = unavailableFunctionName;
+        } else if (activeDocument.function_name === '(global)') {
+          activeDocument.function_name = 'Global Scope';
+        }
+
+        const infoFileBox = document.getElementById('info-file-box');
+        const infoFilename = document.getElementById('info-filename');
+        const infoFunctionName = document.getElementById('info-function-name');
+        if (infoFileBox) {
+          infoFileBox.style.display = activeDocument.filename ? 'flex' : 'none';
+        }
+        if (infoFilename) {
+          infoFilename.textContent = activeDocument.filename;
+          infoFilename.title = activeDocument.source_file;
+        }
+        if (infoFunctionName) {
+          infoFunctionName.textContent = activeDocument.function_name;
+          infoFunctionName.title = activeDocument.function_name;
+        }
+
+        payload.document = Object.assign({}, activeDocument);
+        payload.source_file = activeDocument.source_file;
+        payload.filename = activeDocument.filename;
+      }
+
+      window.code2petriViewer = window.code2petriViewer || {};
+      window.code2petriViewer.setActiveDocumentMetadata = setActiveDocumentMetadata;
+      setActiveDocumentMetadata(activeDocument);
 
       const isFoldMode = payload.mode === "fold" && Array.isArray(payload.fold_steps) && payload.fold_steps.length > 0;
       const initialNet = payload.composite_net || payload.initial_net || { places: [], transitions: [], arcs: [] };

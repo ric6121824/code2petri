@@ -72,6 +72,7 @@ def generate_html(
     title: Optional[str] = None,
     callee_nets: Optional[Dict[str, Any]] = None,
     source_file: Optional[str] = None,
+    function_name: Optional[str] = None,
 ) -> str:
     """Generates a 100% self-contained offline HTML viewer for a PetriNet or FoldResult.
 
@@ -80,6 +81,7 @@ def generate_html(
     :param title: Optional title to display in the header.
     :param callee_nets: Optional dictionary of pre-computed raw callee nets keyed by symbol name.
     :param source_file: Optional source file path or name being visualized.
+    :param function_name: Optional root-function identity for the active document.
     :return: Complete HTML document string with inlined Cytoscape, Dagre, and graph data.
     """
     template = _load_template()
@@ -88,6 +90,9 @@ def generate_html(
 
     full_source_path = source_file or ""
     file_display = os.path.basename(source_file) if source_file else ""
+    root_function_name = (
+        "Global Scope" if function_name == "(global)" else function_name or "Unavailable"
+    )
 
     if isinstance(net_or_fold, PetriNet) and bool(net_or_fold.compounds):
         comp_dict = net_or_fold.to_dict()
@@ -134,10 +139,16 @@ def generate_html(
 
     payload["source_file"] = full_source_path
     payload["filename"] = file_display
+    payload["document"] = {
+        "source_file": full_source_path,
+        "filename": file_display,
+        "function_name": root_function_name,
+    }
 
     escaped_title = html.escape(display_title)
     escaped_source_file = html.escape(full_source_path)
     escaped_filename = html.escape(file_display)
+    escaped_function_name = html.escape(root_function_name)
     file_box_style = "display: flex;" if file_display else "display: none;"
     json_data = json.dumps(payload, indent=2)
     callee_nets_json = json.dumps(callee_dict, indent=2)
@@ -149,6 +160,7 @@ def generate_html(
     rendered = rendered.replace("{{callee_nets_json}}", callee_nets_json)
     rendered = rendered.replace("{{SOURCE_FILE}}", escaped_source_file)
     rendered = rendered.replace("{{FILENAME}}", escaped_filename)
+    rendered = rendered.replace("{{FUNCTION_NAME}}", escaped_function_name)
     rendered = rendered.replace("{{FILE_BOX_STYLE}}", file_box_style)
     rendered = rendered.replace("{{MODE_LABEL}}", html.escape(mode_label))
     rendered = rendered.replace("{{MODE_DESC}}", html.escape(mode_desc))
