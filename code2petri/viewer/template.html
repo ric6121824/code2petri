@@ -186,6 +186,16 @@
       line-height: 1.5;
       padding: 8px 0;
     }
+    .selection-fold-controls {
+      border-bottom: 1px solid #e1e4e8;
+      padding: 0 0 10px;
+    }
+    .selection-fold-result {
+      color: #586069;
+      line-height: 1.4;
+      margin: 6px 0 0;
+      overflow-wrap: anywhere;
+    }
     .inspector-row {
       display: flex;
       flex-direction: column;
@@ -440,6 +450,10 @@
         <button id="inspector-close" class="inspector-close-btn" title="Clear inspection">✕</button>
       </div>
       <div class="inspector-body">
+        <div id="selection-fold-controls" class="selection-fold-controls" style="display: none;">
+          <button id="btn-fold-selected-places" class="btn btn-primary" type="button" style="width: 100%;">Fold Selected Places</button>
+          <p id="batch-fold-result" class="selection-fold-result" aria-live="polite"></p>
+        </div>
         <p id="inspector-empty" class="inspector-empty">Select a transition or component to inspect it.</p>
         <div id="inspector-content" style="display: none;">
           <div class="inspector-row">
@@ -1295,7 +1309,7 @@
         wheelSensitivity: 0.25,
         autoungrabify: false,
         userPanningEnabled: false,
-        boxSelectionEnabled: false
+        boxSelectionEnabled: true
       });
 
       function applyLayout(animate) {
@@ -1860,6 +1874,9 @@
       const btnReset = document.getElementById('btn-reset');
       const btnSaveSession = document.getElementById('btn-save-session');
       const btnExportPnml = document.getElementById('btn-export-pnml');
+      const selectionFoldControls = document.getElementById('selection-fold-controls');
+      const btnFoldSelectedPlaces = document.getElementById('btn-fold-selected-places');
+      const batchFoldResult = document.getElementById('batch-fold-result');
       const valStep = document.getElementById('val-step');
       const valSm = document.getElementById('val-sm');
       const infoTitle = document.getElementById('info-step-title');
@@ -1972,6 +1989,57 @@
           renderStep(0);
         });
       }
+
+      function getSelectedPlaceIds() {
+        return cy.nodes('.place:selected').map(function(place) { return place.id(); });
+      }
+
+      function updateBatchPlaceFoldControls() {
+        if (!selectionFoldControls || !btnFoldSelectedPlaces) return;
+        const selectedPlaceCount = getSelectedPlaceIds().length;
+        selectionFoldControls.style.display = selectedPlaceCount >= 2 ? 'block' : 'none';
+        btnFoldSelectedPlaces.textContent = selectedPlaceCount >= 2
+          ? `Fold Selected Places (${selectedPlaceCount})`
+          : 'Fold Selected Places';
+      }
+
+      function handleBatchPlaceFold() {
+        const selectedPlaceIds = getSelectedPlaceIds();
+        if (selectedPlaceIds.length < 2) return;
+
+        const viewportBefore = captureViewport(cy);
+        const result = foldEngine.executeBatchFold(selectedPlaceIds);
+        if (result.folded.length > 0) {
+          if (cy.elements().length > 0 && typeof cy.layout === 'function') {
+            cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false, animate: false })).run();
+          }
+          restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
+          updateFoldableHighlights();
+          if (selectedInspectorNode && selectedInspectorNode.inside()) {
+            openInspector(selectedInspectorNode);
+          } else {
+            closeInspector();
+          }
+          if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+        }
+
+        if (batchFoldResult) {
+          const skippedSummary = result.skipped.length > 0
+            ? ` Skipped: ${result.skipped.map(function(item) { return `${item.placeId} (${item.reason})`; }).join('; ')}.`
+            : '';
+          batchFoldResult.textContent = result.message + skippedSummary;
+        }
+        updateBatchPlaceFoldControls();
+      }
+
+      if (btnFoldSelectedPlaces) {
+        btnFoldSelectedPlaces.addEventListener('click', function(event) {
+          if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+          handleBatchPlaceFold();
+        });
+      }
+      cy.on('select unselect', 'node', updateBatchPlaceFoldControls);
+      updateBatchPlaceFoldControls();
 
       function getFoldStateDocumentContext() {
         const originalNet = payload.composite_net || payload.initial_net || initialNet;

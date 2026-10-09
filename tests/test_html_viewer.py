@@ -5628,6 +5628,126 @@ console.log('PASS');
 
 
 
+class TestBatchPlaceFold(unittest.TestCase):
+    def test_generated_viewer_exposes_batch_action_for_selected_places(self):
+        net = PetriNet()
+        net.add_place("p0", "start")
+        net.add_transition("t0", "first")
+        net.add_place("p1", "middle")
+        net.add_transition("t1", "second")
+        net.add_place("p2", "end")
+
+        html_content = generate_html(net)
+
+        self.assertIn("boxSelectionEnabled: true", html_content)
+        self.assertIn('id="btn-fold-selected-places"', html_content)
+        self.assertIn("cy.nodes('.place:selected')", html_content)
+        self.assertIn("selectedPlaceCount >= 2", html_content)
+        self.assertIn("foldEngine.executeBatchFold(selectedPlaceIds)", html_content)
+        self.assertIn("DAGRE_LAYOUT_OPTIONS, { fit: false, animate: false }", html_content)
+
+    def test_selected_place_button_folds_once_and_preserves_camera(self):
+        html = _read_template_html()
+        match = re.search(
+            r"function getSelectedPlaceIds\(\) \{.*?(?=      function getFoldStateDocumentContext)",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "Could not find the generated viewer batch-selection controls")
+
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'start' },
+    { id: 'p1', label: 'middle' },
+    { id: 'p2', label: 'end' }
+  ],
+  transitions: [
+    { id: 't0', label: 'first' },
+    { id: 't1', label: 'second' }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = f"""
+const selectionFoldControls = {{ style: {{ display: 'none' }} }};
+const batchFoldResult = {{ textContent: '' }};
+const DAGRE_LAYOUT_OPTIONS = {{ name: 'dagre' }};
+let layoutCount = 0;
+cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
+cy.zoom(1.75);
+cy.pan({{ x: 23, y: -17 }});
+const btnFoldSelectedPlaces = {{
+  textContent: '',
+  listeners: {{}},
+  addEventListener: function(name, listener) {{ this.listeners[name] = listener; }}
+}};
+{match.group(0)}
+cy.getElementById('p0').select();
+cy.getElementById('p1').select();
+if (selectionFoldControls.style.display !== 'block') {{
+  throw new Error('Batch action did not appear for two selected places');
+}}
+if (!btnFoldSelectedPlaces.textContent.includes('2')) {{
+  throw new Error('Batch action did not report selected place count');
+}}
+btnFoldSelectedPlaces.listeners.click({{ stopPropagation: function() {{}} }});
+if (cy.getElementById('p1').length !== 0) throw new Error('Selected contractible place did not fold');
+if (layoutCount !== 1) throw new Error('Expected one final layout, got ' + layoutCount);
+if (cy.zoom() !== 1.75 || cy.pan().x !== 23 || cy.pan().y !== -17) {{
+  throw new Error('Batch fold changed zoom or pan');
+}}
+if (!batchFoldResult.textContent.includes('p0')) throw new Error('Skipped place was not reported');
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_batch_fold_evaluates_original_place_ids_once_and_skips_invalid_ids(self):
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'start' },
+    { id: 'p1', label: 'middle' },
+    { id: 'p2', label: 'end' }
+  ],
+  transitions: [
+    { id: 't0', label: 'first' },
+    { id: 't1', label: 'second' }
+  ],
+  arcs: [
+    { source: 'p0', target: 't0' },
+    { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' },
+    { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = """
+const result = foldEngine.executeBatchFold(['missing-place', 't0', 'p1']);
+if (!result || result.folded.length !== 1 || result.skipped.length !== 2) {
+  throw new Error('Expected one fold and two skips: ' + JSON.stringify(result));
+}
+if (result.folded[0].placeId !== 'p1' || result.folded[0].foldType !== 'sequence') {
+  throw new Error('Unexpected folded trigger: ' + JSON.stringify(result.folded[0]));
+}
+if (result.skipped[0].placeId !== 'missing-place' || result.skipped[1].placeId !== 't0') {
+  throw new Error('Original trigger order was not retained');
+}
+if (cy.getElementById('p1').length !== 0) {
+  throw new Error('The selected contractible place was not folded');
+}
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(net_literal, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+
 class TestViewportModule(unittest.TestCase):
     """Unit tests for the modularized code2petri/viewer/engine/viewport.js module."""
 

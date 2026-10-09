@@ -1214,6 +1214,57 @@
           return null;
         }
 
+        executeBatchFold(placeIds) {
+          const requestedIds = Array.isArray(placeIds) ? placeIds.slice() : [];
+          const folded = [];
+          const skipped = [];
+          const evaluatedIds = new Set();
+
+          requestedIds.forEach((placeId) => {
+            const id = String(placeId);
+            if (evaluatedIds.has(id)) {
+              skipped.push({ placeId: id, reason: 'Place ID was already included in this batch.' });
+              return;
+            }
+            evaluatedIds.add(id);
+
+            const place = this.cy.getElementById(id);
+            if (!place || place.length === 0 || !place.inside()) {
+              skipped.push({ placeId: id, reason: 'Place no longer exists.' });
+              return;
+            }
+            if (!place.hasClass('place')) {
+              skipped.push({ placeId: id, reason: 'Selected node is not a place.' });
+              return;
+            }
+
+            const foldType = this.getFoldType(place);
+            if (!['sequence', 'choice', 'while'].includes(foldType)) {
+              skipped.push({ placeId: id, reason: 'No eligible Sequence, Choice, or While reduction.' });
+              return;
+            }
+
+            const reduction = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType].execute(this, place);
+            if (reduction && reduction.success) {
+              folded.push({ placeId: id, foldType: foldType, componentId: reduction.step && reduction.step.opaqueId });
+            } else {
+              skipped.push({
+                placeId: id,
+                reason: reduction && reduction.message ? reduction.message : 'Reduction was not successful.'
+              });
+            }
+          });
+
+          return {
+            success: folded.length > 0,
+            folded: folded,
+            skipped: skipped,
+            message: folded.length > 0
+              ? `Folded ${folded.length} place${folded.length === 1 ? '' : 's'}; skipped ${skipped.length}.`
+              : `No places folded; skipped ${skipped.length}.`
+          };
+        }
+
         isPendingLoopHead(placeNode) {
           if (!placeNode || !placeNode.inside || !placeNode.inside()) return false;
           if (!placeNode.hasClass('place')) return false;
