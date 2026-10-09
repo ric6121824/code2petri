@@ -122,8 +122,11 @@ global.URL = {{
   revokeObjectURL: function(url) {{}}
 }};
 
-const inspectorPanel = {{ style: {{ display: 'none', left: '', top: '', right: '' }} }};
+const inspectorPanel = {{ style: {{ display: 'flex' }} }};
+const inspectorEmpty = {{ style: {{ display: 'block' }} }};
+const inspectorContent = {{ style: {{ display: 'none' }} }};
 const inspectorLabel = {{ textContent: '' }};
+const inspectorId = {{ textContent: '—' }};
 const inspectorInput = {{
   value: '',
   _listeners: {{}},
@@ -152,6 +155,7 @@ const inspectorSaveBtn = {{
 }};
 const inspectorType = {{ textContent: '' }};
 const inspectorTau = {{ textContent: '' }};
+const inspectorOmega = {{ textContent: '—' }};
 const inspectorLine = {{ textContent: '' }};
 const inspectorCloseBtn = {{
   addEventListener: function(evt, cb) {{
@@ -191,19 +195,37 @@ const hudBtnContractMg = {{
     }}
   }}
 }};
+const hudBtnUnfold = {{
+  style: {{ display: 'none' }},
+  _listeners: {{}},
+  addEventListener: function(evt, cb) {{
+    this._listeners[evt] = this._listeners[evt] || [];
+    this._listeners[evt].push(cb);
+  }},
+  click: function() {{
+    if (this._listeners['click']) {{
+      this._listeners['click'].forEach(cb => cb({{}}));
+    }}
+  }}
+}};
 
 const document = {{
   getElementById: function(id) {{
     if (id === 'inspector-panel') return inspectorPanel;
+    if (id === 'inspector-empty') return inspectorEmpty;
+    if (id === 'inspector-content') return inspectorContent;
     if (id === 'inspector-label') return inspectorLabel;
+    if (id === 'inspector-id') return inspectorId;
     if (id === 'hud-input-label' || id === 'inspector-input-label') return inspectorInput;
     if (id === 'hud-btn-save' || id === 'inspector-btn-save') return inspectorSaveBtn;
     if (id === 'inspector-type') return inspectorType;
     if (id === 'inspector-tau') return inspectorTau;
+    if (id === 'inspector-omega') return inspectorOmega;
     if (id === 'inspector-line') return inspectorLine;
     if (id === 'inspector-sm') return inspectorSm;
     if (id === 'val-sm') return valSm;
     if (id === 'hud-btn-contract-mg') return hudBtnContractMg;
+    if (id === 'hud-btn-unfold') return hudBtnUnfold;
     if (id === 'inspector-close' || id === 'btn-close-hud') return inspectorCloseBtn;
     if (id === 'btn-export-pnml') return btnExportPnml;
     if (id === 'info-filename') return infoFilename;
@@ -290,6 +312,14 @@ if (hudBtnContractMg) {{
       const target = selectedInspectorNode;
       closeInspector();
       handleFoldReduction(target, 'marked_graph');
+    }}
+  }});
+}}
+
+if (hudBtnUnfold) {{
+  hudBtnUnfold.addEventListener('click', function(e) {{
+    if (typeof selectedInspectorNode !== 'undefined' && selectedInspectorNode) {{
+      handleRightClickUnfold(selectedInspectorNode);
     }}
   }});
 }}
@@ -1111,6 +1141,19 @@ console.log('PASS');
         self.assertIn('id="inspector-line"', html)
         self.assertIn('id="inspector-close"', html)
 
+    def test_docked_sidebar_is_permanent_and_pushes_the_canvas(self):
+        """The generated viewer exposes a fixed-width light sidebar beside, not over, the canvas."""
+        html = _read_template_html()
+
+        self.assertIn('#main-container {\n      flex: 1;\n      display: flex;', html)
+        self.assertIn('#cy {\n      flex: 1;', html)
+        self.assertIn('#inspector-panel {\n      flex: 0 0 320px;', html)
+        self.assertIn('<aside id="inspector-panel"', html)
+        self.assertIn('id="inspector-empty"', html)
+        self.assertIn('Select a transition or component to inspect it.', html)
+        self.assertNotIn('class="inspector-panel hud-popover" style="display: none;"', html)
+        self.assertIn('background: #ffffff;', html)
+
     def test_place_left_click_does_not_pan_or_inspect_headless(self):
         """Validates that tapping a place node does not move viewport or open inspector."""
         html = _read_template_html()
@@ -1130,7 +1173,9 @@ const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 {net_to_elements_js}
 
 // Mock DOM elements for inspector
-const inspectorPanel = {{ style: {{ display: 'none' }} }};
+const inspectorPanel = {{ style: {{ display: 'flex' }} }};
+const inspectorEmpty = {{ style: {{ display: 'block' }} }};
+const inspectorContent = {{ style: {{ display: 'none' }} }};
 const inspectorLabel = {{ textContent: '' }};
 const inspectorType = {{ textContent: '' }};
 const inspectorTau = {{ textContent: '' }};
@@ -1180,8 +1225,8 @@ if (zoomAfter !== initialZoom) {{
 }}
 
 // Verify inspector panel did not open
-if (inspectorPanel.style.display !== 'none') {{
-  throw new Error('Inspector opened when tapping place');
+if (inspectorPanel.style.display !== 'flex' || inspectorEmpty.style.display !== 'block' || inspectorContent.style.display !== 'none') {{
+  throw new Error('Place tap replaced the docked inspector empty state');
 }}
 
 console.log('PASS');
@@ -1190,8 +1235,8 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
-    def test_transition_and_component_left_click_opens_inspector_headless(self):
-        """Validates that tapping a transition or component opens inspector with static metadata."""
+    def test_transition_and_component_left_click_updates_docked_inspector_headless(self):
+        """Inspecting and clearing nodes updates all sidebar metadata without moving the camera."""
         html = _read_template_html()
         net_to_elements_js = _extract_template_net_to_elements()
 
@@ -1209,11 +1254,16 @@ const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 {net_to_elements_js}
 
 // Mock DOM elements for inspector
-const inspectorPanel = {{ style: {{ display: 'none' }} }};
+const inspectorPanel = {{ style: {{ display: 'flex' }} }};
+const inspectorEmpty = {{ style: {{ display: 'block' }} }};
+const inspectorContent = {{ style: {{ display: 'none' }} }};
 const inspectorLabel = {{ textContent: '' }};
+const inspectorId = {{ textContent: '' }};
 const inspectorType = {{ textContent: '' }};
 const inspectorTau = {{ textContent: '' }};
+const inspectorOmega = {{ textContent: '' }};
 const inspectorLine = {{ textContent: '' }};
+const inspectorSm = {{ textContent: '' }};
 
 {inspector_js}
 
@@ -1226,7 +1276,7 @@ const net = {{
   ],
   transitions: [
     {{ id: 't_atomic', label: 'compute()', line_number: 42, parent: 'c_outer' }},
-    {{ id: 't_C1', label: 't_C1', metadata: {{ opaque: true, component_type: 'Sequence', tau: 3.5 }} }}
+    {{ id: 't_C1', label: 't_C1', metadata: {{ opaque: true, component_type: 'Sequence', tau: 3.5, omega: 1.25 }} }}
   ],
   arcs: []
 }};
@@ -1240,6 +1290,8 @@ const cy = cytoscape({{
   elements: netToElements(net),
   userPanningEnabled: false
 }});
+cy.viewport({{ zoom: 1.75, pan: {{ x: 32, y: -18 }} }});
+const cameraBefore = {{ zoom: cy.zoom(), pan: Object.assign({{}}, cy.pan()) }};
 
 {tap_handler_js}
 
@@ -1247,15 +1299,17 @@ const cy = cytoscape({{
 const tAtomic = cy.getElementById('t_atomic');
 tAtomic.emit('tap');
 
-if (inspectorPanel.style.display !== 'flex') {{
-  throw new Error('Inspector failed to open for atomic transition: ' + inspectorPanel.style.display);
+if (inspectorPanel.style.display !== 'flex' || inspectorEmpty.style.display !== 'none' || inspectorContent.style.display !== 'block') {{
+  throw new Error('Docked inspector did not replace its empty state');
 }}
+if (inspectorId.textContent !== 't_atomic') throw new Error('ID failed: ' + inspectorId.textContent);
 if (inspectorLabel.textContent !== 'compute()') {{
   throw new Error('Label failed for atomic transition: ' + inspectorLabel.textContent);
 }}
 if (inspectorTau.textContent !== '1.0') {{
   throw new Error('Tau failed for atomic transition: ' + inspectorTau.textContent);
 }}
+if (inspectorOmega.textContent !== '—') throw new Error('Omega empty value failed: ' + inspectorOmega.textContent);
 if (!inspectorType.textContent.includes('Transition')) {{
   throw new Error('Type failed for atomic transition: ' + inspectorType.textContent);
 }}
@@ -1275,6 +1329,9 @@ if (inspectorLabel.textContent !== 't_C1') {{
 }}
 if (inspectorTau.textContent !== '3.5') {{
   throw new Error('Tau failed for opaque transition: ' + inspectorTau.textContent);
+}}
+if (inspectorOmega.textContent !== '1.25') {{
+  throw new Error('Omega failed for opaque transition: ' + inspectorOmega.textContent);
 }}
 if (inspectorType.textContent !== 'Sequence') {{
   throw new Error('Component type failed for opaque transition: ' + inspectorType.textContent);
@@ -1302,8 +1359,12 @@ if (inspectorTau.textContent !== '—') {{
 
 // 4. Close inspector
 closeInspector();
-if (inspectorPanel.style.display !== 'none') {{
-  throw new Error('closeInspector failed: ' + inspectorPanel.style.display);
+if (inspectorPanel.style.display !== 'flex' || inspectorEmpty.style.display !== 'block' || inspectorContent.style.display !== 'none') {{
+  throw new Error('Clearing inspection hid the docked sidebar or left stale content visible');
+}}
+if (selectedInspectorNode !== null) throw new Error('Clearing inspection retained a stale node');
+if (cy.zoom() !== cameraBefore.zoom || cy.pan().x !== cameraBefore.pan.x || cy.pan().y !== cameraBefore.pan.y) {{
+  throw new Error('Inspecting or clearing a node changed the camera');
 }}
 
 console.log('PASS');
@@ -4430,22 +4491,26 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
-    def test_hud_popover_dom_elements_in_template(self):
-        """Verifies template.html contains the floating HUD popover elements and styling."""
+    def test_docked_inspector_dom_elements_in_template(self):
+        """Verifies template.html contains docked inspector metadata, rename, and action controls."""
         html = _read_template_html()
-        self.assertIn('id="inspector-panel"', html)
-        self.assertIn('hud-popover', html)
+        self.assertIn('<aside id="inspector-panel"', html)
+        self.assertIn('id="inspector-empty"', html)
+        self.assertIn('id="inspector-content"', html)
         self.assertIn('id="hud-input-label"', html)
         self.assertIn('id="hud-btn-save"', html)
+        self.assertIn('id="inspector-id"', html)
         self.assertIn('id="inspector-tau"', html)
+        self.assertIn('id="inspector-omega"', html)
         self.assertIn('id="inspector-type"', html)
         self.assertIn('id="inspector-line"', html)
+        self.assertIn('id="hud-btn-unfold"', html)
         self.assertIn('stat-pill', html)
-        self.assertIn('Component Node Renaming', html)
+        self.assertIn('Node Inspector', html)
         self.assertIn('Name:', html)
 
-    def test_hud_popover_opens_on_left_click_headless(self):
-        """Validates that left-clicking a transition opens the floating HUD popover near the node."""
+    def test_docked_inspector_replaces_empty_state_on_left_click_headless(self):
+        """Validates that left-clicking a transition fills the permanently visible sidebar."""
         net_literal = """{
   places: [{ id: 'p0', label: 'p0' }],
   transitions: [{ id: 't0', label: 'ComputeStep', tau: 2.0 }],
@@ -4453,18 +4518,15 @@ console.log('PASS');
 }"""
         test_logic = """
 const t0 = cy.getElementById('t0');
-if (inspectorPanel.style.display !== 'none') {
-  throw new Error('HUD inspector should be hidden initially');
+if (inspectorPanel.style.display !== 'flex' || inspectorEmpty.style.display !== 'block') {
+  throw new Error('Docked inspector empty state should be visible initially');
 }
 
 // Simulate left-click on transition
 t0.emit('tap', { target: t0 });
 
-if (inspectorPanel.style.display !== 'flex') {
-  throw new Error('HUD inspector should be displayed as flex on left-click');
-}
-if (!inspectorPanel.style.left || !inspectorPanel.style.top) {
-  throw new Error('HUD inspector position style left/top should be set');
+if (inspectorPanel.style.display !== 'flex' || inspectorEmpty.style.display !== 'none' || inspectorContent.style.display !== 'block') {
+  throw new Error('Docked inspector should replace its empty state on left-click');
 }
 
 console.log('PASS');
@@ -4611,8 +4673,8 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
-    def test_hud_closes_when_clicking_canvas_background_headless(self):
-        """Validates that HUD closes on canvas background click and discards uncommitted text, and does not close on place tap."""
+    def test_docked_inspector_clears_when_clicking_canvas_background_headless(self):
+        """The sidebar returns to its empty state on background click and discards draft text."""
         net_literal = """{
   places: [{ id: 'p0', label: 'p0' }],
   transitions: [{ id: 't0', label: 't0', tau: 1.0 }],
@@ -4637,13 +4699,13 @@ if (inspectorPanel.style.display !== 'flex') {
   throw new Error('HUD should remain open when tapping uncontractible place node');
 }
 
-// 4. Click canvas background - HUD should close and discard uncommitted text (P2)
+// 4. Click canvas background - sidebar should clear and discard uncommitted text (P2)
 cy.emit('tap', { target: cy });
-if (inspectorPanel.style.display !== 'none') {
-  throw new Error('HUD should close after clicking canvas background');
+if (inspectorPanel.style.display !== 'flex' || inspectorEmpty.style.display !== 'block' || inspectorContent.style.display !== 'none') {
+  throw new Error('Docked inspector should show its empty state after clicking canvas background');
 }
-if (inspectorInput.value !== 't0') {
-  throw new Error(`Expected input value discarded and restored to 't0', got '${inspectorInput.value}'`);
+if (inspectorInput.value !== '') {
+  throw new Error(`Expected draft input to be cleared, got '${inspectorInput.value}'`);
 }
 if (t0.data('label') !== 't0') {
   throw new Error(`Expected node label untouched as 't0', got '${t0.data('label')}'`);
@@ -4686,8 +4748,8 @@ let comp = cy.nodes('[is_opaque]').first();
 if (comp.length === 0) throw new Error('Contracted component not found');
 const origCompId = comp.id();
 
-// 2. Open HUD and rename component to 'CustomFoldedSeq'
-openInspector(comp);
+// 2. Inspect through the browser-visible node interaction and rename the component
+comp.emit('tap', { target: comp });
 inspectorInput.value = 'CustomFoldedSeq';
 inspectorSaveBtn.click();
 
@@ -4698,11 +4760,12 @@ if (comp.data('custom_name') !== 'CustomFoldedSeq') {
   throw new Error(`Expected custom_name 'CustomFoldedSeq', got '${comp.data('custom_name')}'`);
 }
 
-// 3. Unfold the component
-const resUnfold = foldEngine.executeComponentLocalUnfold(comp);
-if (!resUnfold.success) {
-  throw new Error('Component-local unfold failed: ' + resUnfold.reason);
+// 3. Use the applicable docked-sidebar action to unfold the component
+comp.emit('tap', { target: comp });
+if (hudBtnUnfold.style.display === 'none') {
+  throw new Error('Component-Local Unfold action should be visible for an opaque component');
 }
+hudBtnUnfold.click();
 
 const p1Restored = cy.getElementById('p1');
 if (!p1Restored.inside()) {
@@ -5401,8 +5464,3 @@ console.log('PASS');
 
 if __name__ == "__main__":
     unittest.main()
-
-
-
-
-
