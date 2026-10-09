@@ -5629,6 +5629,26 @@ console.log('PASS');
 
 
 class TestBatchPlaceFold(unittest.TestCase):
+    _STATE_MACHINE_NET = """{
+  places: [
+    { id: 'p_src', label: 'src', initial_tokens: 1 },
+    { id: 'p_mid1', label: 'mid1', initial_tokens: 0 },
+    { id: 'p_mid2', label: 'mid2', initial_tokens: 0 },
+    { id: 'p_snk', label: 'snk', initial_tokens: 0 }
+  ],
+  transitions: [
+    { id: 't1', tau: 1.5 }, { id: 't2', tau: 2.5 }, { id: 't3', tau: 1.0 },
+    { id: 't4', tau: 2.0 }, { id: 't5', tau: 3.0 }
+  ],
+  arcs: [
+    { source: 'p_src', target: 't1' }, { source: 'p_src', target: 't3' },
+    { source: 't1', target: 'p_mid1' }, { source: 't3', target: 'p_mid2' },
+    { source: 'p_mid1', target: 't2' }, { source: 'p_mid1', target: 't5' },
+    { source: 't5', target: 'p_mid2' }, { source: 'p_mid2', target: 't4' },
+    { source: 't2', target: 'p_snk' }, { source: 't4', target: 'p_snk' }
+  ]
+}"""
+
     def test_generated_viewer_exposes_batch_action_for_selected_places(self):
         net = PetriNet()
         net.add_place("p0", "start")
@@ -5744,6 +5764,37 @@ console.log('PASS');
 """
         node_script = _setup_live_fold_test_harness(net_literal, test_logic)
         proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_batch_fold_executes_registered_structural_place_reduction(self):
+        test_logic = """
+const result = foldEngine.executeBatchFold(['p_src']);
+if (!result.success || result.folded.length !== 1 || result.folded[0].foldType !== 'state_machine') {
+  throw new Error('Expected batch folding to execute the registered state-machine fold: ' + JSON.stringify(result));
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(self._STATE_MACHINE_NET, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_fold_entire_function_reaches_structural_place_reduction(self):
+        net = self._STATE_MACHINE_NET.replace(
+            "places: [", "compounds: [{ id: 'fn', label: 'fn()', function_name: 'fn' }],\n  places: ["
+        ).replace("label: 'src',", "label: 'src', parent: 'fn',")
+        for node_id in ['p_mid1', 'p_mid2', 'p_snk']:
+            net = net.replace("id: '" + node_id + "', label:", "id: '" + node_id + "', parent: 'fn', label:")
+        for transition_id in ['t1', 't2', 't3', 't4', 't5']:
+            net = net.replace("id: '" + transition_id + "',", "id: '" + transition_id + "', parent: 'fn',")
+        test_logic = """
+const result = foldEngine.executeFoldEntireFunction('fn');
+if (!result.success || !result.folded.some(function(item) { return item.foldType === 'state_machine'; })) {
+  throw new Error('Full-function folding stopped before the structural reduction: ' + JSON.stringify(result));
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
@@ -5866,6 +5917,73 @@ class TestFoldStateSnapshotValidation(unittest.TestCase):
         self.assertIsNotNone(restore_body)
         self.assertNotIn("applyLayout", restore_body.group(1))
         self.assertIn("restoreViewport(cy, snapshot.viewport.zoom, snapshot.viewport.pan)", restore_body.group(1))
+
+    def test_open_rejects_invalid_fold_step_before_replacing_active_session(self):
+        html = _read_template_html()
+        open_handler = re.search(
+            r"if \(btnOpenSession && inputOpenSession\) \{.*?(?=\n      if \(btnExportPnml)", html, re.S
+        )
+        self.assertIsNotNone(open_handler)
+        script = r"""
+const { parseFoldStateSnapshot: parseSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const invalidSnapshot = JSON.stringify({
+  schemaVersion: 1, snapshotType: 'code2petri-fold-state', elements: [],
+  engine: { stepCounter: 0, cfg: {}, rememberedCustomNames: [] },
+  viewport: { zoom: 1, pan: { x: 0, y: 0 } },
+  document: {
+    title: 'Bad', sourceFile: '', filename: '', functionName: '', mode: 'fold',
+    originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [null],
+    calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 1 }
+  }
+});
+let activeGraph = 'previous-session';
+let restoreCalls = 0;
+let shownError = '';
+const btnOpenSession = { listeners: {}, addEventListener: function(name, callback) { this.listeners[name] = callback; }, click: function() {} };
+const inputOpenSession = {
+  listeners: {}, files: [{ name: 'bad.json' }], value: 'bad.json',
+  addEventListener: function(name, callback) { this.listeners[name] = callback; }
+};
+global.FileReader = function() {
+  this.readAsText = function() { this.result = invalidSnapshot; this.onload(); };
+};
+global.alert = function(message) { shownError = message; };
+const parseFoldStateSnapshot = parseSnapshot;
+const restoreFoldStateSnapshot = () => { restoreCalls++; activeGraph = 'replacement'; };
+__OPEN_HANDLER__
+inputOpenSession.listeners.change();
+if (restoreCalls !== 0 || activeGraph !== 'previous-session') throw new Error('Invalid session replaced the active graph');
+if (!shownError.includes('Invalid Fold State Snapshot')) throw new Error('Invalid session error was not shown');
+console.log('PASS');
+""".replace('__OPEN_HANDLER__', open_handler.group(0))
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_saved_document_context_uses_active_function_identity(self):
+        html = _read_template_html()
+        context_match = re.search(
+            r"function getFoldStateDocumentContext\(\) \{.*?(?=\n      if \(btnSaveSession)", html, re.S
+        )
+        self.assertIsNotNone(context_match)
+        context_function = context_match.group(0).replace("{{TITLE_JSON}}", '"Fallback Title"')
+        script = """
+const activeDocument = { function_name: 'module.Processor.run', filename: 'processor.py', source_file: '/src/processor.py' };
+const payload = { title: 'Processor', document: activeDocument, compounds: [] };
+const initialNet = { places: [], transitions: [], arcs: [] };
+const foldSteps = [];
+const totalSteps = 0;
+const currentStep = 0;
+const calleeNetsMap = {};
+const expandedNodes = new Map();
+__CONTEXT_FUNCTION__
+const context = getFoldStateDocumentContext();
+if (context.functionName !== 'module.Processor.run') throw new Error('Snapshot lost the explicit active function identity');
+console.log('PASS');
+""".replace("__CONTEXT_FUNCTION__", context_function)
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
 
     def test_restore_replaces_graph_and_context_without_layout(self):
         html = _read_template_html()

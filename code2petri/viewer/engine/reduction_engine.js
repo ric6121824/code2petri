@@ -1239,12 +1239,13 @@
             }
 
             const foldType = this.getFoldType(place);
-            if (!['sequence', 'choice', 'while'].includes(foldType)) {
-              skipped.push({ placeId: id, reason: 'No eligible Sequence, Choice, or While reduction.' });
+            const foldMeta = foldType && LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
+            if (!foldMeta || foldMeta.targetGroup !== 'place' || typeof foldMeta.execute !== 'function') {
+              skipped.push({ placeId: id, reason: 'No eligible place-targeted reduction.' });
               return;
             }
 
-            const reduction = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType].execute(this, place);
+            const reduction = foldMeta.execute(this, place);
             if (reduction && reduction.success) {
               folded.push({ placeId: id, foldType: foldType, componentId: reduction.step && reduction.step.opaqueId });
             } else {

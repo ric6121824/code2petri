@@ -2094,7 +2094,9 @@
           title: payload.title || {{TITLE_JSON}},
           sourceFile: payload.source_file || '',
           filename: payload.filename || '',
-          functionName: payload.function_name ||
+          functionName: activeDocument.function_name ||
+            (payload.document && payload.document.function_name) ||
+            payload.function_name ||
             (payload.composite_net && payload.composite_net.function_name) ||
             (rootCompound && rootCompound.function_name) || '',
           mode: payload.mode || 'no-fold',

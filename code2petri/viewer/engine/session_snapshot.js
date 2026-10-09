@@ -162,16 +162,32 @@
     ['title', 'sourceFile', 'filename', 'functionName', 'mode'].forEach(function(key) {
       _requireString(documentContext[key], 'document.' + key);
     });
-    const originalNet = documentContext.originalNet;
-    if (!_isObject(originalNet) || !Array.isArray(originalNet.places) ||
-        !Array.isArray(originalNet.transitions) || !Array.isArray(originalNet.arcs)) {
-      _invalidSnapshot('document.originalNet must contain places, transitions, and arcs arrays');
+    function validateNet(net, description) {
+      if (!_isObject(net) || !Array.isArray(net.places) ||
+          !Array.isArray(net.transitions) || !Array.isArray(net.arcs)) {
+        _invalidSnapshot(description + ' must contain places, transitions, and arcs arrays');
+      }
     }
+    validateNet(documentContext.originalNet, 'document.originalNet');
     if (documentContext.compounds !== undefined && !Array.isArray(documentContext.compounds)) {
       _invalidSnapshot('document.compounds must be an array');
     }
     if (!Array.isArray(documentContext.foldSteps)) _invalidSnapshot('document.foldSteps must be an array');
+    documentContext.foldSteps.forEach(function(step, index) {
+      const description = 'document.foldSteps[' + index + ']';
+      if (!_isObject(step)) _invalidSnapshot(description + ' must be an object');
+      if (step.net !== undefined) validateNet(step.net, description + '.net');
+      ['component_type', 'opaque_transition'].forEach(function(key) {
+        if (step[key] !== undefined) _requireString(step[key], description + '.' + key);
+      });
+      ['sm_score', 'omega', 'tau'].forEach(function(key) {
+        if (step[key] !== undefined) _requireFiniteNumber(step[key], description + '.' + key);
+      });
+    });
     if (!_isObject(documentContext.calleeNets)) _invalidSnapshot('document.calleeNets must be an object');
+    Object.keys(documentContext.calleeNets).forEach(function(name) {
+      validateNet(documentContext.calleeNets[name], 'document.calleeNets.' + name);
+    });
     if (!Array.isArray(documentContext.expandedNodes)) _invalidSnapshot('document.expandedNodes must be an array');
     documentContext.expandedNodes.forEach(function(entry) {
       if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || !_isObject(entry[1])) {
