@@ -1060,66 +1060,146 @@
             return { ok: false, reason: "Cannot contract marked start/source places (tokens > 0)." };
           }
 
-          const outArcs = placeNode.outgoers('edge');
-          if (outArcs.length < 2) {
-            return { ok: false, reason: `Choice reduction requires >= 2 outgoing branches (has ${outArcs.length}).` };
+          const self = this;
+          const validBundles = [];
+
+          function addBundle(sourcePlace, targetPlace, transitions) {
+            if (!sourcePlace || !targetPlace || !Array.isArray(transitions) || transitions.length < 2) {
+              return;
+            }
+
+            const sourceId = sourcePlace.id();
+            const targetId = targetPlace.id();
+            const sourceKey = `${sourceId}::${targetId}`;
+            const existing = validBundles.find(function(bundle) {
+              return bundle.sourcePlaceId === sourceId && bundle.targetPlaceId === targetId;
+            });
+            if (existing) {
+              existing.transitions.push.apply(existing.transitions, transitions);
+              existing.transitions = Array.from(new Set(existing.transitions.map(function(t) { return t.id(); }))).map(function(id) {
+                return self.cy.getElementById(id);
+              }).filter(Boolean);
+              return;
+            }
+
+            validBundles.push({
+              sourcePlace: sourcePlace,
+              sourcePlaceId: sourceId,
+              targetPlace: targetPlace,
+              targetPlaceId: targetId,
+              transitions: transitions.slice()
+            });
           }
 
-          const self = this;
-          const targetGroups = new Map();
+          const outArcs = placeNode.outgoers('edge');
+          if (outArcs.length >= 2) {
+            const splitGroups = new Map();
+            outArcs.forEach(function(edge) {
+              const t = edge.target();
+              if (!t.hasClass('transition')) return;
 
-          outArcs.forEach(function(edge) {
-            const t = edge.target();
-            if (!t.hasClass('transition')) return;
+              const inArcs = t.incomers('edge');
+              const outArcsT = t.outgoers('edge');
+              if (inArcs.length !== 1 || outArcsT.length !== 1) return;
 
-            const inArcs = t.incomers('edge');
-            const outArcsT = t.outgoers('edge');
-            if (inArcs.length !== 1 || outArcsT.length !== 1) return;
+              const p_snk = outArcsT[0].target();
+              if (!p_snk.hasClass('place')) return;
+              if (p_snk.id() === placeNode.id()) return;
 
-            const p_snk = outArcsT[0].target();
-            if (!p_snk.hasClass('place')) return;
-            if (p_snk.id() === placeNode.id()) return; // skip self-loops
-
-            // Function boundary encapsulation check:
-            const parentT = t.data('parent') || null;
-            const parentPlace = placeNode.data('parent') || null;
-            if (parentT && parentT !== parentPlace) {
-              if (!self.isFunctionFoldedIntoSingleComponent(parentT)) {
-                return;
+              const choiceParents = [
+                placeNode.data('parent') || null,
+                t.data('parent') || null,
+                p_snk.data('parent') || null
+              ].filter(function(parentId) { return parentId !== null; });
+              if (choiceParents.length > 0) {
+                const baseParent = choiceParents[0];
+                for (let i = 1; i < choiceParents.length; i++) {
+                  const candidateParent = choiceParents[i];
+                  if (candidateParent !== baseParent && !self.isFunctionFoldedIntoSingleComponent(candidateParent)) {
+                    return;
+                  }
+                }
               }
-            }
 
-            const pSnkParent = p_snk.data('parent') || null;
-            if (parentT && parentT !== pSnkParent) {
-              if (!self.isFunctionFoldedIntoSingleComponent(parentT)) {
-                return;
+              const key = p_snk.id();
+              if (!splitGroups.has(key)) {
+                splitGroups.set(key, {
+                  sourcePlace: placeNode,
+                  targetPlace: p_snk,
+                  transitions: []
+                });
               }
-            }
+              splitGroups.get(key).transitions.push(t);
+            });
 
-            const targetId = p_snk.id();
-            if (!targetGroups.has(targetId)) {
-              targetGroups.set(targetId, {
-                targetPlace: p_snk,
-                targetPlaceId: targetId,
-                transitions: []
-              });
-            }
-            targetGroups.get(targetId).transitions.push(t);
-          });
+            splitGroups.forEach(function(group) {
+              if (group.transitions.length >= 2) {
+                addBundle(group.sourcePlace, group.targetPlace, group.transitions);
+              }
+            });
+          }
 
-          const validBundles = [];
-          targetGroups.forEach(function(group) {
-            if (group.transitions.length >= 2) {
-              validBundles.push(group);
-            }
-          });
+          const inArcs = placeNode.incomers('edge');
+          if (inArcs.length >= 2) {
+            const mergeGroups = new Map();
+            inArcs.forEach(function(edge) {
+              const t = edge.source();
+              if (!t.hasClass('transition')) return;
+
+              const inArcsT = t.incomers('edge');
+              const outArcsT = t.outgoers('edge');
+              if (inArcsT.length !== 1 || outArcsT.length !== 1) return;
+
+              const p_src = inArcsT[0].source();
+              if (!p_src.hasClass('place')) return;
+              if (p_src.id() === placeNode.id()) return;
+
+              const choiceParents = [
+                p_src.data('parent') || null,
+                t.data('parent') || null,
+                placeNode.data('parent') || null
+              ].filter(function(parentId) { return parentId !== null; });
+              if (choiceParents.length > 0) {
+                const baseParent = choiceParents[0];
+                for (let i = 1; i < choiceParents.length; i++) {
+                  const candidateParent = choiceParents[i];
+                  if (candidateParent !== baseParent && !self.isFunctionFoldedIntoSingleComponent(candidateParent)) {
+                    return;
+                  }
+                }
+              }
+
+              const key = p_src.id();
+              if (!mergeGroups.has(key)) {
+                mergeGroups.set(key, {
+                  sourcePlace: p_src,
+                  targetPlace: placeNode,
+                  transitions: []
+                });
+              }
+              mergeGroups.get(key).transitions.push(t);
+            });
+
+            mergeGroups.forEach(function(group) {
+              if (group.transitions.length >= 2) {
+                addBundle(group.sourcePlace, group.targetPlace, group.transitions);
+              }
+            });
+          }
 
           validBundles.sort(function(a, b) {
-            return a.targetPlaceId.localeCompare(b.targetPlaceId);
+            const leftKey = `${a.sourcePlaceId}::${a.targetPlaceId}`;
+            const rightKey = `${b.sourcePlaceId}::${b.targetPlaceId}`;
+            return leftKey.localeCompare(rightKey);
           });
 
           if (validBundles.length === 0) {
-            return { ok: false, reason: "No parallel transitions converging on a shared sink place." };
+            const reason = outArcs.length >= 2
+              ? "No parallel transitions converging on a shared sink place."
+              : inArcs.length >= 2
+                ? "No parallel transitions diverging from a shared source place."
+                : "Choice reduction requires at least two parallel branches.";
+            return { ok: false, reason: reason };
           }
 
           return { ok: true, bundles: validBundles };
@@ -1656,8 +1736,13 @@
           }
 
           const bundle = check.bundles[bundleIndex || 0];
-          const targetPlace = bundle.targetPlace;
+          const sourcePlace = bundle.sourcePlace || this.cy.getElementById(bundle.sourcePlaceId);
+          const targetPlace = bundle.targetPlace || this.cy.getElementById(bundle.targetPlaceId);
           const transitions = bundle.transitions;
+
+          if (!sourcePlace || !targetPlace || sourcePlace.length === 0 || targetPlace.length === 0) {
+            return { success: false, message: 'Choice bundle is missing its source or target place.' };
+          }
 
           this.stepCounter++;
           const stepNum = this.stepCounter;
@@ -1674,8 +1759,11 @@
 
           const transParents = transitions.map(function(t) { return t.data('parent') || null; });
           let parentId = this._findLowestCommonAncestorMultiple(transParents);
-          if (!parentId && placeNode.data('parent')) {
-            parentId = this._findLowestCommonAncestor(placeNode.data('parent'), targetPlace.data('parent'));
+          if (!parentId && sourcePlace.data('parent') && targetPlace.data('parent')) {
+            parentId = this._findLowestCommonAncestor(sourcePlace.data('parent'), targetPlace.data('parent'));
+          }
+          if (!parentId && placeNode && placeNode.data && placeNode.data('parent')) {
+            parentId = placeNode.data('parent');
           }
 
           const consumedNodes = transitions.map(function(t) {
@@ -1744,7 +1832,7 @@
             group: 'edges',
             data: {
               id: `arc_in_${opaqueId}`,
-              source: placeNode.id(),
+              source: sourcePlace.id(),
               target: opaqueId,
               weight: 1
             },
