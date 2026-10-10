@@ -494,6 +494,10 @@
               <span id="inspector-sm" class="pill-val">—</span>
             </div>
           </div>
+          <section id="inspector-function-return" aria-label="Called function return evidence" style="display: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid #30363d;">
+            <div class="inspector-label">Function return evidence</div>
+            <pre id="inspector-function-return-content" class="inspector-val" style="white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; font-family: inherit;"></pre>
+          </section>
           <div class="inspector-actions" style="margin-top: 8px;">
             <button id="hud-btn-contract-mg" class="btn btn-primary" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px;">Contract Marked Graph</button>
             <button id="hud-btn-fold-entire-function" class="btn btn-primary" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px; margin-top: 6px;">Fold Entire Function</button>
@@ -726,6 +730,7 @@
               label: readableLabel,
               function_name: compound.function_name || '',
               file: compound.file || '',
+              function_ref: typeof compound.function_ref === 'string' ? compound.function_ref : undefined,
               depth: depth,
               is_compound: true,
               composite_preassembled: true,
@@ -816,6 +821,9 @@
             omega: meta.omega !== undefined ? meta.omega : t.omega,
             source_line: meta.source_line !== undefined ? meta.source_line : t.source_line
           };
+          if (typeof meta.function_ref === 'string') {
+            nodeData.function_ref = meta.function_ref;
+          }
           if (encFn) {
             nodeData.enclosing_function = encFn;
           }
@@ -1496,6 +1504,49 @@
       const hudBtnUnfold = document.getElementById('hud-btn-unfold');
       const hudBtnFoldEntireFunction = document.getElementById('hud-btn-fold-entire-function');
       const inspectorActionResult = document.getElementById('inspector-action-result');
+      const inspectorFunctionReturn = document.getElementById('inspector-function-return');
+      const inspectorFunctionReturnContent = document.getElementById('inspector-function-return-content');
+
+      function getFunctionReturnRecord(functionRef) {
+        if (typeof functionRef !== 'string' || !functionRef) return null;
+        const candidates = [payload.composite_net, payload.initial_net, initialNet];
+        Object.keys(calleeNetsMap || {}).forEach(function(key) { candidates.push(calleeNetsMap[key]); });
+        for (let i = 0; i < candidates.length; i++) {
+          const registry = candidates[i] && candidates[i].function_metadata_registry;
+          if (registry && Object.prototype.hasOwnProperty.call(registry, functionRef)) {
+            return registry[functionRef];
+          }
+        }
+        return null;
+      }
+
+      function formatFunctionReturnInspection(metadata) {
+        if (!metadata) return 'Return metadata: Unknown — no resolved function record is available.';
+        const lines = [];
+        lines.push('Function: ' + (metadata.qualified_name || metadata.function_name || 'Unknown'));
+        lines.push('File: ' + (metadata.source_file || 'Unknown'));
+        if (metadata.definition_location) {
+          const definition = metadata.definition_location;
+          lines.push('Definition: ' + (definition.line == null ? 'Unknown' : definition.line) +
+            (definition.column == null ? '' : ':' + definition.column));
+        }
+        if (metadata.declared && typeof metadata.declared.expression === 'string') {
+          lines.push('Declared return: ' + metadata.declared.expression);
+          lines.push('Declared evidence: ' + (metadata.declared.provenance || 'Unknown'));
+        }
+        lines.push('Analysis status: ' + (metadata.analysis_status || 'unknown'));
+        (Array.isArray(metadata.inferred) ? metadata.inferred : []).forEach(function(evidence) {
+          const location = evidence.source_location || {};
+          lines.push('Returned expression: ' + (typeof evidence.expression === 'string' ? evidence.expression : 'Unknown'));
+          lines.push('Inferred type at this return: ' + (typeof evidence.type === 'string' ? evidence.type : 'Unknown'));
+          lines.push('Evidence: ' + (evidence.provenance || 'Unknown'));
+          lines.push('Role: ' + (evidence.role || 'Unknown'));
+          if (location.line != null) {
+            lines.push('Source location: ' + location.line + (location.column == null ? '' : ':' + location.column));
+          }
+        });
+        return lines.join('\n');
+      }
 
       function getInspectorData(node) {
         const rawLabel = node.data('custom_name') || node.data('raw_label') || node.data('label') || node.id();
@@ -1609,6 +1660,17 @@
         if (!els.panelEl) return;
         selectedInspectorNode = node;
         const data = getInspectorData(node);
+        const functionRef = node.data('function_ref');
+        if (typeof inspectorFunctionReturn !== 'undefined' && inspectorFunctionReturn) {
+          inspectorFunctionReturn.style.display = (functionRef || node.data('resolved') === false) ? 'block' : 'none';
+        }
+        if (typeof inspectorFunctionReturnContent !== 'undefined' && inspectorFunctionReturnContent) {
+          inspectorFunctionReturnContent.textContent = functionRef
+            ? (typeof getFunctionReturnRecord === 'function' && typeof formatFunctionReturnInspection === 'function'
+              ? formatFunctionReturnInspection(getFunctionReturnRecord(functionRef))
+              : 'Return metadata: Unknown — no resolved function record is available.')
+            : 'Return metadata: Unknown — this call is unresolved.';
+        }
 
         if (els.labelEl) els.labelEl.textContent = data.label;
         if (els.inputEl) els.inputEl.value = data.label;
@@ -1655,6 +1717,8 @@
         if (els.inputEl) els.inputEl.value = '';
         if (els.labelEl) els.labelEl.textContent = '';
         if (els.idEl) els.idEl.textContent = '—';
+        if (typeof inspectorFunctionReturn !== 'undefined' && inspectorFunctionReturn) inspectorFunctionReturn.style.display = 'none';
+        if (typeof inspectorFunctionReturnContent !== 'undefined' && inspectorFunctionReturnContent) inspectorFunctionReturnContent.textContent = '';
         if (els.tauEl) els.tauEl.textContent = '—';
         if (els.omegaEl) els.omegaEl.textContent = '—';
         if (els.typeEl) els.typeEl.textContent = '—';

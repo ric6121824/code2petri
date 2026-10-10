@@ -5569,6 +5569,84 @@ console.log('PASS');
         self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
         self.assertIn("Declared:", html_content)
 
+    def test_called_function_return_metadata_is_referenced_by_call_transition_in_viewer(self):
+        """The production HTML path gives resolved calls a stable shared return record."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "called.py")
+            html_path = os.path.join(temp_dir, "called.html")
+            composite_path = os.path.join(temp_dir, "called-composite.html")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write(
+                    "def answer() -> 'Answer':\n"
+                    "    return 'x:y'\n"
+                    "\n"
+                    "def caller():\n"
+                    "    answer()\n"
+                )
+            result = code2petri(
+                source_path, output_file=html_path, target_function="caller", fold=True
+            )
+            composite_result = code2petri(
+                source_path, output_file=composite_path, target_function="caller",
+                context=[source_path], fold=False,
+            )
+            with open(html_path, encoding="utf-8") as html_file:
+                html_content = html_file.read()
+            with open(composite_path, encoding="utf-8") as html_file:
+                composite_html = html_file.read()
+
+        embedded = _extract_embedded_data(html_content)
+        viewer_net = embedded["initial_net"]
+        call_transition = next(
+            transition for transition in viewer_net["transitions"]
+            if transition.get("metadata", {}).get("resolved_to") == "answer"
+        )
+        function_ref = call_transition["metadata"]["function_ref"]
+        record = viewer_net["function_metadata_registry"][function_ref]
+        self.assertEqual(record["qualified_name"], "answer")
+        self.assertEqual(record["source_file"], os.path.abspath(source_path))
+        self.assertEqual(record["declared"]["expression"], "'Answer'")
+        self.assertEqual(record["inferred"][0]["expression"], "'x:y'")
+        self.assertEqual(result.initial_net.to_dict()["function_metadata_registry"],
+                         viewer_net["function_metadata_registry"])
+        self.assertIn('id="inspector-function-return-content"', html_content)
+        self.assertIn("Inferred type at this return:", html_content)
+        self.assertIn("functionRef = node.data('function_ref')", html_content)
+        net_to_elements = _extract_template_net_to_elements()
+        node_script = f"""
+let payload = {{}};
+let calleeNetsMap = {{}};
+let expandedNodes = new Map();
+function findBoundaryPlaces() {{ return {{ sourcePlaceId: null, sinkPlaceId: null }}; }}
+{net_to_elements}
+const elements = netToElements({json.dumps(viewer_net)});
+const callNode = elements.find(element => element.group === 'nodes' && element.data.id === {json.dumps(call_transition['id'])});
+if (!callNode || callNode.data.function_ref !== {json.dumps(function_ref)}) throw new Error('call node lost its function reference');
+console.log('PASS');
+"""
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+        composite_data = _extract_embedded_data(composite_html)
+        composite_net = composite_data["composite_net"]
+        compound = next(item for item in composite_net["compounds"] if item["function_name"] == "answer")
+        self.assertEqual(compound["function_ref"], function_ref)
+        composite_elements_script = f"""
+let payload = {{}};
+let calleeNetsMap = {{}};
+let expandedNodes = new Map();
+function findBoundaryPlaces() {{ return {{ sourcePlaceId: null, sinkPlaceId: null }}; }}
+{net_to_elements}
+const elements = netToElements({json.dumps(composite_net)});
+const functionNode = elements.find(element => element.group === 'nodes' && element.data.id === {json.dumps(compound['id'])});
+if (!functionNode || functionNode.data.function_ref !== {json.dumps(function_ref)}) throw new Error('function compound lost its return reference');
+console.log('PASS');
+"""
+        proc = _run_node_script(composite_elements_script)
+        self.assertEqual(proc.returncode, 0, f"Composite Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_javascript_assigned_functions_keep_owner_jsdoc_and_expression_text(self):
         """JSDoc attaches only to its declaration and unknown expressions keep their source text."""
         source = '''/** @returns {WrongOwner} */

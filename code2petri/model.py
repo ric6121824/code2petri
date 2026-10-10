@@ -32,19 +32,23 @@ class CompoundContainer:
     file: str = ""
     parent: Optional[str] = None
     node_ids: Optional[Set[str]] = None
+    function_ref: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.node_ids is None:
             self.node_ids = set()
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        record = {
             "id": self.id,
             "label": self.label,
             "function_name": self.function_name,
             "file": self.file,
             "parent": self.parent,
         }
+        if self.function_ref:
+            record["function_ref"] = self.function_ref
+        return record
 
 
 
@@ -409,6 +413,7 @@ class PetriNet:
         self.arcs: List[Arc] = []
         self.compounds: List[CompoundContainer] = []
         self.return_metadata: Optional[Dict[str, Any]] = None
+        self.function_metadata_registry: Dict[str, Dict[str, Any]] = {}
 
     def add_place(
         self,
@@ -466,6 +471,7 @@ class PetriNet:
         file: Optional[str] = None,
         parent: Optional[str] = None,
         node_ids: Optional[Set[str]] = None,
+        function_ref: Optional[str] = None,
     ) -> CompoundContainer:
         """Registers a compound node representing an inlined function container."""
         for c in self.compounds:
@@ -478,6 +484,7 @@ class PetriNet:
             file=str(file or ""),
             parent=parent,
             node_ids=set(node_ids) if node_ids else set(),
+            function_ref=function_ref,
         )
         self.compounds.append(compound)
         return compound
@@ -583,6 +590,8 @@ class PetriNet:
             d["compounds"] = [c.to_dict() for c in self.compounds]
         if self.return_metadata is not None:
             d["return_metadata"] = json.loads(json.dumps(self.return_metadata))
+        if self.function_metadata_registry:
+            d["function_metadata_registry"] = json.loads(json.dumps(self.function_metadata_registry))
         return d
 
     def to_json(self, indent: int = 2) -> str:
@@ -599,6 +608,7 @@ class PetriNet:
         """Creates a deep copy of the PetriNet including places, transitions, metadata, and arcs."""
         new_net = PetriNet()
         new_net.return_metadata = json.loads(json.dumps(self.return_metadata)) if self.return_metadata is not None else None
+        new_net.function_metadata_registry = json.loads(json.dumps(self.function_metadata_registry))
 
         for p in self.places:
             new_p_meta = dict(p.metadata) if p.metadata else None
@@ -635,6 +645,7 @@ class PetriNet:
                 file=c.file,
                 parent=c.parent,
                 node_ids=set(c.node_ids) if c.node_ids else set(),
+                function_ref=c.function_ref,
             )
             for c in self.compounds
         ]

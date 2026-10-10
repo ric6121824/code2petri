@@ -7,6 +7,9 @@ import xml.etree.ElementTree as ET
 from code2petri.model import PetriNet, Transition, CallResolution, RenderingConfig
 from code2petri.walker_protocol import CallSite, WalkResult
 from code2petri.symbol_table import Symbol, SymbolTable, normalize_language
+from code2petri.python_walker import PythonWalker
+from code2petri.javascript_walker import JavascriptWalker
+from code2petri.inline import inline_expand
 
 
 class TestSymbolTableIndexing(unittest.TestCase):
@@ -85,6 +88,71 @@ class TestSymbolTableIndexing(unittest.TestCase):
         lookup_res = self.table.lookup("WebGLEngine.step", language="javascript")
         self.assertEqual(len(lookup_res), 1)
         self.assertEqual(lookup_res[0].name, "WebGLEngine.step")
+
+    def test_resolved_call_sites_reference_one_source_owned_return_record(self):
+        """Repeated unambiguous calls reference one definition-identified record."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_file = os.path.join(temp_dir, "returns.py")
+            with open(source_file, "w", encoding="utf-8") as source:
+                source.write(
+                    "def answer() -> 'Result':\n"
+                    "    return True\n"
+                    "\n"
+                    "def caller():\n"
+                    "    answer()\n"
+                    "    answer()\n"
+                )
+            table = SymbolTable()
+            table.index_file(source_file)
+            walker = PythonWalker()
+            tree = walker.parse_file(source_file)
+            caller = walker.find_function(tree, "caller")
+            result = walker.walk_function(caller, "caller", source_file)
+
+            table.resolve_call_sites(result.net, result.call_sites)
+
+            transitions = result.net.transitions
+            refs = [transition.metadata["function_ref"] for transition in transitions]
+            self.assertEqual(refs[0], refs[1])
+            self.assertEqual(len(result.net.function_metadata_registry), 1)
+            record = result.net.function_metadata_registry[refs[0]]
+            self.assertEqual(record["source_file"], os.path.abspath(source_file))
+            self.assertEqual(record["qualified_name"], "answer")
+            self.assertEqual(record["definition_location"]["line"], 1)
+            self.assertEqual(record["declared"]["expression"], "'Result'")
+            self.assertEqual(result.net.clone().to_dict()["function_metadata_registry"],
+                             result.net.to_dict()["function_metadata_registry"])
+
+            expanded = inline_expand(result.net, result.call_sites, table, max_depth=1)
+            function_compounds = [c for c in expanded.compounds if c.function_name == "answer"]
+            self.assertEqual(len(function_compounds), 2)
+            self.assertTrue(all(c.function_ref == refs[0] for c in function_compounds))
+            self.assertEqual(len(expanded.function_metadata_registry), 1)
+
+    def test_resolved_javascript_call_sites_reference_function_record(self):
+        """Resolved JavaScript calls share the record for their exact definition."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_file = os.path.join(temp_dir, "returns.js")
+            with open(source_file, "w", encoding="utf-8") as source:
+                source.write(
+                    "function answer() { return 'yes'; }\n"
+                    "function caller() { answer(); answer(); }\n"
+                )
+            table = SymbolTable()
+            table.index_file(source_file)
+            walker = JavascriptWalker()
+            tree = walker.parse_file(source_file)
+            caller = walker.find_function(tree, "caller")
+            result = walker.walk_function(caller, "caller", source_file)
+
+            table.resolve_call_sites(result.net, result.call_sites)
+
+            refs = [transition.metadata["function_ref"] for transition in result.net.transitions]
+            self.assertEqual(refs[0], refs[1])
+            record = result.net.function_metadata_registry[refs[0]]
+            self.assertEqual(record["qualified_name"], "answer")
+            self.assertEqual(record["source_file"], os.path.abspath(source_file))
+            self.assertEqual(record["inferred"][0]["expression"], "'yes'")
 
 
 class TestCrossLanguageIsolation(unittest.TestCase):
