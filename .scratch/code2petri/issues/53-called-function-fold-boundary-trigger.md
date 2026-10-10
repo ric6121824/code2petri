@@ -1,64 +1,46 @@
-# 53: Called-function folding does not trigger at an entrance/exit boundary
+# 53: Complete called-function folding at shared boundaries
 
-**What to build:** Allow an existing Choice reduction over parallel transitions owned by the selected called function when its shared entrance or exit place belongs to the caller. Expose eligible function-internal split/merge places to the normal green highlight and place-fold action, and let Fold-Entire-Function finish both reported shapes without consuming caller boundaries or losing Component-Local Unfold history.
+**What to build:** Users can fold a called function completely when eligible parallel branches inside it share an entrance or exit place owned by the caller. The function's internal place is highlighted green and supports the normal Place-Centric Fold Trigger; Batch Place Fold and Fold-Entire-Function perform the same eligible reductions. Caller boundaries and surrounding functions remain intact, and the resulting components can still be saved, reopened, and locally unfolded.
 
-**Related phase:** Phase 2.8 — Fold-Entire-Function and existing boundary folding, separate from Phase 2.10 Function Return Metadata.
-
-**Related ticket:** [47 — Fold-Entire-Function](./47-fold-entire-function-compound.md).
-
-**Blocked by:** None; reproduction and controlled diagnosis are complete.
+**Blocked by:** None (can start immediately).
 
 **Status:** ready-for-agent
 
-- [x] Identify the affected generated viewer, called-function occurrences, and symptom. "Opposite side" means graph direction, not layout.
-- [x] Reproduce the reported absence of green highlights and incomplete Fold-Entire-Function results; minimize both shapes to seven nodes and six arcs.
-- [x] Distinguish rejected boundary eligibility from a missing internal trigger using controlled probes; rule priority does not cause these stalls.
-- [ ] Add failing regressions through the actual generated-viewer/headless seam for exit-side splitting and entrance-side merging, including green highlights, individual place folding, and the sidebar Fold-Entire-Function action. Both must complete through existing Choice followed by Sequence reductions.
-- [ ] Validate a Choice bundle by ownership of the transitions it consumes. Shared caller-owned places may serve as retained anchors; do not broadly remove function-boundary guards or combine unresolved functions merely because their transitions share a destination.
-- [ ] Make an eligible entrance-side Choice reachable from a function-internal place. Keep detection, highlights, individual folding, Batch Place Fold, and Fold-Entire-Function consistent. Do not add arbitrary caller places to the function's batch loop.
-- [ ] Preserve caller and sibling nodes, caller-owned boundary places and tokens, exterior connections, names, weights/SM, and local unfolding of nested consumed components. Verify containment when caller boundaries have additional unrelated branches and when nested functions remain unresolved.
-- [ ] Retain complete/partial/no-progress reporting, a single final layout, and zoom/pan preservation. Legitimately unsupported graphs may still stop partially; no whole-net fallback, new mathematical reduction rule, or changed token-flow semantics is introduced.
-- [ ] Re-run the original Aeroblasters graph against the corrected engine and verify all four affected call occurrences. Newly generated HTML must embed the corrected engine; the already exported HTML does not update automatically.
+- [ ] Reproduce both reported shapes: an internal split whose parallel transitions converge on the caller's exit, and an internal merge whose parallel transitions originate at the caller's entrance. In each case, all affected transitions belong to the called function.
+- [ ] Highlight the eligible internal split or merge place green. Clicking it performs the existing Choice reduction in the correct graph direction, retaining both shared places. Batch Place Fold uses the same immediate eligibility check and skips ineligible places as before.
+- [ ] Fold-Entire-Function completes each reported shape through existing Choice and Single-Place Contraction reductions, including when only one internal place remains. The sidebar reports complete collapse accurately and the function reaches Collapsed Compound State.
+- [ ] Validate the entire Choice bundle before mutation. A caller-owned place may be a retained anchor, but the reduction must consume only transitions belonging to the same eligible function container. Retain existing protection against combining unresolved nested functions, siblings, or caller transitions.
+- [ ] Preserve caller-owned boundary places and tokens, unrelated incident arcs, sibling nodes, other folds, component names, and existing weights/Structuredness Metric calculations. Verify this when the shared boundary also connects to unrelated caller or sibling branches.
+- [ ] Preserve recursive restoration records. Component-Local Unfold restores the exact consumed subgraph, hierarchy, and connections, including earlier components within the newly folded Choice. Save/open followed by continued folding and local unfolding preserves that behavior without component-ID collisions.
+- [ ] Keep a single final layout and retain zoom/pan for Fold-Entire-Function. Partial/no-progress results remain valid for unsupported graphs; do not introduce a new mathematical reduction, broadly disable function-boundary safeguards, or force completion through whole-net fallback.
+- [ ] Add regressions at the generated-viewer/headless action seam for green highlights, individual place folding, Batch Place Fold, and the sidebar function action. Include both boundary directions, already-folded branch components, containment rejection, nested unfolding, session resumption, and viewport preservation.
+- [ ] Replay the original Aeroblasters net against the corrected engine and verify all four affected call occurrences. Confirm that newly generated HTML embeds the fix; previously exported HTML retains its embedded engine until regenerated.
 
-## Report
+## Context
 
-### 2026-10-10 — User report during Phase 2.10 design
+This is a Phase 2.8 follow-up to [47 — Fold-Entire-Function](./47-fold-entire-function-compound.md), separate from Phase 2.9 snapshot optimization and Phase 2.10 Function Return Metadata. Ticket 47 is resolved and supplies the existing action; it is not an outstanding blocker.
 
-"I can't fold a called function when its entrance or exit is not resolved into one place (the fold mechanic is not triggered when either entrance or exit is on the opposite side of the other)."
-
-Existing Fold-Entire-Function permits partial completion; that contract alone does not explain this report.
-
-### 2026-10-10 — Reproduction details supplied
-
-- Affected viewer: [aeroblasters_global_foldable.html](</Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/Graph Data/output_code2petri/Aeroblasters-261010/aeroblasters_global_foldable.html>).
-- Affected functions: `BlinkingText.update()` and `Message.update()`.
-- Symptom: the relevant place is not highlighted foldable green, and the called function cannot be reduced entirely into a component node.
-- "Opposite side" describes graph connections, not rendered positions.
+Function containment concerns the nodes a reduction consumes. A retained caller boundary can anchor a function-owned Choice without being consumed. The internal-place trigger makes that Choice accessible without requiring the user to select an exterior caller place or adding arbitrary caller places to the function's batch scope.
 
 ## Comments
 
-### 2026-10-10 — Reproduction and diagnosis
+### 2026-10-10 — User report
 
-The supplied HTML's embedded engine matches the current repository engine. Replaying its actual embedded net reproduces the stall in all four matching call occurrences: one `BlinkingText.update()` and three `Message.update()` compounds. Each stops with one internal place and three transitions, without an eligible green internal place or complete collapse.
+The user cannot fold `BlinkingText.update()` and `Message.update()` entirely into component nodes in the Aeroblasters viewer generated on 2026-10-10 because the relevant internal place is not highlighted green. "Opposite side" means graph connection direction, not rendered position.
 
-The minimized remainder shapes are:
+### 2026-10-10 — Confirmed diagnosis
 
-```text
-BlinkingText.update(): caller entry -> linear transition -> internal place
-                      -> {two parallel transitions} -> caller exit
+The supplied viewer embeds the same engine as the repository. Replaying its net reproduces the stall in one `BlinkingText.update()` and three `Message.update()` call occurrences. Each stops at one internal place and three transitions.
 
-Message.update():     caller entry -> {two parallel transitions}
-                      -> internal place -> linear transition -> caller exit
-```
+Two controlled probes distinguish the causes:
 
-All three transitions belong to the called function; the shared outer places belong to the caller after [boundary place unification](../../../docs/adr/0002-boundary-place-unification.md).
+1. Relaxing only the Choice boundary checks in memory makes the exit-side split eligible; existing Choice followed by Single-Place Contraction completes the function.
+2. With those checks relaxed, the entrance-side merge still lacks an internal trigger. Applying Choice from its exterior entrance lets the existing function action finish while retaining both caller boundary places.
 
-Controlled probes identify two obstructions in [the reduction engine](../../../code2petri/viewer/engine/reduction_engine.js):
+Bypassing elementary-rule priority does not help either internal place. The required refinement is eligibility and trigger access for existing reductions, with consumption containment retained. The diagnostic bypass is not a safe implementation.
 
-- `detectChoiceCandidates` rejects otherwise parallel function-owned transitions when a shared source or sink place has a different parent and the function is not already collapsed. Bypassing only those checks in memory allows Choice then Sequence to complete the exit-side shape.
-- For the entrance-side shape, the current Choice trigger is the caller's exterior source place. `executeFoldEntireFunction` considers only descendant places, so it still stalls after the boundary-check bypass. Applying that Choice directly in the diagnostic replay lets the existing function action complete while retaining both caller boundaries.
-- Rule-priority bypass does not help either internal place; no elementary reductions were available in the baseline. No new reduction type is needed for these examples.
+The [diagnostic replay and reproduction notes](../debug/called-function-boundary-folding/README.md) preserve both minimized real-world shapes and the original input location. The replay currently fails both cases as expected; no production fix has been applied.
 
-The portable [diagnostic replay and notes](../debug/called-function-boundary-folding/README.md) preserve both minimal cases. Running `node .scratch/code2petri/debug/called-function-boundary-folding/repro.cjs` from the repository root currently exits 1 with two failures. This is diagnosis evidence, not a passing regression or production fix.
+### 2026-10-10 — Ticket rewrite
 
-Ticket 47's containment contract remains: consumption stays inside the selected function and its descendants. Its prohibition on exterior triggers is refined here only for a retained caller boundary anchoring a verified function-owned Choice bundle. The internal-place affordance must make this usable without requiring the user to select a caller place.
+Rewritten with to-tickets as one complete, independently verifiable folding fix covering eligibility, UI actions, restoration, and regression evidence. No prefactoring ticket or outstanding blocking edge is required.

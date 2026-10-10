@@ -2,6 +2,8 @@
 
 Related issue: [Ticket 53](../../issues/53-called-function-fold-boundary-trigger.md).
 
+Original reported input: [aeroblasters_global_foldable.html](</Users/pingchungtsai/My Drive (ric6121824@gmail.com)/Digital Media MSc/Semester 4/Graph Data/output_code2petri/Aeroblasters-261010/aeroblasters_global_foldable.html>). The affected occurrences are one `BlinkingText.update()` and three `Message.update()` function compounds. "Opposite side" refers to graph connection direction.
+
 This is a diagnostic fixture, not an implemented fix or a replacement for the generated-viewer regression suite. It uses the repository's actual reduction engine and highlight function with two stripped post-fold graph shapes captured from the reported Aeroblasters viewer. Each case has seven nodes (including the function container) and six arcs. No original source path, generated HTML, or temporary files are required.
 
 From the repository root:
