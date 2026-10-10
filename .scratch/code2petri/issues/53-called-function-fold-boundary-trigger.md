@@ -4,17 +4,17 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Reproduce both reported shapes: an internal split whose parallel transitions converge on the caller's exit, and an internal merge whose parallel transitions originate at the caller's entrance. In each case, all affected transitions belong to the called function.
-- [ ] Highlight the eligible internal split or merge place green. Clicking it performs the existing Choice reduction in the correct graph direction, retaining both shared places. Batch Place Fold uses the same immediate eligibility check and skips ineligible places as before.
-- [ ] Fold-Entire-Function completes each reported shape through existing Choice and Single-Place Contraction reductions, including when only one internal place remains. The sidebar reports complete collapse accurately and the function reaches Collapsed Compound State.
-- [ ] Validate the entire Choice bundle before mutation. A caller-owned place may be a retained anchor, but the reduction must consume only transitions belonging to the same eligible function container. Retain existing protection against combining unresolved nested functions, siblings, or caller transitions.
-- [ ] Preserve caller-owned boundary places and tokens, unrelated incident arcs, sibling nodes, other folds, component names, and existing weights/Structuredness Metric calculations. Verify this when the shared boundary also connects to unrelated caller or sibling branches.
-- [ ] Preserve recursive restoration records. Component-Local Unfold restores the exact consumed subgraph, hierarchy, and connections, including earlier components within the newly folded Choice. Save/open followed by continued folding and local unfolding preserves that behavior without component-ID collisions.
-- [ ] Keep a single final layout and retain zoom/pan for Fold-Entire-Function. Partial/no-progress results remain valid for unsupported graphs; do not introduce a new mathematical reduction, broadly disable function-boundary safeguards, or force completion through whole-net fallback.
-- [ ] Add regressions at the generated-viewer/headless action seam for green highlights, individual place folding, Batch Place Fold, and the sidebar function action. Include both boundary directions, already-folded branch components, containment rejection, nested unfolding, session resumption, and viewport preservation.
-- [ ] Replay the original Aeroblasters net against the corrected engine and verify all four affected call occurrences. Confirm that newly generated HTML embeds the fix; previously exported HTML retains its embedded engine until regenerated.
+- [x] Reproduce both reported shapes: an internal split whose parallel transitions converge on the caller's exit, and an internal merge whose parallel transitions originate at the caller's entrance. In each case, all affected transitions belong to the called function.
+- [x] Highlight the eligible internal split or merge place green. Clicking it performs the existing Choice reduction in the correct graph direction, retaining both shared places. Batch Place Fold uses the same immediate eligibility check and skips ineligible places as before.
+- [x] Fold-Entire-Function completes each reported shape through existing Choice and Single-Place Contraction reductions, including when only one internal place remains. The sidebar reports complete collapse accurately and the function reaches Collapsed Compound State.
+- [x] Validate the entire Choice bundle before mutation. A caller-owned place may be a retained anchor, but the reduction must consume only transitions belonging to the same eligible function container. Retain existing protection against combining unresolved nested functions, siblings, or caller transitions.
+- [x] Preserve caller-owned boundary places and tokens, unrelated incident arcs, sibling nodes, other folds, component names, and existing weights/Structuredness Metric calculations. Verify this when the shared boundary also connects to unrelated caller or sibling branches.
+- [x] Preserve recursive restoration records. Component-Local Unfold restores the exact consumed subgraph, hierarchy, and connections, including earlier components within the newly folded Choice. Save/open followed by continued folding and local unfolding preserves that behavior without component-ID collisions.
+- [x] Keep a single final layout and retain zoom/pan for Fold-Entire-Function. Partial/no-progress results remain valid for unsupported graphs; do not introduce a new mathematical reduction, broadly disable function-boundary safeguards, or force completion through whole-net fallback.
+- [x] Add regressions at the generated-viewer/headless action seam for green highlights, individual place folding, Batch Place Fold, and the sidebar function action. Include both boundary directions, already-folded branch components, containment rejection, nested unfolding, session resumption, and viewport preservation.
+- [x] Replay the original Aeroblasters net against the corrected engine and verify all four affected call occurrences. Confirm that newly generated HTML embeds the fix; previously exported HTML retains its embedded engine until regenerated.
 
 ## Context
 
@@ -23,6 +23,10 @@ This is a Phase 2.8 follow-up to [47 — Fold-Entire-Function](./47-fold-entire-
 Function containment concerns the nodes a reduction consumes. A retained caller boundary can anchor a function-owned Choice without being consumed. The internal-place trigger makes that Choice accessible without requiring the user to select an exterior caller place or adding arbitrary caller places to the function's batch scope.
 
 ## Comments
+
+### 2026-10-10 — Implementation complete
+
+Implemented the round-02 findings and added generated-viewer/headless regressions. `python3 -m unittest tests.test_html_viewer` passes (150 tests). The full suite ran 547 tests and has three unrelated errors (missing `pygraphviz`, missing `pytest`, and an existing `WalkResult` unpacking mismatch). The read-only round-02 review snapshot reports the Aeroblasters manual acceptance check passed. See the [round-02 implementation review](../reviews/phase-2.8-ticket-53-round-02.md).
 
 ### 2026-10-10 — User report
 

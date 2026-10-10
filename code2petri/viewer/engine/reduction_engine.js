@@ -867,22 +867,20 @@
           const parentSrc = t_src.data('parent') || null;
           const parentSnk = t_snk.data('parent') || null;
 
-          if (parentSrc !== parentSnk || (parentPlace !== null && (parentPlace !== parentSrc || parentPlace !== parentSnk))) {
-            if (parentSrc !== null && (parentSrc !== parentSnk || parentSrc !== parentPlace)) {
-              if (!this.isFunctionFoldedIntoSingleComponent(parentSrc)) {
-                return {
-                  ok: false,
-                  reason: `Preceding transition belongs to function container '${parentSrc}', which is not yet folded into a single component node.`
-                };
-              }
+          if (parentSrc !== null && parentSrc !== parentPlace) {
+            if (!this.isFunctionFoldedIntoSingleComponent(parentSrc)) {
+              return {
+                ok: false,
+                reason: `Preceding transition belongs to function container '${parentSrc}', which is not yet folded into a single component node.`
+              };
             }
-            if (parentSnk !== null && (parentSnk !== parentSrc || parentSnk !== parentPlace)) {
-              if (!this.isFunctionFoldedIntoSingleComponent(parentSnk)) {
-                return {
-                  ok: false,
-                  reason: `Succeeding transition belongs to function container '${parentSnk}', which is not yet folded into a single component node.`
-                };
-              }
+          }
+          if (parentSnk !== null && parentSnk !== parentPlace) {
+            if (!this.isFunctionFoldedIntoSingleComponent(parentSnk)) {
+              return {
+                ok: false,
+                reason: `Succeeding transition belongs to function container '${parentSnk}', which is not yet folded into a single component node.`
+              };
             }
           }
 
@@ -1063,6 +1061,33 @@
           const self = this;
           const validBundles = [];
 
+          function isContainedChoiceBundle(sourcePlace, targetPlace, transitions) {
+            if (!sourcePlace || !targetPlace || transitions.length < 2) return false;
+
+            const eligibleFunctionParent = placeNode.data('parent') || null;
+            const functionParent = transitions[0].data('parent') || null;
+            if (functionParent !== eligibleFunctionParent) return false;
+            if (transitions.some(function(transition) {
+              return (transition.data('parent') || null) !== functionParent;
+            })) {
+              return false;
+            }
+
+            const sourceParent = sourcePlace.data('parent') || null;
+            const targetParent = targetPlace.data('parent') || null;
+            if (!functionParent) {
+              return placeNode.id() === sourcePlace.id() && sourceParent === null && targetParent === null;
+            }
+
+            const functionContainer = self.cy.getElementById(functionParent);
+            if (!functionContainer || functionContainer.length === 0) return false;
+            const callerParent = functionContainer.data('parent') || null;
+            const isRetainedFunctionOrCallerPlace = function(parentId) {
+              return parentId === functionParent || parentId === callerParent;
+            };
+            return isRetainedFunctionOrCallerPlace(sourceParent) && isRetainedFunctionOrCallerPlace(targetParent);
+          }
+
           function addBundle(sourcePlace, targetPlace, transitions) {
             if (!sourcePlace || !targetPlace || !Array.isArray(transitions) || transitions.length < 2) {
               return;
@@ -1074,11 +1099,15 @@
             const existing = validBundles.find(function(bundle) {
               return bundle.sourcePlaceId === sourceId && bundle.targetPlaceId === targetId;
             });
+            const combinedTransitions = existing
+              ? existing.transitions.concat(transitions)
+              : transitions.slice();
+            const uniqueTransitions = Array.from(new Set(combinedTransitions.map(function(t) { return t.id(); }))).map(function(id) {
+              return self.cy.getElementById(id);
+            }).filter(Boolean);
+            if (!isContainedChoiceBundle(sourcePlace, targetPlace, uniqueTransitions)) return;
             if (existing) {
-              existing.transitions.push.apply(existing.transitions, transitions);
-              existing.transitions = Array.from(new Set(existing.transitions.map(function(t) { return t.id(); }))).map(function(id) {
-                return self.cy.getElementById(id);
-              }).filter(Boolean);
+              existing.transitions = uniqueTransitions;
               return;
             }
 
@@ -1105,21 +1134,6 @@
               const p_snk = outArcsT[0].target();
               if (!p_snk.hasClass('place')) return;
               if (p_snk.id() === placeNode.id()) return;
-
-              const choiceParents = [
-                placeNode.data('parent') || null,
-                t.data('parent') || null,
-                p_snk.data('parent') || null
-              ].filter(function(parentId) { return parentId !== null; });
-              if (choiceParents.length > 0) {
-                const baseParent = choiceParents[0];
-                for (let i = 1; i < choiceParents.length; i++) {
-                  const candidateParent = choiceParents[i];
-                  if (candidateParent !== baseParent && !self.isFunctionFoldedIntoSingleComponent(candidateParent)) {
-                    return;
-                  }
-                }
-              }
 
               const key = p_snk.id();
               if (!splitGroups.has(key)) {
@@ -1153,21 +1167,6 @@
               const p_src = inArcsT[0].source();
               if (!p_src.hasClass('place')) return;
               if (p_src.id() === placeNode.id()) return;
-
-              const choiceParents = [
-                p_src.data('parent') || null,
-                t.data('parent') || null,
-                placeNode.data('parent') || null
-              ].filter(function(parentId) { return parentId !== null; });
-              if (choiceParents.length > 0) {
-                const baseParent = choiceParents[0];
-                for (let i = 1; i < choiceParents.length; i++) {
-                  const candidateParent = choiceParents[i];
-                  if (candidateParent !== baseParent && !self.isFunctionFoldedIntoSingleComponent(candidateParent)) {
-                    return;
-                  }
-                }
-              }
 
               const key = p_src.id();
               if (!mergeGroups.has(key)) {

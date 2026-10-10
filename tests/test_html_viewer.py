@@ -5962,6 +5962,274 @@ console.log('PASS');
 
 
 
+class TestCalledFunctionChoiceBoundary(unittest.TestCase):
+    @staticmethod
+    def _boundary_net(direction, transitions_override=None):
+        transitions_override = transitions_override or ""
+        if direction == 'split':
+            return """{
+  compounds: [
+    { id: 'caller', label: 'caller()' },
+    { id: 'fn', label: 'called()', function_name: 'called', parent: 'caller' }
+  ],
+  places: [
+    { id: 'p_entry', parent: 'caller', label: 'entry', initial_tokens: 1 },
+    { id: 'p_trigger', parent: 'fn', label: 'split' },
+    { id: 'p_exit', parent: 'caller', label: 'exit' },
+    { id: 'p_after', parent: 'caller', label: 'after' }
+  ],
+  transitions: [
+    { id: 't_before', parent: 'fn', label: 'before()' },
+    { id: 't1', parent: 'fn', label: 'left()' },
+    { id: 't2', parent: 'fn', label: 'right()' },
+    { id: 't_unrelated', parent: 'caller', label: 'unrelated()' }
+    %s
+  ],
+  arcs: [
+    { source: 'p_entry', target: 't_before' }, { source: 't_before', target: 'p_trigger' },
+    { source: 'p_trigger', target: 't1' }, { source: 't1', target: 'p_exit' },
+    { source: 'p_trigger', target: 't2' }, { source: 't2', target: 'p_exit' },
+    { source: 'p_exit', target: 't_unrelated' }, { source: 't_unrelated', target: 'p_after' }
+  ]
+}""" % transitions_override
+        return """{
+  compounds: [
+    { id: 'caller', label: 'caller()' },
+    { id: 'fn', label: 'called()', function_name: 'called', parent: 'caller' }
+  ],
+  places: [
+    { id: 'p_entry', parent: 'caller', label: 'entry', initial_tokens: 1 },
+    { id: 'p_trigger', parent: 'fn', label: 'merge' },
+    { id: 'p_exit', parent: 'caller', label: 'exit' },
+    { id: 'p_after', parent: 'caller', label: 'after' }
+  ],
+  transitions: [
+    { id: 't1', parent: 'fn', label: 'left()' },
+    { id: 't2', parent: 'fn', label: 'right()' },
+    { id: 't_after', parent: 'fn', label: 'after()' },
+    { id: 't_unrelated', parent: 'caller', label: 'unrelated()' }
+    %s
+  ],
+  arcs: [
+    { source: 'p_entry', target: 't1' }, { source: 't1', target: 'p_trigger' },
+    { source: 'p_entry', target: 't2' }, { source: 't2', target: 'p_trigger' },
+    { source: 'p_trigger', target: 't_after' }, { source: 't_after', target: 'p_exit' },
+    { source: 'p_exit', target: 't_unrelated' }, { source: 't_unrelated', target: 'p_after' }
+  ]
+}""" % transitions_override
+
+    def test_internal_split_and_merge_places_fold_through_individual_trigger(self):
+        for direction in ('split', 'merge'):
+            with self.subTest(direction=direction):
+                test_logic = """
+const trigger = cy.getElementById('p_trigger');
+if (!trigger.hasClass('contractible-choice')) throw new Error('shared-boundary trigger was not highlighted');
+cy.zoom(1.4);
+cy.pan({ x: 27, y: -13 });
+trigger.emit('tap');
+if (cy.getElementById('t1').length || cy.getElementById('t2').length) throw new Error('Choice transitions were not folded');
+if (!cy.getElementById('p_entry').length || !cy.getElementById('p_exit').length) throw new Error('Caller boundaries were consumed');
+if (cy.getElementById('p_entry').data('initial_tokens') !== 1) throw new Error('Caller boundary tokens changed');
+if (!cy.getElementById('t_unrelated').length || !cy.getElementById('p_after').length) throw new Error('Unrelated caller path was consumed');
+const component = cy.getElementById('c_01');
+if (!component.length || component.data('parent') !== 'fn') throw new Error('Choice component lost function containment');
+if (cy.zoom() !== 1.4 || cy.pan().x !== 27 || cy.pan().y !== -13) throw new Error('Individual fold changed viewport');
+console.log('PASS');
+"""
+                proc = _run_node_script(_setup_live_fold_test_harness(self._boundary_net(direction), test_logic))
+                self.assertEqual(proc.returncode, 0, f"{direction} individual fold failed: {proc.stderr}")
+                self.assertIn("PASS", proc.stdout)
+
+    def test_batch_fold_uses_the_same_internal_split_and_merge_eligibility(self):
+        for direction in ('split', 'merge'):
+            with self.subTest(direction=direction):
+                test_logic = """
+const trigger = cy.getElementById('p_trigger');
+if (!trigger.hasClass('contractible-choice')) throw new Error('batch trigger was not highlighted');
+const result = foldEngine.executeBatchFold(['p_trigger', 'missing']);
+if (result.folded.length !== 1 || result.folded[0].foldType !== 'choice' || result.skipped.length !== 1) {
+  throw new Error('Unexpected batch result: ' + JSON.stringify(result));
+}
+if (!cy.getElementById('p_entry').length || !cy.getElementById('p_exit').length) throw new Error('Batch fold consumed caller boundaries');
+if (cy.getElementById('p_entry').data('initial_tokens') !== 1) throw new Error('Batch fold changed caller boundary tokens');
+if (!cy.getElementById('t_unrelated').length || !cy.getElementById('p_after').length) throw new Error('Batch fold consumed unrelated caller path');
+console.log('PASS');
+"""
+                proc = _run_node_script(_setup_live_fold_test_harness(self._boundary_net(direction), test_logic))
+                self.assertEqual(proc.returncode, 0, f"{direction} batch fold failed: {proc.stderr}")
+                self.assertIn("PASS", proc.stdout)
+
+    def test_collapsed_sibling_or_caller_transition_cannot_join_a_choice_bundle(self):
+        for foreign_transition, foreign_parent in [('sibling()', 'sibling'), ('caller()', 'caller')]:
+            with self.subTest(parent=foreign_parent):
+                extra_compound = "{ id: 'sibling', label: 'sibling()', parent: 'caller' }," if foreign_parent == 'sibling' else ''
+                net = self._boundary_net(
+                    'split',
+                    ",\n    { id: 't_foreign', parent: '%s', label: '%s' }" % (foreign_parent, foreign_transition),
+                )
+                if extra_compound:
+                    net = net.replace("{ id: 'fn', label: 'called()', function_name: 'called' }", extra_compound + "\n    { id: 'fn', label: 'called()', function_name: 'called' }")
+                net = net.replace("{ source: 'p_trigger', target: 't2' }, { source: 't2', target: 'p_exit' }", "{ source: 'p_trigger', target: 't2' }, { source: 't2', target: 'p_exit' },\n    { source: 'p_trigger', target: 't_foreign' }, { source: 't_foreign', target: 'p_exit' }")
+                test_logic = f"""
+cy.getElementById('caller').addClass('collapsed-compound');
+cy.getElementById('{foreign_parent}').addClass('collapsed-compound');
+const result = foldEngine.executeBatchFold(['p_trigger']);
+if (result.folded.length !== 0 || result.skipped.length !== 1) throw new Error('Mixed-parent bundle was accepted: ' + JSON.stringify(result));
+if (!cy.getElementById('t1').length || !cy.getElementById('t2').length || !cy.getElementById('t_foreign').length) throw new Error('Rejected bundle mutated the graph');
+console.log('PASS');
+"""
+                proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+                self.assertEqual(proc.returncode, 0, f"{foreign_parent} containment check failed: {proc.stderr}")
+                self.assertIn("PASS", proc.stdout)
+
+    def test_single_place_in_active_function_can_fold_next_to_collapsed_child_function(self):
+        net_literal = """{
+  compounds: [
+    { id: 'active_fn', label: 'reset()', function_name: 'reset' },
+    { id: 'child_fn', label: 'Player.reset()', function_name: 'Player.reset', parent: 'active_fn' }
+  ],
+  places: [
+    { id: 'p_start', parent: 'active_fn', label: 'start' },
+    { id: 'p_middle', parent: 'active_fn', label: 'middle' },
+    { id: 'p_end', parent: 'active_fn', label: 'end' }
+  ],
+  transitions: [
+    { id: 't_before', parent: 'active_fn', label: 'before()' },
+    { id: 't_collapsed_child', parent: 'child_fn', label: 'Player.reset()' }
+  ],
+  arcs: [
+    { source: 'p_start', target: 't_before' }, { source: 't_before', target: 'p_middle' },
+    { source: 'p_middle', target: 't_collapsed_child' }, { source: 't_collapsed_child', target: 'p_end' }
+  ]
+}"""
+        test_logic = """
+cy.getElementById('child_fn').addClass('collapsed-compound');
+const active = cy.getElementById('active_fn');
+if (foldEngine.isFunctionFoldedIntoSingleComponent(active)) throw new Error('Active function unexpectedly collapsed before trigger');
+if (foldEngine.getFoldType(cy.getElementById('p_middle')) !== 'sequence') throw new Error('Active function place was not eligible');
+const result = foldEngine.executeSinglePlaceContraction(cy.getElementById('p_middle'));
+if (!result.success) throw new Error('Active function place failed to fold: ' + result.message);
+if (cy.getElementById('p_middle').length) throw new Error('Folded place remained in graph');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net_literal, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Active function boundary contraction failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_fold_entire_function_sidebar_action_completes_both_boundary_directions(self):
+        html = _read_template_html()
+        action_match = re.search(
+            r"function handleFoldEntireFunction\(compoundNode\) \{.*?"
+            r"if \(hudEls\.foldEntireFunctionBtnEl\) \{.*?\n      \}",
+            html,
+            re.DOTALL,
+        )
+        fold_helpers = re.search(
+            r"function refreshFoldActionView\(viewportBefore\) \{.*?"
+            r"function formatFoldActionResult\(result\) \{.*?\n      \}",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(action_match, "Could not find the sidebar Fold-Entire-Function action")
+        self.assertIsNotNone(fold_helpers, "Could not find the shared fold-action helpers")
+
+        for direction in ('split', 'merge'):
+            with self.subTest(direction=direction):
+                test_logic = f"""
+const inspectorActionResult = {{ textContent: '' }};
+const hudBtnFoldEntireFunction = {{
+  style: {{ display: 'none' }},
+  listener: null,
+  addEventListener: function(name, listener) {{ this.listener = listener; }}
+}};
+const hudEls = {{ foldEntireFunctionBtnEl: hudBtnFoldEntireFunction }};
+const DAGRE_LAYOUT_OPTIONS = {{ name: 'dagre' }};
+let layoutCount = 0;
+cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
+cy.zoom(1.4);
+cy.pan({{ x: 27, y: -13 }});
+{action_match.group(0)}
+{fold_helpers.group(0)}
+const compound = cy.getElementById('fn');
+openInspector(compound);
+if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('Sidebar fold action was hidden');
+hudBtnFoldEntireFunction.listener({{ stopPropagation: function() {{}} }});
+if (!compound.hasClass('collapsed-compound')) throw new Error('Function did not collapse');
+if (!inspectorActionResult.textContent.includes('fully collapsed')) throw new Error('Sidebar did not report completion');
+if (layoutCount !== 1) throw new Error('Expected one final layout, got ' + layoutCount);
+if (cy.zoom() !== 1.4 || cy.pan().x !== 27 || cy.pan().y !== -13) throw new Error('Function action changed viewport');
+if (!cy.getElementById('p_entry').length || !cy.getElementById('p_exit').length) throw new Error('Caller boundary was consumed');
+if (cy.getElementById('p_entry').data('initial_tokens') !== 1) throw new Error('Function fold changed caller boundary tokens');
+if (!cy.getElementById('t_unrelated').length || !cy.getElementById('p_after').length) throw new Error('Function fold consumed unrelated caller path');
+console.log('PASS');
+"""
+                proc = _run_node_script(_setup_live_fold_test_harness(self._boundary_net(direction), test_logic))
+                self.assertEqual(proc.returncode, 0, f"{direction} sidebar fold failed: {proc.stderr}")
+                self.assertIn("PASS", proc.stdout)
+
+    def test_save_open_continue_and_nested_unfold_after_called_function_choice(self):
+        net_literal = """{
+  compounds: [
+    { id: 'caller', label: 'caller()' },
+    { id: 'fn', label: 'called()', function_name: 'called', parent: 'caller' }
+  ],
+  places: [
+    { id: 'p_entry', parent: 'caller', label: 'entry' },
+    { id: 'p_trigger', parent: 'fn', label: 'split' },
+    { id: 'p1', parent: 'fn', label: 'left middle' },
+    { id: 'p2', parent: 'fn', label: 'right middle' },
+    { id: 'p_exit', parent: 'caller', label: 'exit' }
+  ],
+  transitions: [
+    { id: 't_before', parent: 'fn', label: 'before()' },
+    { id: 't1', parent: 'fn', label: 'left first()' },
+    { id: 't1b', parent: 'fn', label: 'left second()' },
+    { id: 't2', parent: 'fn', label: 'right first()' },
+    { id: 't2b', parent: 'fn', label: 'right second()' }
+  ],
+  arcs: [
+    { source: 'p_entry', target: 't_before' }, { source: 't_before', target: 'p_trigger' },
+    { source: 'p_trigger', target: 't1' }, { source: 't1', target: 'p1' },
+    { source: 'p1', target: 't1b' }, { source: 't1b', target: 'p_exit' },
+    { source: 'p_trigger', target: 't2' }, { source: 't2', target: 'p2' },
+    { source: 'p2', target: 't2b' }, { source: 't2b', target: 'p_exit' }
+  ]
+}"""
+        test_logic = r"""
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const branchFolds = foldEngine.executeBatchFold(['p1', 'p2']);
+if (branchFolds.folded.length !== 2) throw new Error('Could not fold both branches before saving');
+const documentContext = {
+  title: 'Called Function', sourceFile: '/src/caller.js', filename: 'caller.js', functionName: 'caller', mode: 'fold',
+  originalNet: net, compounds: net.compounds, foldSteps: [], calleeNets: {}, expandedNodes: [],
+  playback: { currentStep: 0, totalSteps: 0 }
+};
+const snapshot = parseFoldStateSnapshot(serializeFoldStateSnapshot({ cy, engine: foldEngine, document: documentContext }));
+const resumedCy = cytoscape({ elements: snapshot.elements });
+const resumedEngine = new LiveFoldReductionEngine(resumedCy);
+resumedEngine.cfg = snapshot.engine.cfg;
+resumedEngine.stepCounter = snapshot.engine.stepCounter;
+resumedEngine.rememberedCustomNames = new Map(snapshot.engine.rememberedCustomNames);
+const resumedFold = resumedEngine.executeFoldEntireFunction('fn');
+if (!resumedFold.success || !resumedFold.complete) throw new Error('Restored function could not continue folding: ' + resumedFold.message);
+const nextId = resumedFold.folded[resumedFold.folded.length - 1].componentId;
+if (!nextId || nextId === branchFolds.folded[0].componentId || nextId === branchFolds.folded[1].componentId) {
+  throw new Error('Resumed component ID collided with an existing component');
+}
+const finalComponent = resumedCy.getElementById(nextId);
+const unfoldedFunction = resumedEngine.executeComponentLocalUnfold(finalComponent);
+if (!unfoldedFunction.success) throw new Error('Could not unfold the function component: ' + unfoldedFunction.reason);
+for (const id of ['p_entry', 'p_trigger', 'p1', 'p2', 'p_exit', 't_before', 't1', 't1b', 't2', 't2b']) {
+  if (!resumedCy.getElementById(id).length) throw new Error('Original topology missing after nested unfold: ' + id);
+}
+if (resumedCy.edges().length !== 10) throw new Error('Original connections were not restored');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net_literal, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Session continuation/unfold failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+
 class TestBatchPlaceFold(unittest.TestCase):
     _STATE_MACHINE_NET = """{
   places: [
