@@ -1,10 +1,10 @@
 # code2petri
 
-> **Attribution & Lineage:** `code2petri` is a mathematical Petri net modeling tool heavily modified and evolved from the [code2flow](https://github.com/scottrogowski/code2flow) project created by Scott Rogowski. While `code2flow` generates visual flowcharts, `code2petri` structurally transforms that foundation to output formal, executable Petri nets for advanced control-flow analysis and game loop modeling.
+> **Attribution & Lineage:** `code2petri` is a mathematical Petri net modeling tool heavily modified and evolved from the [code2flow](https://github.com/scottrogowski/code2flow) project created by Scott Rogowski. While `code2flow` generates visual call graphs, `code2petri` structurally transforms that foundation to output formal, executable Petri nets for advanced control-flow analysis and game loop modeling.
 
 `code2petri` statically analyzes source code (currently **Python** and **JavaScript**) and translates its exact control flow into **Petri nets**. 
 
-Unlike standard call graphs or basic flowcharts, Petri nets mathematically model execution states (places), operations (transitions), and control flow (arcs). This allows `code2petri` to faithfully translate complex logical structures like `try/catch/finally` boundaries, `switch` fallthroughs, and recursive game loops (`requestAnimationFrame`).
+Unlike standard call graphs, Petri nets mathematically model execution states (places), operations (transitions), and control flow (arcs). This allows `code2petri` to faithfully translate complex logical structures like `try/catch/finally` boundaries, `switch` fallthroughs, and recursive game loops (`requestAnimationFrame`).
 
 ## Features
 
