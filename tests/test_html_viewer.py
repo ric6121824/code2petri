@@ -597,6 +597,23 @@ if (!infoReturnMetadata.textContent.includes('Declared: Result[str]') ||
   throw new Error('Declared and inferred return evidence did not render separately');
 }
 window.code2petriViewer.setActiveDocumentMetadata({
+  source_file: '/async/fetch.py', filename: 'fetch.py', function_name: 'fetch',
+  return_metadata: {
+    function_kind: 'async_function',
+    roles: {
+      immediate: { analysis_status: 'complete', inferred_types: ['coroutine'], inferred: [], observed_types: [], observed: [] },
+      awaited: { declared: { expression: 'str', provenance: 'annotation' }, analysis_status: 'complete', inferred_types: ['int'],
+        inferred: [{ expression: 'value', type: 'int', role: 'awaited', source_location: { line: 3 } }], observed_types: [], observed: [] }
+    }
+  }
+});
+if (!infoReturnMetadata.textContent.includes('Inferred immediate call result: coroutine') ||
+    !infoReturnMetadata.textContent.includes('Declared awaited result: str') ||
+    !infoReturnMetadata.textContent.includes('Inferred awaited result: int') ||
+    !infoReturnMetadata.textContent.includes('Returned expression: value')) {
+  throw new Error('Async wrapper and awaited result did not render by role');
+}
+window.code2petriViewer.setActiveDocumentMetadata({
   source_file: '/restored/very/long/path/restored.py',
   filename: 'restored.py',
   function_name: 'Processor.run',
@@ -5532,6 +5549,22 @@ console.log('PASS');
         self.assertIn("Declared:", html_content)
         self.assertIn("Observed return expression: ') + evidence.expression", html_content)
 
+    def test_python_async_roles_are_embedded_and_saved_separately(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "async_returns.py")
+            html_path = os.path.join(temp_dir, "async_returns.html")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write("async def fetch() -> str:\n    value = 4\n    return value\n")
+            result = code2petri(source_path, output_file=html_path, target_function="fetch", fold=True)
+            with open(html_path, encoding="utf-8") as html_file:
+                html_content = html_file.read()
+        metadata = _extract_embedded_data(html_content)["document"]["return_metadata"]
+        self.assertEqual(metadata["function_kind"], "async_function")
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["coroutine"])
+        self.assertEqual(metadata["roles"]["awaited"]["declared"]["expression"], "str")
+        self.assertEqual(metadata["roles"]["awaited"]["inferred_types"], ["int"])
+        self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
+
     def test_python_partial_return_coverage_is_embedded_with_separate_observations(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source_path = os.path.join(temp_dir, "partial.py")
@@ -5591,6 +5624,27 @@ console.log('PASS');
         self.assertEqual(metadata["inferred"][0]["evidence"][0]["expression"], "const value = 1;")
         self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
         self.assertIn("Declared:", html_content)
+
+    def test_javascript_async_roles_are_embedded_and_saved_separately(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "async_returns.js")
+            html_path = os.path.join(temp_dir, "async_returns.html")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write(
+                    "/** @returns {Promise<string>} */\n"
+                    "async function fetchValue() { const value = 4; return value; }\n"
+                )
+            result = code2petri(source_path, output_file=html_path, target_function="fetchValue", fold=True)
+            with open(html_path, encoding="utf-8") as html_file:
+                html_content = html_file.read()
+        metadata = _extract_embedded_data(html_content)["document"]["return_metadata"]
+        self.assertEqual(metadata["function_kind"], "async_function")
+        self.assertEqual(metadata["declared"]["expression"], "Promise<string>")
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["Promise"])
+        self.assertEqual(metadata["roles"]["immediate"]["declared"]["expression"], "Promise<string>")
+        self.assertEqual(metadata["roles"]["awaited"]["declared"]["expression"], "string")
+        self.assertEqual(metadata["roles"]["awaited"]["inferred_types"], ["number"])
+        self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
 
     def test_called_function_return_metadata_is_referenced_by_call_transition_in_viewer(self):
         """The production HTML path gives resolved calls a stable shared return record."""
@@ -6228,6 +6282,22 @@ if (restoredMetadata.inferred[0].expression !== 'x:y' ||
     restoredMetadata.inferred[0].evidence[0].expression !== 'x = "a:b"') {
   throw new Error('New metadata did not survive parsing');
 }
+const asyncMetadata = Object.assign({}, metadata, {
+  function_kind: 'async_function',
+  roles: {
+    immediate: { declared: null, analysis_status: 'complete', inferred_types: ['coroutine'], observed_types: [],
+      inferred: [{ expression: 'async function syntax', type: 'coroutine', provenance: 'async_function_syntax',
+        role: 'immediate', source_location: { line: 1, column: 0 } }], observed: [] },
+    awaited: { declared: { expression: 'str', provenance: 'annotation' }, analysis_status: 'unknown', inferred_types: [],
+      observed_types: ['str'], inferred: [], observed: [metadata.inferred[0]] }
+  }
+});
+const restoredAsync = parseFoldStateSnapshot(snapshot(asyncMetadata)).document.returnMetadata;
+if (restoredAsync.function_kind !== 'async_function' ||
+    restoredAsync.roles.immediate.inferred_types[0] !== 'coroutine' ||
+    restoredAsync.roles.awaited.observed[0].expression !== 'x:y') {
+  throw new Error('Async role records did not survive save/open parsing');
+}
 const partialMetadata = Object.assign({}, metadata, {
   analysis_status: 'unknown', inferred_types: [], observed_types: ['str'],
   observed: [metadata.inferred[0]]
@@ -6254,6 +6324,11 @@ let rejected = false;
 try { parseFoldStateSnapshot(snapshot(Object.assign({}, metadata, { inferred: 'bad' }))); }
 catch (error) { rejected = error.message.includes('Invalid Fold State Snapshot'); }
 if (!rejected) throw new Error('Malformed return metadata was accepted');
+rejected = false;
+try {
+  parseFoldStateSnapshot(snapshot(Object.assign({}, asyncMetadata, { roles: { awaited: { analysis_status: 'broken' } } })));
+} catch (error) { rejected = error.message.includes('Invalid Fold State Snapshot'); }
+if (!rejected) throw new Error('Malformed role metadata was accepted');
 console.log('PASS');
 """;
         proc = _run_node_script(script)

@@ -602,6 +602,20 @@
             : 'Return: Unknown — no return metadata is available.';
         }
         if (metadata.analysis_status === 'not_applicable') return 'Return: Not applicable for global scope.';
+        if (metadata.roles && typeof metadata.roles === 'object') {
+          const roleLines = [];
+          if (metadata.roles.immediate) roleLines.push.apply(roleLines, formatReturnRole(metadata.roles.immediate, 'Immediate call result'));
+          if (metadata.roles.awaited) roleLines.push.apply(roleLines, formatReturnRole(metadata.roles.awaited, 'Awaited result'));
+          if (metadata.roles.yielded) roleLines.push.apply(roleLines, formatReturnRole(metadata.roles.yielded, 'Yielded value'));
+          if (metadata.roles.completion) roleLines.push.apply(roleLines, formatReturnRole(metadata.roles.completion, 'Generator completion'));
+          if (metadata.declared && typeof metadata.declared.expression === 'string' &&
+              !Object.keys(metadata.roles).some(function(roleName) {
+                return metadata.roles[roleName] && metadata.roles[roleName].declared;
+              })) {
+            roleLines.unshift('Declared return (as written): ' + metadata.declared.expression);
+          }
+          return roleLines.join('\n');
+        }
         const lines = [];
         if (metadata.declared && typeof metadata.declared.expression === 'string') {
           lines.push('Declared: ' + metadata.declared.expression);
@@ -646,6 +660,43 @@
           }
         }
         return lines.join('\n');
+      }
+
+      function formatReturnRole(role, label) {
+        if (!role || typeof role !== 'object') return [];
+        const lines = [];
+        if (role.declared && typeof role.declared.expression === 'string') {
+          lines.push('Declared ' + label.toLowerCase() + ': ' + role.declared.expression);
+        }
+        if (role.analysis_status === 'no_normal_return') {
+          lines.push('Inferred ' + label.toLowerCase() + ': No normal return.');
+          return lines;
+        }
+        if (role.analysis_status === 'complete') {
+          const resultTypes = Array.isArray(role.inferred_types) ? role.inferred_types : [];
+          lines.push('Inferred ' + label.toLowerCase() + ': ' + (resultTypes.length ? resultTypes.join(' | ') : 'Unknown'));
+        } else {
+          lines.push('Inferred ' + label.toLowerCase() + ': Unknown — evidence is unavailable or incomplete.');
+          const observedTypes = Array.isArray(role.observed_types) ? role.observed_types : [];
+          if (observedTypes.length) lines.push('Observed types (partial): ' + observedTypes.join(' | '));
+        }
+        (Array.isArray(role.inferred) ? role.inferred : []).forEach(function(evidence) {
+          const expressionLabel = role.analysis_status === 'complete' ? 'Returned expression: ' : 'Observed return expression: ';
+          lines.push(expressionLabel + (typeof evidence.expression === 'string' ? evidence.expression : 'Unknown'));
+          if (evidence.source_location && evidence.source_location.line) {
+            lines.push('Return site: line ' + evidence.source_location.line);
+          }
+          lines.push('Inferred type at this return: ' + (evidence.type === 'unknown'
+            ? 'Unknown — evidence is unavailable or incomplete.' : (evidence.type || 'Unknown')));
+          const assignments = Array.isArray(evidence.evidence) ? evidence.evidence : [];
+          if (assignments.length) {
+            lines.push('Evidence: ' + assignments.map(function(item) {
+              const location = item.source_location && item.source_location.line ? ' at line ' + item.source_location.line : '';
+              return item.expression + ' (' + item.type + location + ')';
+            }).join('; '));
+          }
+        });
+        return lines;
       }
 
       window.code2petriViewer = window.code2petriViewer || {};
@@ -1543,6 +1594,22 @@
           const definition = metadata.definition_location;
           lines.push('Definition: ' + (definition.line == null ? 'Unknown' : definition.line) +
             (definition.column == null ? '' : ':' + definition.column));
+        }
+        if (metadata.roles && typeof metadata.roles === 'object') {
+          ['immediate', 'awaited', 'yielded', 'completion'].forEach(function(roleName) {
+            if (!metadata.roles[roleName]) return;
+            const label = roleName === 'immediate' ? 'Immediate call result' :
+              roleName === 'awaited' ? 'Awaited result' :
+                roleName === 'yielded' ? 'Yielded value' : 'Generator completion';
+            lines.push.apply(lines, formatReturnRole(metadata.roles[roleName], label));
+          });
+          if (metadata.declared && typeof metadata.declared.expression === 'string' &&
+              !Object.keys(metadata.roles).some(function(roleName) {
+                return metadata.roles[roleName] && metadata.roles[roleName].declared;
+              })) {
+            lines.push('Declared return (as written): ' + metadata.declared.expression);
+          }
+          return lines.join('\n');
         }
         if (metadata.declared && typeof metadata.declared.expression === 'string') {
           lines.push('Declared return: ' + metadata.declared.expression);

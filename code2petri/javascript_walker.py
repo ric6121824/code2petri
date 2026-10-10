@@ -118,9 +118,18 @@ def _javascript_return_metadata(
                 },
             }
 
-    # Later tickets define the awaited and yielded values. Keep documented
-    # evidence, but do not describe an async/generator body value as immediate.
-    if func_node.get("async") or func_node.get("generator"):
+    if func_node.get("async") and not func_node.get("generator"):
+        metadata["function_kind"] = "async_function"
+        wrapper_declared = metadata["declared"] if _javascript_is_promise_declaration(metadata["declared"]) else None
+        awaited_declared = _javascript_inner_return_declaration(metadata["declared"])
+        metadata["roles"] = {
+            "immediate": _javascript_known_wrapper_role("Promise", "async_function_syntax", definition, wrapper_declared),
+            "awaited": _javascript_result_role(func_node, source, awaited_declared, "awaited"),
+        }
+        return metadata
+
+    # Generators are handled separately from async functions by the generator-role ticket.
+    if func_node.get("generator"):
         return metadata
 
     body = func_node.get("body", {})
@@ -149,6 +158,107 @@ def _javascript_return_metadata(
             "provenance": "normal_fallthrough", "role": "call_result",
             "source_location": {"line": end_loc.get("line"), "column": end_loc.get("column")},
         })
+    observed = [item for item in returns if item.get("type") != "unknown"]
+    observed_types = _javascript_unique_return_types(observed)
+    is_complete = not has_unknown and all(item.get("type") != "unknown" for item in returns)
+    metadata["analysis_status"] = "complete" if is_complete else "unknown"
+    metadata["inferred"] = returns
+    metadata["inferred_types"] = _javascript_unique_return_types(returns) if is_complete else []
+    metadata["observed"] = [] if is_complete else observed
+    metadata["observed_types"] = [] if is_complete else observed_types
+    return metadata
+
+
+def _javascript_promise_inner(declared: Optional[dict]) -> Optional[str]:
+    if not isinstance(declared, dict) or not isinstance(declared.get("expression"), str):
+        return None
+    expression = declared["expression"].strip()
+    prefix = re.match(r"^Promise\s*<", expression)
+    if prefix is None or not expression.endswith(">"):
+        return None
+    inner = expression[prefix.end():-1].strip()
+    depth = 0
+    for character in inner:
+        if character == "<":
+            depth += 1
+        elif character == ">":
+            depth -= 1
+            if depth < 0:
+                return None
+    return inner if inner and depth == 0 else None
+
+
+def _javascript_is_promise_declaration(declared: Optional[dict]) -> bool:
+    if not isinstance(declared, dict) or not isinstance(declared.get("expression"), str):
+        return False
+    expression = declared["expression"].strip()
+    return expression == "Promise" or _javascript_promise_inner(declared) is not None
+
+
+def _javascript_inner_return_declaration(declared: Optional[dict]) -> Optional[dict]:
+    inner = _javascript_promise_inner(declared)
+    if inner is None:
+        return None
+    return {
+        "expression": inner,
+        "provenance": declared.get("provenance", "jsdoc"),
+        "source_location": declared.get("source_location"),
+    }
+
+
+def _javascript_known_wrapper_role(wrapper_type: str, provenance: str, location: dict, declared: Optional[dict]) -> dict:
+    return {
+        "declared": declared,
+        "analysis_status": "complete",
+        "inferred": [{
+            "expression": "async function syntax", "type": wrapper_type,
+            "provenance": provenance, "role": "immediate",
+            "source_location": location,
+        }],
+        "inferred_types": [wrapper_type],
+        "observed": [],
+        "observed_types": [],
+    }
+
+
+def _javascript_result_role(func_node: dict, source: str, declared: Optional[dict], role: str) -> dict:
+    body = func_node.get("body", {})
+    metadata = {
+        "declared": declared,
+        "analysis_status": "unknown",
+        "inferred": [],
+        "inferred_types": [],
+        "observed": [],
+        "observed_types": [],
+    }
+    if func_node.get("type") == "ArrowFunctionExpression" and body.get("type") != "BlockStatement":
+        result = _javascript_inferred_type(body, {}, source)
+        inferred = _javascript_return_evidence(body, body, source, result)
+        inferred["role"] = role
+        metadata["inferred"] = [inferred]
+        if result["type"] != "unknown":
+            metadata["analysis_status"] = "complete"
+            metadata["inferred_types"] = [result["type"]]
+        return metadata
+
+    statements = body.get("body", []) if body.get("type") == "BlockStatement" else []
+    outcomes, uncertain = _javascript_return_outcomes(statements, source)
+    uncertain = uncertain or bool(func_node.get("decorators"))
+    returns = [value for kind, value in outcomes if kind == "return"]
+    normal = [value for kind, value in outcomes if kind == "normal"]
+    has_unknown = uncertain or any(item.get("type") == "unknown" for item in returns)
+    if not normal and not returns and outcomes and all(kind == "throw" for kind, _ in outcomes) and not has_unknown:
+        metadata["analysis_status"] = "no_normal_return"
+        return metadata
+    end_loc = get_nested(func_node, "loc", "end", default={})
+    for _ in normal:
+        returns.append({
+            "expression": "implicit fall-through", "type": "undefined",
+            "provenance": "normal_fallthrough", "role": role,
+            "source_location": {"line": end_loc.get("line"), "column": end_loc.get("column")},
+        })
+    for evidence in returns:
+        evidence["role"] = role
     observed = [item for item in returns if item.get("type") != "unknown"]
     observed_types = _javascript_unique_return_types(observed)
     is_complete = not has_unknown and all(item.get("type") != "unknown" for item in returns)

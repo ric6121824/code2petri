@@ -187,6 +187,41 @@ class TestPythonWalkerSequential(unittest.TestCase):
                     self.assertEqual(metadata["analysis_status"], "unknown")
                     self.assertEqual(metadata["inferred"], [])
 
+    def test_async_function_separates_coroutine_wrapper_from_awaited_annotation_and_body(self):
+        node = ast.parse(
+            "async def fetch(flag) -> 'Result[str]':\n"
+            "    value = 1\n"
+            "    return value\n"
+        ).body[0]
+        metadata = walker.walk_function(node, "fetch", "/src/async_sample.py").return_metadata
+
+        self.assertEqual(metadata["function_kind"], "async_function")
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["coroutine"])
+        awaited = metadata["roles"]["awaited"]
+        self.assertEqual(awaited["declared"]["expression"], "'Result[str]'")
+        self.assertEqual(awaited["analysis_status"], "complete")
+        self.assertEqual(awaited["inferred_types"], ["int"])
+        self.assertTrue(all(item["role"] == "awaited" for item in awaited["inferred"]))
+
+    def test_async_wrapper_stays_known_when_awaited_result_is_unknown_or_has_no_normal_return(self):
+        cases = [
+            ("async def f():\n    return unknown_value\n", "unknown", []),
+            ("async def f():\n    raise ValueError()\n", "no_normal_return", []),
+        ]
+        for source, expected_status, expected_types in cases:
+            with self.subTest(source=source):
+                metadata = walker.walk_function(ast.parse(source).body[0], "f", "/src/async.py").return_metadata
+                self.assertEqual(metadata["roles"]["immediate"]["analysis_status"], "complete")
+                self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["coroutine"])
+                self.assertEqual(metadata["roles"]["awaited"]["analysis_status"], expected_status)
+                self.assertEqual(metadata["roles"]["awaited"]["inferred_types"], expected_types)
+
+    def test_async_generator_is_not_misclassified_as_an_ordinary_async_function(self):
+        node = ast.parse("async def values() -> int:\n    yield 4\n").body[0]
+        metadata = walker.walk_function(node, "values", "/src/scopes.py").return_metadata
+        self.assertNotIn("function_kind", metadata)
+        self.assertNotIn("roles", metadata)
+
     def test_supported_return_paths_report_complete_unions_and_partial_observations(self):
         cases = [
             ("def answer(flag):\n    if flag:\n        return 1\n    else:\n        return 'x'\n", "complete", ["int", "str"], []),

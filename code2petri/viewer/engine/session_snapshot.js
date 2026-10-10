@@ -198,6 +198,36 @@
     });
   }
 
+  function _validateReturnRole(role, description) {
+    if (!_isObject(role)) _invalidSnapshot(description + ' must be an object');
+    if (!['complete', 'unknown', 'no_normal_return', 'not_applicable'].includes(role.analysis_status)) {
+      _invalidSnapshot(description + '.analysis_status is invalid');
+    }
+    if (role.declared !== null) {
+      if (!_isObject(role.declared)) _invalidSnapshot(description + '.declared is invalid');
+      _requireString(role.declared.expression, description + '.declared.expression');
+      _requireString(role.declared.provenance, description + '.declared.provenance');
+    }
+    ['inferred', 'observed'].forEach(function(key) {
+      if (!Array.isArray(role[key])) _invalidSnapshot(description + '.' + key + ' must be an array');
+      role[key].forEach(function(evidence, index) {
+        const itemDescription = description + '.' + key + '[' + index + ']';
+        if (!_isObject(evidence)) _invalidSnapshot(itemDescription + ' must be an object');
+        ['expression', 'type', 'provenance', 'role'].forEach(function(field) {
+          _requireString(evidence[field], itemDescription + '.' + field);
+        });
+        if (!_isObject(evidence.source_location) || !Number.isInteger(evidence.source_location.line)) {
+          _invalidSnapshot(itemDescription + '.source_location is invalid');
+        }
+      });
+    });
+    ['inferred_types', 'observed_types'].forEach(function(key) {
+      if (!Array.isArray(role[key]) || role[key].some(function(value) { return typeof value !== 'string'; })) {
+        _invalidSnapshot(description + '.' + key + ' must be an array of strings');
+      }
+    });
+  }
+
   function _validateDocumentContext(documentContext) {
     if (!_isObject(documentContext)) _invalidSnapshot('document context is missing');
     ['title', 'sourceFile', 'filename', 'functionName', 'mode'].forEach(function(key) {
@@ -271,6 +301,16 @@
           if (!_isObject(evidence.source_location) || !Number.isInteger(evidence.source_location.line)) {
             _invalidSnapshot(description + '.source_location is invalid');
           }
+        });
+      }
+      if (metadata.function_kind !== undefined) _requireString(metadata.function_kind, 'document.returnMetadata.function_kind');
+      if (metadata.roles !== undefined) {
+        if (!_isObject(metadata.roles)) _invalidSnapshot('document.returnMetadata.roles must be an object');
+        Object.keys(metadata.roles).forEach(function(roleName) {
+          if (!['immediate', 'awaited', 'yielded', 'completion'].includes(roleName)) {
+            _invalidSnapshot('document.returnMetadata.roles contains an unknown role');
+          }
+          _validateReturnRole(metadata.roles[roleName], 'document.returnMetadata.roles.' + roleName);
         });
       }
     }

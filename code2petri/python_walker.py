@@ -254,16 +254,17 @@ def _extract_python_return_metadata(
         None if is_global or node.returns is None
         else _source_text_for(node.returns, source_text)
     )
+    declared = None if declared_expression is None else {
+        "expression": declared_expression,
+        "provenance": "annotation",
+        "source_location": {"line": line, "column": column},
+    }
     metadata: Dict[str, Any] = {
         "function_name": "Global Scope" if is_global else function_name,
         "source_file": source_file,
         "qualified_name": "Global Scope" if is_global else qualified_name,
         "definition_location": {"line": line, "column": column},
-        "declared": None if declared_expression is None else {
-            "expression": declared_expression,
-            "provenance": "annotation",
-            "source_location": {"line": line, "column": column},
-        },
+        "declared": declared,
         "analysis_status": "not_applicable" if is_global else "unknown",
         "inferred": [],
         "inferred_types": [],
@@ -273,11 +274,55 @@ def _extract_python_return_metadata(
     if is_global:
         return metadata
 
-    # Async and generator return roles are introduced by the later role-specific tickets.
-    if isinstance(node, ast.AsyncFunctionDef) or _function_has_yield(node):
+    # Generator roles have a distinct contract. Ordinary async functions expose
+    # a coroutine immediately and the body summary only after awaiting it.
+    if _function_has_yield(node):
         return metadata
 
-    outcomes, uncertain_coverage = _python_return_outcomes(node, source_text)
+    if isinstance(node, ast.AsyncFunctionDef):
+        metadata["function_kind"] = "async_function"
+        metadata["declared"] = None
+        metadata["roles"] = {
+            "immediate": _known_wrapper_role("coroutine", "async_function_syntax", line, column),
+            "awaited": _python_result_role(node, source_text, declared, "awaited"),
+        }
+        return metadata
+
+    role = _python_result_role(node, source_text, metadata["declared"], "call_result")
+    metadata.update(role)
+    return metadata
+
+
+def _known_wrapper_role(wrapper_type: str, provenance: str, line: Optional[int], column: Optional[int]) -> Dict[str, Any]:
+    evidence = {
+        "expression": "async function syntax",
+        "type": wrapper_type,
+        "provenance": provenance,
+        "role": "immediate",
+        "source_location": {"line": line, "column": column},
+    }
+    return {
+        "declared": None,
+        "analysis_status": "complete",
+        "inferred": [evidence],
+        "inferred_types": [wrapper_type],
+        "observed": [],
+        "observed_types": [],
+    }
+
+
+def _python_result_role(
+    node: ast.AST, source_text: Optional[str], declared: Optional[Dict[str, Any]], role: str,
+) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {
+        "declared": declared,
+        "analysis_status": "unknown",
+        "inferred": [],
+        "inferred_types": [],
+        "observed": [],
+        "observed_types": [],
+    }
+    outcomes, uncertain_coverage = _python_return_outcomes(node, source_text, role)
     uncertain_coverage = uncertain_coverage or bool(getattr(node, "decorator_list", []))
     normal = [outcome for outcome in outcomes if outcome[0] == "normal"]
     returns = [outcome[1] for outcome in outcomes if outcome[0] == "return"]
@@ -290,10 +335,10 @@ def _extract_python_return_metadata(
         return metadata
 
     for outcome in normal:
-        line_number = getattr(node, "end_lineno", line)
+        line_number = getattr(node, "end_lineno", getattr(node, "lineno", None))
         returns.append({
             "expression": "implicit fall-through", "type": "NoneType",
-            "provenance": "normal_fallthrough", "role": "call_result",
+            "provenance": "normal_fallthrough", "role": role,
             "source_location": {"line": line_number, "column": None},
         })
 
@@ -319,7 +364,7 @@ def _unique_return_types(evidence: List[Dict[str, Any]]) -> List[str]:
     return result
 
 
-def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
+def _python_return_outcomes(node: ast.AST, source_text: Optional[str], role: str = "call_result"):
     """Summarize supported sequential/if paths without merging branch environments."""
     uncertain = False
 
@@ -343,7 +388,7 @@ def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
         )
         return {
             "expression": expression, "type": inferred["type"], "provenance": provenance,
-            "role": "call_result", "source_location": {"line": return_node.lineno, "column": return_node.col_offset},
+            "role": role, "source_location": {"line": return_node.lineno, "column": return_node.col_offset},
             "expression_location": {
                 "line": getattr(expression_node, "lineno", return_node.lineno),
                 "column": getattr(expression_node, "col_offset", return_node.col_offset),

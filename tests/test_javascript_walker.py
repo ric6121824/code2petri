@@ -127,6 +127,38 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
                 self.assertEqual(metadata["analysis_status"], "unknown")
                 self.assertEqual([item["type"] for item in metadata["observed"]], ["number"])
 
+    def test_async_function_separates_promise_from_awaited_documented_and_inferred_results(self):
+        source = "/** @returns {Promise<string>} */\nasync function answer(flag) {\n  if (flag) return 1;\n  return 'fallback';\n}"
+        metadata = self._walk_source_function(source, "answer")
+
+        self.assertEqual(metadata["function_kind"], "async_function")
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["Promise"])
+        self.assertEqual(metadata["declared"]["expression"], "Promise<string>")
+        awaited = metadata["roles"]["awaited"]
+        self.assertEqual(awaited["declared"]["expression"], "string")
+        self.assertEqual(awaited["inferred_types"], ["number", "string"])
+        self.assertEqual(awaited["analysis_status"], "complete")
+        self.assertTrue(all(item["role"] == "awaited" for item in awaited["inferred"]))
+
+    def test_async_arrow_and_unknown_or_abnormal_awaited_results_keep_known_promise(self):
+        cases = [
+            ("const f = async () => 4;", "complete", ["number"]),
+            ("async function f() { const value = 4; return value; }", "complete", ["number"]),
+            ("async function f() { return value; }", "unknown", []),
+            ("async function f() { throw new Error(); }", "no_normal_return", []),
+        ]
+        for source, expected_status, expected_types in cases:
+            with self.subTest(source=source):
+                metadata = self._walk_source_function(source, "f")
+                self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["Promise"])
+                self.assertEqual(metadata["roles"]["awaited"]["analysis_status"], expected_status)
+                self.assertEqual(metadata["roles"]["awaited"]["inferred_types"], expected_types)
+
+    def test_async_jsdoc_only_extracts_inner_type_from_recognized_promise_wrapper(self):
+        metadata = self._walk_source_function("/** @returns {CustomResult} */ async function f() { return 1; }")
+        self.assertEqual(metadata["declared"]["expression"], "CustomResult")
+        self.assertIsNone(metadata["roles"]["awaited"]["declared"])
+
     def test_walk_function_returns_walk_result_for_other_fixtures(self):
         call_path = os.path.join(
             os.path.dirname(__file__),
