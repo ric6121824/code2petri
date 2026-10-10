@@ -18,4 +18,4 @@
 
 ### 2026-10-10 — Round 1 verification
 
-Confirmed the implementation and acceptance checklist. `python -m unittest tests.test_javascript_walker` passes (63 tests). The full unittest discovery run still has failures outside this ticket: missing `pygraphviz` and `pytest`, an existing `WalkResult` unpacking test mismatch, and failures in later return-metadata and viewer-choice coverage.
+Confirmed the implementation and acceptance checklist. `python -m unittest tests.test_javascript_walker` passes (63 tests), including `test_walk_sequential_function`, `test_walk_global_scope`, `test_walk_assignment_with_call_expression`, `test_engine_end_to_end_sequential_js`, and `test_engine_end_to_end_global_js`; these cover source-sliced labels, sequential statements, returns, opaque calls, global scope, engine routing, and valid net output. The full unittest discovery run still has failures outside this ticket: missing `pygraphviz` and `pytest`, an existing `WalkResult` unpacking test mismatch, and failures in later return-metadata and viewer-choice coverage.
