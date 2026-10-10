@@ -602,8 +602,12 @@
             : 'Return: Unknown — no return metadata is available.';
         }
         if (metadata.analysis_status === 'not_applicable') return 'Return: Not applicable for global scope.';
+        return formatReturnMetadataDetails(metadata);
+      }
+
+      function formatReturnMetadataDetails(metadata) {
         if (metadata.roles && typeof metadata.roles === 'object') {
-          return formatFunctionRoles(metadata, true);
+          return formatFunctionRoles(metadata);
         }
         const lines = [];
         if (metadata.declared && typeof metadata.declared.expression === 'string') {
@@ -651,7 +655,7 @@
         return lines.join('\n');
       }
 
-      function formatFunctionRoles(metadata, compact) {
+      function formatFunctionRoles(metadata) {
         const labels = {
           immediate: metadata.function_kind === 'async_function' ? 'Immediate coroutine' :
             (metadata.function_kind === 'async_generator' ? 'Immediate async-generator object' : 'Immediate generator object'),
@@ -705,7 +709,7 @@
             }
           });
         });
-        return compact ? lines.join('\n') : lines.join('\n');
+        return lines.join('\n');
       }
 
       window.code2petriViewer = window.code2petriViewer || {};
@@ -1604,37 +1608,8 @@
           lines.push('Definition: ' + (definition.line == null ? 'Unknown' : definition.line) +
             (definition.column == null ? '' : ':' + definition.column));
         }
-        if (metadata.roles && typeof metadata.roles === 'object') {
-          lines.push(formatFunctionRoles(metadata, false));
-          return lines.join('\n');
-        }
-        if (metadata.declared && typeof metadata.declared.expression === 'string') {
-          lines.push('Declared return: ' + metadata.declared.expression);
-          lines.push('Declared evidence: ' + (metadata.declared.provenance || 'Unknown'));
-        }
         lines.push('Analysis status: ' + (metadata.analysis_status || 'unknown'));
-        if (metadata.analysis_status === 'no_normal_return') {
-          lines.push('Inferred result: No normal return.');
-          return lines.join('\n');
-        }
-        if (metadata.analysis_status === 'complete') {
-          const resultTypes = Array.isArray(metadata.inferred_types) ? metadata.inferred_types : [];
-          lines.push('Inferred result: ' + (resultTypes.length ? resultTypes.join(' | ') : 'Unknown'));
-        } else {
-          lines.push('Inferred result: Unknown — evidence is unavailable or incomplete.');
-          const observedTypes = Array.isArray(metadata.observed_types) ? metadata.observed_types : [];
-          if (observedTypes.length) lines.push('Observed types (partial): ' + observedTypes.join(' | '));
-        }
-        (Array.isArray(metadata.inferred) ? metadata.inferred : []).forEach(function(evidence) {
-          const location = evidence.source_location || {};
-          lines.push((metadata.analysis_status === 'complete' ? 'Returned expression: ' : 'Observed return expression: ') + (typeof evidence.expression === 'string' ? evidence.expression : 'Unknown'));
-          lines.push('Inferred type at this return: ' + (typeof evidence.type === 'string' ? evidence.type : 'Unknown'));
-          lines.push('Evidence: ' + (evidence.provenance || 'Unknown'));
-          lines.push('Role: ' + (evidence.role || 'Unknown'));
-          if (location.line != null) {
-            lines.push('Source location: ' + location.line + (location.column == null ? '' : ':' + location.column));
-          }
-        });
+        lines.push(formatReturnMetadataDetails(metadata));
         return lines.join('\n');
       }
 

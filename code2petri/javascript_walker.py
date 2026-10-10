@@ -113,10 +113,10 @@ def _javascript_yield_evidence(body: dict, source: str) -> List[dict]:
     statements = body.get("body", []) if body.get("type") == "BlockStatement" else []
     evidence = []
 
-    def visit(item: Any, history: List[dict], ambiguous: bool = False) -> None:
+    def visit(item: Any, history: List[dict], blocked_names: Optional[set] = None) -> None:
         if isinstance(item, list):
             for child in item:
-                visit(child, history, ambiguous)
+                visit(child, history, blocked_names)
             return
         if not isinstance(item, dict):
             return
@@ -133,7 +133,8 @@ def _javascript_yield_evidence(body: dict, source: str) -> List[dict]:
             elif _javascript_direct_literal_evidence(argument, source) is not None:
                 result = _javascript_inferred_type(argument, {}, source)
             else:
-                bindings = {} if ambiguous else _javascript_local_bindings(history, source)
+                expression_names = _javascript_expression_names(argument)
+                bindings = {} if expression_names & (blocked_names or set()) else _javascript_local_bindings(history, source)
                 result = _javascript_inferred_type(argument, bindings, source)
             loc = get_nested(item, "loc", "start", default={})
             expression_loc = get_nested(argument, "loc", "start", default=loc)
@@ -153,28 +154,70 @@ def _javascript_yield_evidence(body: dict, source: str) -> List[dict]:
                 "evidence": result["evidence"],
             })
             if argument is not None:
-                visit(argument, history, ambiguous)
+                visit(argument, history, blocked_names)
             return
-        nested_ambiguous = ambiguous or kind in (
+        nested_blocked_names = (blocked_names or set()) | _javascript_written_names([item]) if kind in (
             "IfStatement", "WhileStatement", "DoWhileStatement", "ForStatement", "ForInStatement",
             "ForOfStatement", "SwitchStatement", "TryStatement", "CatchClause",
-        )
+        ) else blocked_names
         for key, value in item.items():
             if key not in ("loc", "start", "end"):
-                visit(value, history, nested_ambiguous)
+                visit(value, history, nested_blocked_names)
 
     for index, statement in enumerate(statements):
         history = statements[:index]
-        ambiguous_history = any(
-            item.get("type") in (
+        branch_history = [item for item in history if item.get("type") in (
                 "IfStatement", "WhileStatement", "DoWhileStatement", "ForStatement", "ForInStatement",
                 "ForOfStatement", "SwitchStatement", "TryStatement",
-            )
-            for item in history
-        )
-        visit(statement, history, ambiguous_history)
+            )]
+        if statement.get("type") in (
+            "IfStatement", "WhileStatement", "DoWhileStatement", "ForStatement", "ForInStatement",
+            "ForOfStatement", "SwitchStatement", "TryStatement",
+        ):
+            branch_history.append(statement)
+        blocked_names = set().union(*(_javascript_written_names([item]) for item in branch_history)) if branch_history else set()
+        visit(statement, history, blocked_names)
     evidence.sort(key=lambda item: (item["source_location"]["line"] or 0, item["source_location"]["column"] or 0))
     return evidence
+
+
+def _javascript_expression_names(expression: dict) -> set:
+    names = set()
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            if item.get("type") == "Identifier": names.add(item.get("name"))
+            for key, value in item.items():
+                if key not in ("loc", "start", "end"): visit(value)
+        elif isinstance(item, list):
+            for child in item: visit(child)
+    visit(expression)
+    return names
+
+
+def _javascript_written_names(nodes: List[dict]) -> set:
+    names = set()
+    def target_names(target: Any) -> None:
+        if isinstance(target, dict):
+            if target.get("type") == "Identifier": names.add(target.get("name"))
+            elif target.get("type") in ("ArrayPattern", "ObjectPattern", "RestElement", "AssignmentPattern"):
+                for key, value in target.items():
+                    if key not in ("loc", "start", "end"): target_names(value)
+        elif isinstance(target, list):
+            for child in target: target_names(child)
+    def visit(item: Any) -> None:
+        if isinstance(item, dict):
+            kind = item.get("type")
+            if kind in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression", "ClassDeclaration", "ClassExpression"):
+                return
+            if kind == "VariableDeclarator": target_names(item.get("id"))
+            elif kind == "AssignmentExpression": target_names(item.get("left"))
+            elif kind == "UpdateExpression": target_names(item.get("argument"))
+            for key, value in item.items():
+                if key not in ("loc", "start", "end"): visit(value)
+        elif isinstance(item, list):
+            for child in item: visit(child)
+    visit(nodes)
+    return names
 
 
 def _javascript_completion_evidence(outcomes: List[tuple], uncertain: bool, func_node: dict,
@@ -447,7 +490,8 @@ def _javascript_return_outcomes(statements: List[dict], source: str):
     """Summarize sequential and if/else paths without joining branch bindings."""
     uncertain = False
 
-    def return_evidence(statement: dict, history: List[dict], ambiguous: bool, nested: bool):
+    def return_evidence(statement: dict, history: List[dict], ambiguous: bool, nested: bool,
+                        blocked_names: Optional[set] = None):
         argument = statement.get("argument")
         loc = get_nested(statement, "loc", "start", default={})
         if argument is None:
@@ -459,7 +503,9 @@ def _javascript_return_outcomes(statements: List[dict], source: str):
         if direct is not None:
             result = {"type": direct["type"], "evidence": []}
         elif ambiguous or nested:
-            result = _javascript_inferred_type(argument, {}, source)
+            names = _javascript_expression_names(argument)
+            bindings = {} if names & (blocked_names or set()) else _javascript_local_bindings(history, source)
+            result = _javascript_inferred_type(argument, bindings, source)
         else:
             result = _javascript_inferred_type(argument, _javascript_local_bindings(history, source), source)
         return _javascript_return_evidence(argument, statement, source, result)
@@ -472,7 +518,7 @@ def _javascript_return_outcomes(statements: List[dict], source: str):
                 if kind in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"):
                     return
                 if kind == "ReturnStatement":
-                    evidence = return_evidence(item, [], True, True)
+                    evidence = return_evidence(item, [], True, True, set())
                     if evidence.get("type") != "unknown":
                         found.append(evidence)
                     return
@@ -485,26 +531,28 @@ def _javascript_return_outcomes(statements: List[dict], source: str):
         visit(statement)
         return found
 
-    def sequence(items: List[dict], history: List[dict], ambiguous: bool = False, nested: bool = False):
+    def sequence(items: List[dict], history: List[dict], ambiguous: bool = False,
+                 nested: bool = False, blocked_names: Optional[set] = None):
         nonlocal uncertain
-        active = [(history, ambiguous)]
+        active = [(history, ambiguous, blocked_names or set())]
         done = []
         for statement in items:
             next_active = []
-            for prior, path_ambiguous in active:
+            for prior, path_ambiguous, path_blocked_names in active:
                 kind = statement.get("type")
                 if kind == "ReturnStatement":
-                    done.append(("return", return_evidence(statement, prior, path_ambiguous, nested)))
+                    done.append(("return", return_evidence(statement, prior, path_ambiguous, nested, path_blocked_names)))
                 elif kind == "ThrowStatement":
                     done.append(("throw", None))
                 elif kind == "IfStatement":
+                    branch_blocked_names = path_blocked_names | _javascript_written_names([statement])
                     consequent = statement.get("consequent", {})
                     yes_items = consequent.get("body", []) if consequent.get("type") == "BlockStatement" else [consequent]
-                    yes, yes_uncertain = sequence(yes_items, list(prior), path_ambiguous, True)
+                    yes, yes_uncertain = sequence(yes_items, list(prior), path_ambiguous, True, branch_blocked_names)
                     alternate = statement.get("alternate")
                     if isinstance(alternate, dict):
                         no_items = alternate.get("body", []) if alternate.get("type") == "BlockStatement" else [alternate]
-                        no, no_uncertain = sequence(no_items, list(prior), path_ambiguous, True)
+                        no, no_uncertain = sequence(no_items, list(prior), path_ambiguous, True, branch_blocked_names)
                     else:
                         no, no_uncertain = [("normal", None)], False
                     uncertain = uncertain or yes_uncertain or no_uncertain
@@ -515,10 +563,10 @@ def _javascript_return_outcomes(statements: List[dict], source: str):
                         else:
                             done.append((branch_kind, evidence))
                     if has_normal_branch:
-                        next_active.append(([statement], True))
+                        next_active.append((prior + [statement], True, branch_blocked_names))
                 elif kind in ("VariableDeclaration", "ExpressionStatement", "EmptyStatement",
                               "FunctionDeclaration", "ClassDeclaration"):
-                    next_active.append((prior + [statement], path_ambiguous))
+                    next_active.append((prior + [statement], path_ambiguous, path_blocked_names))
                 else:
                     uncertain = True
                     done.extend(("return", item) for item in nested_known_returns(statement))

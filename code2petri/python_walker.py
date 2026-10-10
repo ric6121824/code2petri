@@ -475,9 +475,10 @@ def _python_yield_evidence(node: ast.AST, source_text: Optional[str]) -> List[Di
     evidence: List[Dict[str, Any]] = []
 
     class YieldCollector(ast.NodeVisitor):
-        def __init__(self, history: List[ast.stmt], ambiguous: bool):
+        def __init__(self, history: List[ast.stmt], ambiguous: bool, blocked_names: Optional[set] = None):
             self.history = history
             self.ambiguous = ambiguous
+            self.blocked_names = blocked_names or set()
 
         def visit_FunctionDef(self, nested: ast.FunctionDef) -> None:
             return
@@ -502,7 +503,8 @@ def _python_yield_evidence(node: ast.AST, source_text: Optional[str]) -> List[Di
             elif _direct_literal_type(expression_node) is not None:
                 inferred = _python_inferred_type(expression_node, {})
             else:
-                bindings = {} if self.ambiguous else _python_local_bindings(self.history, source_text)
+                expression_names = _python_expression_names(expression_node)
+                bindings = {} if expression_names & self.blocked_names else _python_local_bindings(self.history, source_text)
                 inferred = _python_inferred_type(expression_node, bindings)
             provenance = "delegated_yield" if delegated else (
                 "bare_yield" if expression_node is None else (
@@ -538,14 +540,52 @@ def _python_yield_evidence(node: ast.AST, source_text: Optional[str]) -> List[Di
 
     for index, statement in enumerate(statements):
         direct_history = statements[:index]
-        ambiguous = isinstance(statement, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith))
-        ambiguous = ambiguous or any(
-            isinstance(previous, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith))
-            for previous in direct_history
-        )
-        YieldCollector(direct_history, ambiguous).visit(statement)
+        branch_types = (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith)
+        relevant_mutations = [item for item in direct_history if isinstance(item, branch_types)]
+        if isinstance(statement, branch_types):
+            relevant_mutations.append(statement)
+        blocked_names = set().union(*(_python_written_names([item]) for item in relevant_mutations)) if relevant_mutations else set()
+        YieldCollector(direct_history, False, blocked_names).visit(statement)
     evidence.sort(key=lambda item: (item["source_location"]["line"] or 0, item["source_location"]["column"] or 0))
     return evidence
+
+
+def _python_expression_names(expression: ast.AST) -> set:
+    return {item.id for item in ast.walk(expression) if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Load)}
+
+
+def _python_written_names(statements: List[ast.stmt]) -> set:
+    names = set()
+
+    def collect_target(target: ast.AST) -> None:
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for item in target.elts:
+                collect_target(item)
+
+    class WriteCollector(ast.NodeVisitor):
+        def visit_FunctionDef(self, nested: ast.FunctionDef) -> None: return
+        def visit_AsyncFunctionDef(self, nested: ast.AsyncFunctionDef) -> None: return
+        def visit_ClassDef(self, nested: ast.ClassDef) -> None: return
+        def visit_Lambda(self, nested: ast.Lambda) -> None: return
+        def visit_Assign(self, item: ast.Assign) -> None:
+            for target in item.targets: collect_target(target)
+            self.generic_visit(item.value)
+        def visit_AnnAssign(self, item: ast.AnnAssign) -> None:
+            collect_target(item.target)
+            if item.value is not None: self.generic_visit(item.value)
+        def visit_AugAssign(self, item: ast.AugAssign) -> None:
+            collect_target(item.target)
+            self.generic_visit(item.value)
+        def visit_NamedExpr(self, item: ast.NamedExpr) -> None:
+            collect_target(item.target)
+            self.generic_visit(item.value)
+
+    collector = WriteCollector()
+    for statement in statements:
+        collector.visit(statement)
+    return names
 
 
 def _python_role_record(evidence: List[Dict[str, Any]], declared: Optional[Dict[str, Any]] = None,
@@ -567,7 +607,8 @@ def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
     """Summarize supported sequential/if paths without merging branch environments."""
     uncertain = False
 
-    def known_evidence(return_node: ast.Return, history: List[ast.stmt], ambiguous: bool, nested: bool):
+    def known_evidence(return_node: ast.Return, history: List[ast.stmt], ambiguous: bool, nested: bool,
+                       blocked_names: Optional[set] = None):
         expression_node = return_node.value
         if expression_node is None:
             inferred = {"type": "NoneType", "evidence": []}
@@ -577,7 +618,9 @@ def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
             if _direct_literal_type(expression_node) is not None:
                 inferred = _python_inferred_type(expression_node, {})
             elif ambiguous or nested:
-                inferred = _python_inferred_type(expression_node, {})
+                names = _python_expression_names(expression_node)
+                bindings = {} if names & (blocked_names or set()) else _python_local_bindings(history, source_text)
+                inferred = _python_inferred_type(expression_node, bindings)
             else:
                 inferred = _python_inferred_type(expression_node, _python_local_bindings(history, source_text))
         provenance = "bare_return" if expression_node is None else (
@@ -599,7 +642,7 @@ def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
         found = []
         class Collector(ast.NodeVisitor):
             def visit_Return(self, item: ast.Return):
-                evidence = known_evidence(item, [], True, True)
+                evidence = known_evidence(item, [], True, True, set())
                 if evidence["type"] != "unknown":
                     found.append(evidence)
             def visit_FunctionDef(self, item: ast.FunctionDef):
@@ -613,21 +656,23 @@ def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
         Collector().visit(statement)
         return found
 
-    def sequence(statements: List[ast.stmt], history: List[ast.stmt], ambiguous: bool = False, nested: bool = False):
+    def sequence(statements: List[ast.stmt], history: List[ast.stmt], ambiguous: bool = False,
+                 nested: bool = False, blocked_names: Optional[set] = None):
         nonlocal uncertain
-        active = [("normal", None, history, ambiguous)]
+        active = [("normal", None, history, ambiguous, blocked_names or set())]
         done = []
         for statement in statements:
             next_active = []
-            for _, _, prior, path_ambiguous in active:
+            for _, _, prior, path_ambiguous, path_blocked_names in active:
                 if isinstance(statement, ast.Return):
-                    done.append(("return", known_evidence(statement, prior, path_ambiguous, nested)))
+                    done.append(("return", known_evidence(statement, prior, path_ambiguous, nested, path_blocked_names)))
                 elif isinstance(statement, ast.Raise):
                     done.append(("raise", None))
                 elif isinstance(statement, ast.If):
-                    yes = sequence(statement.body, list(prior), path_ambiguous, True)
+                    branch_blocked_names = path_blocked_names | _python_written_names(statement.body + statement.orelse)
+                    yes = sequence(statement.body, list(prior), path_ambiguous, True, branch_blocked_names)
                     if statement.orelse:
-                        no = sequence(statement.orelse, list(prior), path_ambiguous, True)
+                        no = sequence(statement.orelse, list(prior), path_ambiguous, True, branch_blocked_names)
                     else:
                         no = ([ ("normal", None) ], False)
                     branch_outcomes = yes[0] + no[0]
@@ -639,11 +684,11 @@ def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
                         else:
                             done.append((kind, evidence))
                     if has_normal_branch:
-                        next_active.append(("normal", None, [statement], True))
+                        next_active.append(("normal", None, prior + [statement], True, branch_blocked_names))
                 elif isinstance(statement, (ast.Pass, ast.Expr, ast.Assign, ast.AnnAssign, ast.AugAssign,
                                             ast.Global, ast.Nonlocal, ast.FunctionDef, ast.AsyncFunctionDef,
                                             ast.ClassDef)):
-                    next_active.append(("normal", None, prior + [statement], path_ambiguous))
+                    next_active.append(("normal", None, prior + [statement], path_ambiguous, path_blocked_names))
                 else:
                     uncertain = True
                     done.extend(("return", item) for item in collect_known_nested(statement))

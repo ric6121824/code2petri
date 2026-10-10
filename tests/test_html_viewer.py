@@ -6307,6 +6307,28 @@ if (restoredGenerator.roles.completion.analysis_status !== 'not_applicable' ||
     restoredGenerator.roles.yielded.observed_types[0] !== 'number') {
   throw new Error('Generator role metadata did not round-trip');
 }
+function registrySnapshot(registry, functionRef) {
+  const value = snapshot();
+  value.document.originalNet.function_metadata_registry = registry;
+  if (functionRef !== undefined) value.document.originalNet.transitions = [
+    { id: 't0', metadata: { function_ref: functionRef } }
+  ];
+  return value;
+}
+let rejected = false;
+const functionRegistry = { 'answer@/src/example.py:1': metadata };
+parseFoldStateSnapshot(registrySnapshot(functionRegistry, 'answer@/src/example.py:1'));
+for (const bad of [
+  registrySnapshot({ 'answer@/src/example.py:1': Object.assign({}, metadata, { definition_location: null }) }),
+  registrySnapshot({ 'answer@/src/example.py:1': Object.assign({}, generatorMetadata, { roles: { yielded: {} } }) }),
+  registrySnapshot(functionRegistry, 'missing@/src/example.py:1'),
+  registrySnapshot(functionRegistry, '')
+]) {
+  rejected = false;
+  try { parseFoldStateSnapshot(bad); }
+  catch (error) { rejected = error.message.includes('Invalid Fold State Snapshot'); }
+  if (!rejected) throw new Error('Malformed function registry or reference was accepted');
+}
 const asyncMetadata = Object.assign({}, metadata, {
   function_kind: 'async_function',
   roles: {
@@ -6317,7 +6339,7 @@ const asyncMetadata = Object.assign({}, metadata, {
 if (parseFoldStateSnapshot(snapshot(asyncMetadata)).document.returnMetadata.roles.awaited.inferred_types[0] !== 'number') {
   throw new Error('Async role metadata did not round-trip');
 }
-let rejected = false;
+rejected = false;
 try { parseFoldStateSnapshot(snapshot(Object.assign({}, metadata, { inferred: 'bad' }))); }
 catch (error) { rejected = error.message.includes('Invalid Fold State Snapshot'); }
 if (!rejected) throw new Error('Malformed return metadata was accepted');
@@ -6591,7 +6613,7 @@ for (let i = 0; i < 14; i++) {
   elements.push({ group: 'nodes', data: { id: 'p' + i, type: 'Place', label: 'p' + i }, classes: 'place', position: { x: i * 10, y: i } });
 }
 for (let i = 0; i < 13; i++) {
-  elements.push({ group: 'nodes', data: { id: 't' + i, type: 'Transition', label: 't' + i, tau: 1.5 }, classes: 'transition' });
+  elements.push({ group: 'nodes', data: { id: 't' + i, type: 'Transition', label: 't' + i, tau: 1.5, ...(i === 0 ? { function_ref: 'nested.generator' } : {}) }, classes: 'transition' });
   elements.push({ group: 'edges', data: { id: 'a' + (i * 2), source: 'p' + i, target: 't' + i, weight: 3 } });
   elements.push({ group: 'edges', data: { id: 'a' + (i * 2 + 1), source: 't' + i, target: 'p' + (i + 1), weight: 3 } });
 }
@@ -6599,7 +6621,25 @@ const cy = cytoscape({ elements });
 const engine = new LiveFoldReductionEngine(cy);
 const documentContext = {
   title: 'Nested', sourceFile: '', filename: 'nested.pnml', functionName: '', mode: 'composite',
-  originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
+  originalNet: { places: [], transitions: [], arcs: [], function_metadata_registry: {
+    'nested.generator': { function_name: 'items', source_file: '/src/nested.py', qualified_name: 'Nested.items',
+      definition_location: { line: 12, column: 4 }, function_kind: 'generator', analysis_status: 'complete',
+      declared: null, inferred_types: ['generator'], observed_types: [], inferred: [], observed: [],
+      roles: {
+        immediate: { declared: null, analysis_status: 'complete', inferred: [], inferred_types: ['generator'], observed: [], observed_types: [] },
+        yielded: { declared: { expression: 'int', provenance: 'return_annotation', source_location: { line: 12, column: 20 } },
+          analysis_status: 'complete', inferred: [{ expression: '1', type: 'int', provenance: 'direct_literal', role: 'yielded_item',
+            source_location: { line: 13, column: 8 }, expression_location: { line: 13, column: 14 }, evidence: [] }],
+          inferred_types: ['int'], observed: [], observed_types: [] },
+        completion: { declared: null, analysis_status: 'complete', inferred: [], inferred_types: ['None'], observed: [], observed_types: [] }
+      } }
+  } }, compounds: [], foldSteps: [],
+  returnMetadata: { function_name: 'items', source_file: '/src/nested.py', qualified_name: 'Nested.items',
+    definition_location: { line: 12, column: 4 }, function_kind: 'generator', analysis_status: 'complete',
+    declared: null, inferred_types: ['generator'], observed_types: [], inferred: [], observed: [],
+    roles: { immediate: { declared: null, analysis_status: 'complete', inferred: [], inferred_types: ['generator'], observed: [], observed_types: [] },
+      yielded: { declared: null, analysis_status: 'complete', inferred: [], inferred_types: ['int'], observed: [], observed_types: [] },
+      completion: { declared: null, analysis_status: 'complete', inferred: [], inferred_types: ['None'], observed: [], observed_types: [] } } },
   calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
 };
 global.Blob = function(parts, options) { this.content = parts.join(''); this.type = options.type; };
@@ -6635,6 +6675,13 @@ for (let i = 12; i >= 1; i--) {
   if (!unfolded.success) throw new Error('unfold ' + i + ' failed: ' + unfolded.reason);
 }
 if (cy2.nodes().length !== 27 || cy2.edges().length !== 26) throw new Error('original graph size was not restored');
+const restoredRecord = restored.document.originalNet.function_metadata_registry['nested.generator'];
+if (!restoredRecord || restoredRecord.roles.yielded.inferred[0].expression_location.column !== 14 ||
+    restoredRecord.roles.yielded.declared.expression !== 'int' ||
+    restored.document.returnMetadata.roles.completion.inferred_types[0] !== 'None' ||
+    cy2.getElementById('t0').data('function_ref') !== 'nested.generator') {
+  throw new Error('function metadata or its graph reference did not survive nested restoration');
+}
 for (let i = 0; i < 14; i++) if (cy2.getElementById('p' + i).length !== 1) throw new Error('missing p' + i);
 for (let i = 0; i < 13; i++) {
   if (cy2.getElementById('t' + i).length !== 1) throw new Error('missing t' + i);

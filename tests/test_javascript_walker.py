@@ -196,6 +196,32 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
         self.assertEqual(metadata["roles"]["yielded"]["observed_types"], ["number"])
         self.assertEqual(metadata["roles"]["completion"]["inferred_types"], ["undefined"])
 
+    def test_return_and_yield_keep_straight_line_binding_across_non_mutating_branches(self):
+        return_metadata = self._walk_source_function(
+            "function answer(cond) { const value = 1; if (cond) { return value; } else { return value; } }",
+            "answer",
+        )
+        self.assertEqual(return_metadata["analysis_status"], "complete")
+        self.assertEqual(return_metadata["inferred_types"], ["number"])
+
+        yield_metadata = self._walk_source_function(
+            "function* values(cond) { const value = 1; if (cond) { yield value; } else { yield value; } }",
+            "values",
+        )
+        self.assertEqual(yield_metadata["roles"]["yielded"]["analysis_status"], "complete")
+        self.assertEqual(yield_metadata["roles"]["yielded"]["inferred_types"], ["number"])
+
+        mutated_return = self._walk_source_function(
+            "function answer(cond) { let value = 1; if (cond) { value = 2; return value; } else { return value; } }",
+            "answer",
+        )
+        self.assertEqual(mutated_return["analysis_status"], "unknown")
+        mutated_yield = self._walk_source_function(
+            "function* values(cond) { let value = 1; if (cond) { value = 2; yield value; } else { yield value; } }",
+            "values",
+        )
+        self.assertEqual(mutated_yield["roles"]["yielded"]["analysis_status"], "unknown")
+
     def test_walk_function_returns_walk_result_for_other_fixtures(self):
         call_path = os.path.join(
             os.path.dirname(__file__),

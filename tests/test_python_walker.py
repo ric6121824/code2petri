@@ -269,6 +269,59 @@ class TestPythonWalkerSequential(unittest.TestCase):
         self.assertEqual(metadata["roles"]["immediate"]["analysis_status"], "complete")
         self.assertEqual(metadata["roles"]["completion"]["analysis_status"], "no_normal_return")
 
+    def test_return_and_yield_keep_straight_line_binding_across_non_mutating_branches(self):
+        returned = ast.parse(
+            "def answer(x_cond):\n"
+            "    value = 1\n"
+            "    if x_cond:\n"
+            "        return value\n"
+            "    else:\n"
+            "        return value\n"
+        ).body[0]
+        return_metadata = walker.walk_function(returned, "answer", "/src/paths.py").return_metadata
+        self.assertEqual(return_metadata["analysis_status"], "complete")
+        self.assertEqual(return_metadata["inferred_types"], ["int"])
+
+        yielded = ast.parse(
+            "def values(x_cond):\n"
+            "    value = 1\n"
+            "    if x_cond:\n"
+            "        yield value\n"
+            "    else:\n"
+            "        yield value\n"
+        ).body[0]
+        yield_metadata = walker.walk_function(yielded, "values", "/src/paths.py").return_metadata
+        self.assertEqual(yield_metadata["roles"]["yielded"]["analysis_status"], "complete")
+        self.assertEqual(yield_metadata["roles"]["yielded"]["inferred_types"], ["int"])
+
+        mutated_return = ast.parse(
+            "def answer(cond):\n"
+            "    value = 1\n"
+            "    if cond:\n"
+            "        value = 2\n"
+            "        return value\n"
+            "    else:\n"
+            "        return value\n"
+        ).body[0]
+        self.assertEqual(
+            walker.walk_function(mutated_return, "answer", "/src/paths.py").return_metadata["analysis_status"],
+            "unknown",
+        )
+
+        mutated_yield = ast.parse(
+            "def values(cond):\n"
+            "    value = 1\n"
+            "    if cond:\n"
+            "        value = 2\n"
+            "        yield value\n"
+            "    else:\n"
+            "        yield value\n"
+        ).body[0]
+        self.assertEqual(
+            walker.walk_function(mutated_yield, "values", "/src/paths.py").return_metadata["roles"]["yielded"]["analysis_status"],
+            "unknown",
+        )
+
     def test_supported_return_paths_report_complete_unions_and_partial_observations(self):
         cases = [
             ("def answer(flag):\n    if flag:\n        return 1\n    else:\n        return 'x'\n", "complete", ["int", "str"], []),

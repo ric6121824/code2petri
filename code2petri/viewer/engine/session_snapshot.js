@@ -455,6 +455,102 @@
     }
   }
 
+  function _validateFunctionReferences(snapshot) {
+    const functionRecords = new Map();
+    const references = [];
+    const visited = new WeakSet();
+
+    function visit(value, path) {
+      if (Array.isArray(value)) {
+        value.forEach(function(item, index) { visit(item, path + '[' + index + ']'); });
+        return;
+      }
+      if (!_isObject(value) || visited.has(value)) return;
+      visited.add(value);
+      if (Object.prototype.hasOwnProperty.call(value, 'function_ref')) {
+        const reference = value.function_ref;
+        if (typeof reference !== 'string' || reference.length === 0) {
+          _invalidSnapshot(path + '.function_ref must be a non-empty string');
+        }
+        references.push({ reference: reference, path: path + '.function_ref' });
+      }
+      if (Object.prototype.hasOwnProperty.call(value, 'function_metadata_registry')) {
+        const registry = value.function_metadata_registry;
+        if (!_isObject(registry)) _invalidSnapshot(path + '.function_metadata_registry must be an object');
+        Object.keys(registry).forEach(function(reference) {
+          const record = registry[reference];
+          const recordPath = path + '.function_metadata_registry.' + reference;
+          if (!reference) _invalidSnapshot(path + '.function_metadata_registry contains an empty reference');
+          if (!_isObject(record)) _invalidSnapshot(recordPath + ' must be an object');
+          ['function_name', 'source_file', 'qualified_name'].forEach(function(key) {
+            _requireString(record[key], recordPath + '.' + key);
+          });
+          const definition = record.definition_location;
+          if (!_isObject(definition) || !Number.isInteger(definition.line) || definition.line < 1 ||
+              (definition.column !== null && definition.column !== undefined &&
+               (!Number.isInteger(definition.column) || definition.column < 0))) {
+            _invalidSnapshot(recordPath + '.definition_location is invalid');
+          }
+          if (!['complete', 'unknown', 'no_normal_return', 'not_applicable'].includes(record.analysis_status)) {
+            _invalidSnapshot(recordPath + '.analysis_status is invalid');
+          }
+          if (!['generator', 'async_generator', 'async_function'].includes(record.function_kind) &&
+              record.function_kind !== undefined) {
+            _invalidSnapshot(recordPath + '.function_kind is invalid');
+          }
+          if (!Array.isArray(record.inferred) || !Array.isArray(record.inferred_types) ||
+              !Array.isArray(record.observed) || !Array.isArray(record.observed_types)) {
+            _invalidSnapshot(recordPath + ' has invalid return metadata');
+          }
+          ['inferred_types', 'observed_types'].forEach(function(key) {
+            if (record[key].some(function(value) { return typeof value !== 'string'; })) {
+              _invalidSnapshot(recordPath + '.' + key + ' must contain strings');
+            }
+          });
+          if (record.declared !== null && record.declared !== undefined &&
+              (!_isObject(record.declared) || typeof record.declared.expression !== 'string' ||
+               typeof record.declared.provenance !== 'string')) {
+            _invalidSnapshot(recordPath + '.declared is invalid');
+          }
+          if (record.function_kind !== undefined) {
+            if (!_isObject(record.roles)) _invalidSnapshot(recordPath + '.roles must be an object');
+            const requiredRoles = record.function_kind === 'async_function'
+              ? ['immediate', 'awaited'] : ['immediate', 'yielded', 'completion'];
+            requiredRoles.forEach(function(roleName) {
+              const role = record.roles[roleName];
+              const rolePath = recordPath + '.roles.' + roleName;
+              if (!_isObject(role) ||
+                  !['complete', 'unknown', 'no_normal_return', 'not_applicable'].includes(role.analysis_status) ||
+                  !Array.isArray(role.inferred) || !Array.isArray(role.observed) ||
+                  !Array.isArray(role.inferred_types) || !Array.isArray(role.observed_types) ||
+                  role.inferred_types.some(function(value) { return typeof value !== 'string'; }) ||
+                  role.observed_types.some(function(value) { return typeof value !== 'string'; })) {
+                _invalidSnapshot(rolePath + ' is invalid');
+              }
+              if (role.declared !== null && role.declared !== undefined &&
+                  (!_isObject(role.declared) || typeof role.declared.expression !== 'string' ||
+                   typeof role.declared.provenance !== 'string')) {
+                _invalidSnapshot(rolePath + '.declared is invalid');
+              }
+            });
+          } else if (record.roles !== undefined) {
+            _invalidSnapshot(recordPath + '.roles requires function_kind');
+          }
+          functionRecords.set(reference, record);
+          visit(record, recordPath);
+        });
+      }
+      Object.keys(value).forEach(function(key) { visit(value[key], path + '.' + key); });
+    }
+
+    visit(snapshot, 'snapshot');
+    references.forEach(function(item) {
+      if (!functionRecords.has(item.reference)) {
+        _invalidSnapshot(item.path + ' does not resolve to a function metadata record');
+      }
+    });
+  }
+
   /**
    * Parses and validates a saved session before a viewer replaces its active graph.
    * Component IDs found anywhere in restoration records raise the allocation counter.
@@ -532,6 +628,7 @@
     _requireFiniteNumber(viewport.pan.x, 'viewport.pan.x');
     _requireFiniteNumber(viewport.pan.y, 'viewport.pan.y');
     _validateDocumentContext(snapshot.document);
+    _validateFunctionReferences(snapshot);
 
     if (componentIds.length > 0) {
       engine.stepCounter = Math.max(engine.stepCounter, Math.max.apply(null, componentIds));
