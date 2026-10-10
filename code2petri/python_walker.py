@@ -42,6 +42,209 @@ def _collect_functions(tree: ast.AST) -> List[tuple[str, Union[ast.FunctionDef, 
     return results
 
 
+def _source_text_for(node: ast.AST, source_text: Optional[str]) -> Optional[str]:
+    if source_text:
+        segment = ast.get_source_segment(source_text, node)
+        if segment is not None:
+            return segment
+    if hasattr(ast, "unparse"):
+        return ast.unparse(node)
+    return None
+
+
+def _function_returns(node: ast.AST) -> List[ast.Return]:
+    """Collect only returns owned by this function, excluding nested scopes."""
+    returns: List[ast.Return] = []
+
+    class ReturnCollector(ast.NodeVisitor):
+        def visit_Return(self, return_node: ast.Return) -> None:
+            returns.append(return_node)
+
+        def visit_FunctionDef(self, nested: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, nested: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_ClassDef(self, nested: ast.ClassDef) -> None:
+            return
+
+        def visit_Lambda(self, nested: ast.Lambda) -> None:
+            return
+
+    collector = ReturnCollector()
+    for statement in getattr(node, "body", []):
+        collector.visit(statement)
+    returns.sort(key=lambda item: (item.lineno, item.col_offset))
+    return returns
+
+
+def _function_has_yield(node: ast.AST) -> bool:
+    class YieldCollector(ast.NodeVisitor):
+        found = False
+
+        def visit_Yield(self, expression: ast.Yield) -> None:
+            self.found = True
+
+        def visit_YieldFrom(self, expression: ast.YieldFrom) -> None:
+            self.found = True
+
+        def visit_FunctionDef(self, nested: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, nested: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_ClassDef(self, nested: ast.ClassDef) -> None:
+            return
+
+        def visit_Lambda(self, nested: ast.Lambda) -> None:
+            return
+
+    collector = YieldCollector()
+    for statement in getattr(node, "body", []):
+        collector.visit(statement)
+    return collector.found
+
+
+def _direct_literal_type(expression: ast.AST) -> Optional[str]:
+    if isinstance(expression, ast.Constant):
+        value = expression.value
+        if value is None:
+            return "NoneType"
+        if isinstance(value, bool):
+            return "bool"
+        if isinstance(value, int):
+            return "int"
+        if isinstance(value, float):
+            return "float"
+        if isinstance(value, complex):
+            return "complex"
+        if isinstance(value, str):
+            return "str"
+        if isinstance(value, bytes):
+            return "bytes"
+    if (isinstance(expression, ast.UnaryOp) and
+            isinstance(expression.op, (ast.UAdd, ast.USub)) and
+            isinstance(expression.operand, ast.Constant) and
+            isinstance(expression.operand.value, (int, float, complex)) and
+            not isinstance(expression.operand.value, bool)):
+        return _direct_literal_type(expression.operand)
+    return None
+
+
+def _is_simple_sequential_body(node: ast.AST) -> bool:
+    """Reject control-flow constructs whose normal-return coverage is not proven here."""
+    unsupported_nodes = [
+        ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With,
+        ast.AsyncWith, ast.Raise, ast.Assert, ast.Break, ast.Continue,
+    ]
+    match_node = getattr(ast, "Match", None)
+    if match_node is not None:
+        unsupported_nodes.append(match_node)
+    unsupported = tuple(unsupported_nodes)
+
+    class ControlFlowCheck(ast.NodeVisitor):
+        supported = True
+
+        def generic_visit(self, child: ast.AST) -> None:
+            if isinstance(child, unsupported):
+                self.supported = False
+                return
+            super().generic_visit(child)
+
+        def visit_FunctionDef(self, child: ast.FunctionDef) -> None:
+            if child is not node:
+                self.supported = False
+
+        def visit_AsyncFunctionDef(self, child: ast.AsyncFunctionDef) -> None:
+            if child is not node:
+                self.supported = False
+
+        def visit_ClassDef(self, child: ast.ClassDef) -> None:
+            self.supported = False
+
+        def visit_Lambda(self, child: ast.Lambda) -> None:
+            self.supported = False
+
+    check = ControlFlowCheck()
+    for statement in getattr(node, "body", []):
+        check.visit(statement)
+    return check.supported
+
+
+def _extract_python_return_metadata(
+    node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
+    function_name: str,
+    qualified_name: str,
+    source_file: str,
+    source_text: Optional[str],
+) -> Dict[str, Any]:
+    """Extract declared evidence and conservative direct-literal evidence."""
+    line = getattr(node, "lineno", None)
+    column = getattr(node, "col_offset", None)
+    is_global = function_name == "(global)" or getattr(node, "name", None) == "(global)"
+    declared_expression = (
+        None if is_global or node.returns is None
+        else _source_text_for(node.returns, source_text)
+    )
+    metadata: Dict[str, Any] = {
+        "function_name": "Global Scope" if is_global else function_name,
+        "source_file": source_file,
+        "qualified_name": "Global Scope" if is_global else qualified_name,
+        "definition_location": {"line": line, "column": column},
+        "declared": None if declared_expression is None else {
+            "expression": declared_expression,
+            "provenance": "annotation",
+            "source_location": {"line": line, "column": column},
+        },
+        "analysis_status": "not_applicable" if is_global else "unknown",
+        "inferred": [],
+    }
+    if is_global:
+        return metadata
+
+    # Async and generator return roles are introduced by the later role-specific tickets.
+    if isinstance(node, ast.AsyncFunctionDef) or _function_has_yield(node):
+        return metadata
+
+    returns = _function_returns(node)
+    if not _is_simple_sequential_body(node):
+        return metadata
+
+    evidence: List[Dict[str, Any]] = []
+    if not returns:
+        # Sequential bodies without explicit returns complete normally with None.
+        evidence.append({
+            "expression": "implicit fall-through",
+            "type": "NoneType",
+            "provenance": "normal_fallthrough",
+            "role": "call_result",
+            "source_location": {"line": getattr(node, "end_lineno", line), "column": None},
+        })
+    else:
+        # A direct return is complete evidence only when it is the final statement.
+        last_statement = node.body[-1] if node.body else None
+        if len(returns) != 1 or returns[0] is not last_statement:
+            return metadata
+        return_node = returns[0]
+        literal_type = "NoneType" if return_node.value is None else _direct_literal_type(return_node.value)
+        if literal_type is None:
+            return metadata
+        expression = "None" if return_node.value is None else _source_text_for(return_node.value, source_text)
+        evidence.append({
+            "expression": expression,
+            "type": literal_type,
+            "provenance": "direct_literal",
+            "role": "call_result",
+            "source_location": {"line": return_node.lineno, "column": return_node.col_offset},
+        })
+
+    metadata["analysis_status"] = "complete"
+    metadata["inferred"] = evidence
+    return metadata
+
+
 
 def _format_call_expression(call_node: ast.Call) -> str:
     """Formats an ast.Call node into an opaque label: call: func_name()."""
@@ -380,6 +583,8 @@ class PythonWalker(WalkerProtocol):
 
     def __init__(self) -> None:
         self.filepath: Optional[str] = None
+        self.source_text: Optional[str] = None
+        self.parsed_tree: Optional[ast.AST] = None
 
     def get_node_lineno(self, ast_node: Any) -> int:
         """Returns the line number for an AST node, defaulting to 0."""
@@ -388,7 +593,13 @@ class PythonWalker(WalkerProtocol):
     def parse_file(self, filepath: str) -> ast.AST:
         """Parses a Python source file into an AST."""
         self.filepath = filepath
-        return Python.get_tree(filepath, None)
+        try:
+            with open(filepath, "r", encoding="utf-8") as source_file:
+                self.source_text = source_file.read()
+        except OSError:
+            self.source_text = None
+        self.parsed_tree = Python.get_tree(filepath, None)
+        return self.parsed_tree
 
     def find_function(
         self,
@@ -476,6 +687,23 @@ class PythonWalker(WalkerProtocol):
 
         active_func_name = func_name or getattr(ast_node, "name", "")
         active_filepath = filepath or getattr(self, "filepath", "") or ""
+        source_text = self.source_text
+        if (self.parsed_tree is None or
+                not any(candidate is ast_node for candidate in ast.walk(self.parsed_tree))):
+            source_text = None
+        qualified_name = active_func_name
+        if self.parsed_tree is not None:
+            qualified_name = next(
+                (name for name, candidate in _collect_functions(self.parsed_tree) if candidate is ast_node),
+                active_func_name,
+            )
+        return_metadata = _extract_python_return_metadata(
+            ast_node,
+            function_name=active_func_name,
+            qualified_name=qualified_name,
+            source_file=active_filepath,
+            source_text=source_text,
+        )
 
         net = PetriNet()
 
@@ -499,5 +727,5 @@ class PythonWalker(WalkerProtocol):
             filepath=active_filepath,
         )
         walker.walk_block(ast_node.body, current_place=start_place, target_exit=end_place)
-
-        return WalkResult(net=net, call_sites=walker.call_sites)
+        net.return_metadata = return_metadata
+        return WalkResult(net=net, call_sites=walker.call_sites, return_metadata=return_metadata)

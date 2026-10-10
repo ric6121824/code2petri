@@ -270,6 +270,7 @@ def code2petri(
             if ext == "html":
                 serializer_kwargs["source_file"] = source_path
                 serializer_kwargs["function_name"] = target_function
+                serializer_kwargs["return_metadata"] = walk_res.return_metadata
                 if symbol_table is not None:
                     serializer_kwargs["callee_nets"] = precompute_callee_nets(
                         call_sites=call_sites,

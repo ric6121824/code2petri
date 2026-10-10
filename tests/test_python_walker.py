@@ -61,6 +61,71 @@ class TestPythonWalkerSequential(unittest.TestCase):
         self.assertEqual(len(net.places), 7)
         self.assertEqual(len(net.arcs), 12)
 
+    def test_walk_result_exposes_function_owned_python_return_evidence(self):
+        """Python declarations and direct literals survive walking as separate evidence."""
+        node = ast.parse(
+            "def choose(flag) -> 'Result[Thing]':\n"
+            "    if flag:\n"
+            "        return True\n"
+            "    return 1\n"
+        ).body[0]
+        result = walker.walk_function(node, "choose", "/src/sample.py")
+
+        self.assertEqual(result.return_metadata["function_name"], "choose")
+        self.assertEqual(result.return_metadata["source_file"], "/src/sample.py")
+        self.assertEqual(result.return_metadata["declared"]["expression"], "'Result[Thing]'")
+        self.assertEqual(result.return_metadata["analysis_status"], "unknown")
+        self.assertEqual(result.return_metadata["inferred"], [])
+
+    def test_direct_literal_return_has_type_and_return_site(self):
+        """A simple direct literal is inferred at its return statement."""
+        node = ast.parse("def answer():\n    return True\n").body[0]
+        result = walker.walk_function(node, "answer", "/src/sample.py")
+
+        self.assertEqual(result.return_metadata["analysis_status"], "complete")
+        evidence = result.return_metadata["inferred"][0]
+        self.assertEqual(evidence["expression"], "True")
+        self.assertEqual(evidence["type"], "bool")
+        self.assertEqual(evidence["role"], "call_result")
+        self.assertEqual(evidence["source_location"]["line"], 2)
+        self.assertEqual(result.net.to_dict()["return_metadata"], result.return_metadata)
+        self.assertEqual(result.net.clone().to_dict()["return_metadata"], result.return_metadata)
+
+    def test_python_global_scope_is_not_applicable(self):
+        """A synthetic global wrapper does not gain artificial return metadata."""
+        node = walker.find_function(ast.parse("print('hello')"), "(global)")
+        result = walker.walk_function(node, "(global)", "/src/sample.py")
+
+        self.assertEqual(result.return_metadata["analysis_status"], "not_applicable")
+        self.assertEqual(result.return_metadata["function_name"], "Global Scope")
+
+    def test_direct_literal_types_distinguish_bool_int_and_supported_primitives(self):
+        """Literal type evidence preserves Python's bool/int distinction and supported values."""
+        cases = [
+            ("True", "bool"), ("1", "int"), ("1.5", "float"), ("1j", "complex"),
+            ("'text'", "str"), ("b'bytes'", "bytes"), ("None", "NoneType"),
+        ]
+        for expression, expected_type in cases:
+            with self.subTest(expression=expression):
+                node = ast.parse(f"def value():\n    return {expression}\n").body[0]
+                metadata = walker.walk_function(node, "value", "/src/literals.py").return_metadata
+                self.assertEqual(metadata["analysis_status"], "complete")
+                self.assertEqual(metadata["inferred"][0]["type"], expected_type)
+
+    def test_nested_returns_and_async_or_generator_values_do_not_become_call_results(self):
+        """Nested scopes and deferred async/generator roles are not treated as ordinary results."""
+        cases = [
+            ("def outer():\n    def inner():\n        return 4\n", "outer"),
+            ("async def fetch() -> int:\n    return 4\n", "fetch"),
+            ("def values() -> int:\n    yield 4\n", "values"),
+        ]
+        for source, name in cases:
+            with self.subTest(name=name):
+                node = ast.parse(source).body[0]
+                metadata = walker.walk_function(node, name, "/src/scopes.py").return_metadata
+                self.assertEqual(metadata["analysis_status"], "unknown")
+                self.assertEqual(metadata["inferred"], [])
+
     def test_collect_variable_bindings_baseline(self):
         bindings = walker.collect_variable_bindings(self.tree)
         self.assertEqual(bindings, {})

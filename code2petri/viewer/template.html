@@ -335,6 +335,7 @@
       min-width: 0;
       overflow-wrap: anywhere;
     }
+    .info-return-metadata { white-space: pre-line; margin-top: 6px; font-size: 12px; line-height: 1.45; }
     #info-panel h4 {
       margin-bottom: 6px;
       font-size: 13px;
@@ -434,6 +435,7 @@
         <span class="info-identity-label">Function:</span>
         <span id="info-function-name" class="info-identity-value">{{FUNCTION_NAME}}</span>
       </div>
+      <div id="info-return-metadata" class="info-return-metadata" aria-label="Function return metadata"></div>
       <h4 id="info-step-title">{{MODE_LABEL}}</h4>
       <p id="info-step-desc">{{MODE_DESC}}</p>
       <div class="legend">
@@ -579,10 +581,38 @@
           infoFunctionName.textContent = activeDocument.function_name;
           infoFunctionName.title = activeDocument.function_name;
         }
+        const infoReturnMetadata = document.getElementById('info-return-metadata');
+        if (infoReturnMetadata) {
+          infoReturnMetadata.textContent = formatReturnMetadata(activeDocument.return_metadata);
+        }
 
         payload.document = Object.assign({}, activeDocument);
         payload.source_file = activeDocument.source_file;
         payload.filename = activeDocument.filename;
+      }
+
+      function formatReturnMetadata(metadata) {
+        if (!metadata || typeof metadata !== 'object') {
+          return activeDocument && activeDocument.function_name === 'Global Scope'
+            ? 'Return: Not applicable for global scope.'
+            : 'Return: Unknown — no return metadata is available.';
+        }
+        if (metadata.analysis_status === 'not_applicable') return 'Return: Not applicable for global scope.';
+        const lines = [];
+        if (metadata.declared && typeof metadata.declared.expression === 'string') {
+          lines.push('Declared: ' + metadata.declared.expression);
+        }
+        if (metadata.analysis_status === 'complete' && Array.isArray(metadata.inferred) && metadata.inferred.length) {
+          metadata.inferred.forEach(function(evidence) {
+            const role = evidence.role === 'call_result' ? 'Inferred return' : 'Inferred ' + (evidence.role || 'value');
+            const location = evidence.source_location && evidence.source_location.line
+              ? ' at line ' + evidence.source_location.line : '';
+            lines.push(role + ': ' + evidence.type + ' from ' + evidence.expression + location);
+          });
+        } else {
+          lines.push('Inferred: Unknown — evidence is unavailable or incomplete.');
+        }
+        return lines.join('\n');
       }
 
       window.code2petriViewer = window.code2petriViewer || {};
@@ -2099,6 +2129,7 @@
             payload.function_name ||
             (payload.composite_net && payload.composite_net.function_name) ||
             (rootCompound && rootCompound.function_name) || '',
+          returnMetadata: activeDocument.return_metadata || null,
           mode: payload.mode || 'no-fold',
           originalNet: originalNet,
           compounds: compounds,
@@ -2184,7 +2215,8 @@
         setActiveDocumentMetadata({
           source_file: doc.sourceFile,
           filename: doc.filename,
-          function_name: doc.functionName
+          function_name: doc.functionName,
+          return_metadata: doc.returnMetadata || null
         });
         isFoldMode = doc.mode === 'fold' && totalSteps > 0;
         if (foldControls) foldControls.style.display = isFoldMode ? 'flex' : 'none';

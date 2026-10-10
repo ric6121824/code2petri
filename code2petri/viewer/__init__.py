@@ -79,6 +79,7 @@ def generate_html(
     callee_nets: Optional[Dict[str, Any]] = None,
     source_file: Optional[str] = None,
     function_name: Optional[str] = None,
+    return_metadata: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Generates a 100% self-contained offline HTML viewer for a PetriNet or FoldResult.
 
@@ -88,6 +89,7 @@ def generate_html(
     :param callee_nets: Optional dictionary of pre-computed raw callee nets keyed by symbol name.
     :param source_file: Optional source file path or name being visualized.
     :param function_name: Optional root-function identity for the active document.
+    :param return_metadata: Optional source-owned return evidence for the root function.
     :return: Complete HTML document string with inlined Cytoscape, Dagre, and graph data.
     """
     template = _load_template()
@@ -145,18 +147,26 @@ def generate_html(
 
     payload["source_file"] = full_source_path
     payload["filename"] = file_display
-    payload["document"] = {
+    document_metadata = {
         "source_file": full_source_path,
         "filename": file_display,
         "function_name": root_function_name,
     }
+    root_return_metadata = return_metadata or getattr(
+            net_or_fold.initial_net if isinstance(net_or_fold, FoldResult) else net_or_fold,
+            "return_metadata", None,
+        )
+    if root_return_metadata is not None:
+        document_metadata["return_metadata"] = root_return_metadata
+    payload["document"] = document_metadata
 
     escaped_title = html.escape(display_title)
     escaped_source_file = html.escape(full_source_path)
     escaped_filename = html.escape(file_display)
     escaped_function_name = html.escape(root_function_name)
     file_box_style = "display: flex;" if file_display else "display: none;"
-    json_data = json.dumps(payload, indent=2)
+    # Prevent source annotations and expressions from terminating the embedded data script.
+    json_data = json.dumps(payload, indent=2).replace("<", "\\u003c")
     callee_nets_json = json.dumps(callee_dict, indent=2)
 
     rendered = template.replace("{{TITLE}}", escaped_title)

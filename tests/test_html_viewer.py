@@ -564,16 +564,22 @@ const payload = {
   document: {
     source_file: '/initial/source.py',
     filename: 'source.py',
-    function_name: 'initial_root'
+    function_name: 'initial_root',
+    return_metadata: {
+      analysis_status: 'complete', declared: { expression: 'Result[str]' },
+      inferred: [{ expression: '"a:b"', type: 'str', role: 'call_result', source_location: { line: 8 } }]
+    }
   }
 };
 const infoFileBox = { style: {} };
 const infoFilename = { textContent: '', title: '' };
 const infoFunctionName = { textContent: '', title: '' };
+const infoReturnMetadata = { textContent: '' };
 const elements = {
   'info-file-box': infoFileBox,
   'info-filename': infoFilename,
-  'info-function-name': infoFunctionName
+  'info-function-name': infoFunctionName,
+  'info-return-metadata': infoReturnMetadata
 };
 const document = { getElementById: id => elements[id] || null };
 const window = {};
@@ -581,10 +587,15 @@ const window = {};
 if (infoFunctionName.textContent !== 'initial_root') {
   throw new Error('Initial root function did not render');
 }
+if (!infoReturnMetadata.textContent.includes('Declared: Result[str]') ||
+    !infoReturnMetadata.textContent.includes('Inferred return: str from "a:b" at line 8')) {
+  throw new Error('Declared and inferred return evidence did not render separately');
+}
 window.code2petriViewer.setActiveDocumentMetadata({
   source_file: '/restored/very/long/path/restored.py',
   filename: 'restored.py',
-  function_name: 'Processor.run'
+  function_name: 'Processor.run',
+  return_metadata: { analysis_status: 'unknown', declared: null, inferred: [] }
 });
 if (infoFilename.textContent !== 'restored.py' || infoFilename.title !== '/restored/very/long/path/restored.py') {
   throw new Error('Restored source identity did not render');
@@ -592,6 +603,7 @@ if (infoFilename.textContent !== 'restored.py' || infoFilename.title !== '/resto
 if (infoFunctionName.textContent !== 'Processor.run') {
   throw new Error('Restored root function did not render');
 }
+if (!infoReturnMetadata.textContent.includes('Unknown')) throw new Error('Unknown analysis status was not explained');
 window.code2petriViewer.setActiveDocumentMetadata({});
 if (infoFunctionName.textContent !== 'Unavailable') {
   throw new Error('Missing restored function metadata was not explicit');
@@ -5424,6 +5436,12 @@ cy.pan({ x: 83, y: -41 });
 const documentContext = {
   title: 'Order Flow', sourceFile: '/src/orders.py', filename: 'orders.py',
   functionName: 'process_order', mode: 'composite',
+  returnMetadata: {
+    function_name: 'process_order', source_file: '/src/orders.py', qualified_name: 'process_order',
+    definition_location: { line: 4, column: 0 }, analysis_status: 'complete', declared: null,
+    inferred: [{ expression: 'a:b', type: 'str', provenance: 'direct_literal', role: 'call_result',
+      source_location: { line: 5, column: 4 } }]
+  },
   originalNet: { places: [{ id: 'p0' }], transitions: [{ id: 't0' }], arcs: [] },
   compounds: [{ id: 'compound_process_order', function_name: 'process_order' }],
   foldSteps: [{ component_type: 'Sequence' }], finalSm: 9.5, fullyReducible: true,
@@ -5443,6 +5461,7 @@ if (snapshot.engine.cfg.choice !== 1.25 || snapshot.engine.cfg.loop !== 4.5) thr
 if (!snapshot.engine.rememberedCustomNames.some(entry => entry[1] === 'Validate Order')) throw new Error('remembered name missing');
 if (snapshot.viewport.zoom !== 1.75 || snapshot.viewport.pan.x !== 83 || snapshot.viewport.pan.y !== -41) throw new Error('viewport missing');
 if (snapshot.document.functionName !== 'process_order' || snapshot.document.sourceFile !== '/src/orders.py') throw new Error('identity missing');
+if (!snapshot.document.returnMetadata || snapshot.document.returnMetadata.inferred[0].expression !== 'a:b') throw new Error('return metadata missing');
 if (!snapshot.document.originalNet || !snapshot.document.calleeNets.helper || snapshot.document.playback.currentStep !== 1) throw new Error('context missing');
 const savedLive = snapshot.elements.find(el => el.group === 'nodes' && el.data.id === liveComponent.id());
 if (!savedLive) throw new Error('live component missing');
@@ -5476,6 +5495,44 @@ console.log('PASS');
         proc = _run_node_script(script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
+
+    def test_python_root_return_metadata_is_embedded_and_saved(self):
+        """The production Python-to-viewer path carries return evidence into sessions."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "returns.py")
+            html_path = os.path.join(temp_dir, "returns.html")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write("def answer() -> 'Unknown':\n    return True\n")
+            result = code2petri(
+                source_path, output_file=html_path, target_function="answer", fold=True
+            )
+            with open(html_path, encoding="utf-8") as html_file:
+                html_content = html_file.read()
+
+        embedded = _extract_embedded_data(html_content)
+        metadata = embedded["document"]["return_metadata"]
+        self.assertEqual(metadata["declared"]["expression"], "'Unknown'")
+        self.assertEqual(metadata["inferred"][0]["type"], "bool")
+        self.assertEqual(metadata["inferred"][0]["expression"], "True")
+        self.assertEqual(metadata["inferred"][0]["source_location"]["line"], 2)
+        self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
+        self.assertIn("info-return-metadata", html_content)
+        self.assertIn("Declared:", html_content)
+        self.assertIn("evidence.type + ' from ' + evidence.expression", html_content)
+
+    def test_python_global_return_metadata_is_not_applicable_in_viewer_data(self):
+        """Global synthetic wrappers keep a distinct not-applicable analysis status."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "module.py")
+            html_path = os.path.join(temp_dir, "module.html")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write("print('hello')\n")
+            code2petri(source_path, output_file=html_path, target_function="(global)", fold=True)
+            with open(html_path, encoding="utf-8") as html_file:
+                html_content = html_file.read()
+        metadata = _extract_embedded_data(html_content)["document"]["return_metadata"]
+        self.assertEqual(metadata["analysis_status"], "not_applicable")
+        self.assertEqual(metadata["function_name"], "Global Scope")
 
     _SIMPLE_SEQUENCE_NET_LITERAL = """{
   places: [
@@ -5921,6 +5978,49 @@ console.log('PASS');
 
 
 class TestFoldStateSnapshotValidation(unittest.TestCase):
+    def test_return_metadata_validation_accepts_old_records_and_rejects_malformed(self):
+        script = r"""
+const { parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+function snapshot(returnMetadata) {
+  const document = {
+    title: 'Example', sourceFile: '/src/example.py', filename: 'example.py',
+    functionName: 'answer', mode: 'fold',
+    originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
+    calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
+  };
+  if (returnMetadata !== undefined) document.returnMetadata = returnMetadata;
+  return { schemaVersion: 1, snapshotType: 'code2petri-fold-state', elements: [],
+    engine: { stepCounter: 0, cfg: {}, rememberedCustomNames: [] },
+    viewport: { zoom: 1, pan: { x: 0, y: 0 } }, document };
+}
+const old = parseFoldStateSnapshot(snapshot());
+if (old.document.returnMetadata !== undefined) throw new Error('Old snapshot acquired metadata');
+const metadata = {
+  function_name: 'answer', source_file: '/src/example.py', qualified_name: 'answer',
+  definition_location: { line: 1, column: 0 }, analysis_status: 'complete', declared: null,
+  inferred: [{ expression: 'x:y', type: 'str', provenance: 'direct_literal', role: 'call_result',
+    source_location: { line: 2, column: 4 } }]
+};
+if (parseFoldStateSnapshot(snapshot(metadata)).document.returnMetadata.inferred[0].expression !== 'x:y') {
+  throw new Error('New metadata did not survive parsing');
+}
+const globalMetadata = Object.assign({}, metadata, {
+  function_name: 'Global Scope', qualified_name: 'Global Scope',
+  analysis_status: 'not_applicable', inferred: []
+});
+if (parseFoldStateSnapshot(snapshot(globalMetadata)).document.returnMetadata.analysis_status !== 'not_applicable') {
+  throw new Error('Global Scope metadata did not round-trip');
+}
+let rejected = false;
+try { parseFoldStateSnapshot(snapshot(Object.assign({}, metadata, { inferred: 'bad' }))); }
+catch (error) { rejected = error.message.includes('Invalid Fold State Snapshot'); }
+if (!rejected) throw new Error('Malformed return metadata was accepted');
+console.log('PASS');
+""";
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("PASS", proc.stdout)
+
     def test_generated_viewer_wires_offline_open_without_relayout(self):
         from code2petri.viewer import _load_template
 

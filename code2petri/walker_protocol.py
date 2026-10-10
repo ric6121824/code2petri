@@ -21,6 +21,7 @@ class WalkResult(NamedTuple):
     """Container packaging the generated PetriNet and extracted CallSite records."""
     net: PetriNet
     call_sites: List[CallSite]
+    return_metadata: Optional[Dict[str, Any]] = None
 
 
 class WalkerProtocol(ABC):

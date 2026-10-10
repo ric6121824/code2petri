@@ -408,6 +408,7 @@ class PetriNet:
         self.transitions: List[Transition] = []
         self.arcs: List[Arc] = []
         self.compounds: List[CompoundContainer] = []
+        self.return_metadata: Optional[Dict[str, Any]] = None
 
     def add_place(
         self,
@@ -580,6 +581,8 @@ class PetriNet:
         }
         if self.compounds:
             d["compounds"] = [c.to_dict() for c in self.compounds]
+        if self.return_metadata is not None:
+            d["return_metadata"] = json.loads(json.dumps(self.return_metadata))
         return d
 
     def to_json(self, indent: int = 2) -> str:
@@ -595,6 +598,7 @@ class PetriNet:
     def clone(self) -> "PetriNet":
         """Creates a deep copy of the PetriNet including places, transitions, metadata, and arcs."""
         new_net = PetriNet()
+        new_net.return_metadata = json.loads(json.dumps(self.return_metadata)) if self.return_metadata is not None else None
 
         for p in self.places:
             new_p_meta = dict(p.metadata) if p.metadata else None

@@ -203,6 +203,38 @@
     ['title', 'sourceFile', 'filename', 'functionName', 'mode'].forEach(function(key) {
       _requireString(documentContext[key], 'document.' + key);
     });
+    if (documentContext.returnMetadata !== undefined && documentContext.returnMetadata !== null) {
+      const metadata = documentContext.returnMetadata;
+      if (!_isObject(metadata)) _invalidSnapshot('document.returnMetadata must be an object');
+      _requireString(metadata.function_name, 'document.returnMetadata.function_name');
+      _requireString(metadata.source_file, 'document.returnMetadata.source_file');
+      _requireString(metadata.qualified_name, 'document.returnMetadata.qualified_name');
+      if (!_isObject(metadata.definition_location) ||
+          !Number.isInteger(metadata.definition_location.line) ||
+          (metadata.definition_location.column !== null &&
+           !Number.isInteger(metadata.definition_location.column))) {
+        _invalidSnapshot('document.returnMetadata.definition_location is invalid');
+      }
+      if (!['complete', 'unknown', 'not_applicable'].includes(metadata.analysis_status)) {
+        _invalidSnapshot('document.returnMetadata.analysis_status is invalid');
+      }
+      if (metadata.declared !== null) {
+        if (!_isObject(metadata.declared)) _invalidSnapshot('document.returnMetadata.declared is invalid');
+        _requireString(metadata.declared.expression, 'document.returnMetadata.declared.expression');
+        _requireString(metadata.declared.provenance, 'document.returnMetadata.declared.provenance');
+      }
+      if (!Array.isArray(metadata.inferred)) _invalidSnapshot('document.returnMetadata.inferred must be an array');
+      metadata.inferred.forEach(function(evidence, index) {
+        const description = 'document.returnMetadata.inferred[' + index + ']';
+        if (!_isObject(evidence)) _invalidSnapshot(description + ' must be an object');
+        ['expression', 'type', 'provenance', 'role'].forEach(function(key) {
+          _requireString(evidence[key], description + '.' + key);
+        });
+        if (!_isObject(evidence.source_location) || !Number.isInteger(evidence.source_location.line)) {
+          _invalidSnapshot(description + '.source_location is invalid');
+        }
+      });
+    }
     function validateCompounds(compounds, description, nodeIds) {
       if (!Array.isArray(compounds)) _invalidSnapshot(description + ' must be an array');
       compounds.forEach(function(compound, index) {
