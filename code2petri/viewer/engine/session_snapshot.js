@@ -215,7 +215,7 @@
            !Number.isInteger(metadata.definition_location.column))) {
         _invalidSnapshot('document.returnMetadata.definition_location is invalid');
       }
-      if (!['complete', 'unknown', 'not_applicable'].includes(metadata.analysis_status)) {
+      if (!['complete', 'unknown', 'no_normal_return', 'not_applicable'].includes(metadata.analysis_status)) {
         _invalidSnapshot('document.returnMetadata.analysis_status is invalid');
       }
       if (metadata.declared !== null) {
@@ -254,6 +254,25 @@
           });
         }
       });
+      ['inferred_types', 'observed_types'].forEach(function(key) {
+        if (metadata[key] !== undefined && (!Array.isArray(metadata[key]) ||
+            metadata[key].some(function(value) { return typeof value !== 'string'; }))) {
+          _invalidSnapshot('document.returnMetadata.' + key + ' must be an array of strings');
+        }
+      });
+      if (metadata.observed !== undefined) {
+        if (!Array.isArray(metadata.observed)) _invalidSnapshot('document.returnMetadata.observed must be an array');
+        metadata.observed.forEach(function(evidence, index) {
+          const description = 'document.returnMetadata.observed[' + index + ']';
+          if (!_isObject(evidence)) _invalidSnapshot(description + ' must be an object');
+          ['expression', 'type', 'provenance', 'role'].forEach(function(key) {
+            _requireString(evidence[key], description + '.' + key);
+          });
+          if (!_isObject(evidence.source_location) || !Number.isInteger(evidence.source_location.line)) {
+            _invalidSnapshot(description + '.source_location is invalid');
+          }
+        });
+      }
     }
     function validateCompounds(compounds, description, nodeIds) {
       if (!Array.isArray(compounds)) _invalidSnapshot(description + ' must be an array');

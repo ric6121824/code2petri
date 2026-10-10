@@ -86,6 +86,9 @@ def _javascript_return_metadata(
         "declared": None,
         "analysis_status": "not_applicable" if is_global else "unknown",
         "inferred": [],
+        "inferred_types": [],
+        "observed": [],
+        "observed_types": [],
     }
     if is_global:
         return metadata
@@ -127,45 +130,133 @@ def _javascript_return_metadata(
         metadata["inferred"] = [inferred]
         if result["type"] != "unknown":
             metadata["analysis_status"] = "complete"
+            metadata["inferred_types"] = [result["type"]]
         return metadata
 
     statements = body.get("body", []) if body.get("type") == "BlockStatement" else []
-    returns = [statement for statement in statements if statement.get("type") == "ReturnStatement"]
-    if len(returns) == 1 and returns[0] is statements[-1]:
-        argument = returns[0].get("argument")
-        if argument is None:
-            return_loc = get_nested(returns[0], "loc", "start", default={})
-            metadata["inferred"] = [{
-                "expression": "undefined", "type": "undefined", "provenance": "bare_return",
-                "role": "call_result", "source_location": {
-                    "line": return_loc.get("line"), "column": return_loc.get("column"),
-                },
-            }]
-            metadata["analysis_status"] = "complete"
-            return metadata
-        simple_body = all(
-            statement.get("type") in ("VariableDeclaration", "ExpressionStatement", "EmptyStatement")
-            for statement in statements[:-1]
-        )
-        bindings = _javascript_local_bindings(statements[:-1], source) if simple_body else {}
-        result = _javascript_inferred_type(argument, bindings, source) if simple_body else {"type": "unknown", "evidence": []}
-        inferred = _javascript_return_evidence(argument, returns[0], source, result)
-        metadata["inferred"] = [inferred]
-        if result["type"] != "unknown" and simple_body:
-            metadata["analysis_status"] = "complete"
-            return metadata
-    elif not returns and not _contains_nested_function(body) and all(
-        statement.get("type") in ("VariableDeclaration", "ExpressionStatement", "EmptyStatement")
-        for statement in statements
-    ):
-        end_loc = get_nested(func_node, "loc", "end", default={})
-        metadata["inferred"] = [{
+    outcomes, uncertain = _javascript_return_outcomes(statements, source)
+    uncertain = uncertain or bool(func_node.get("decorators"))
+    returns = [value for kind, value in outcomes if kind == "return"]
+    normal = [value for kind, value in outcomes if kind == "normal"]
+    has_unknown = uncertain or any(item.get("type") == "unknown" for item in returns)
+    if not normal and not returns and outcomes and all(kind == "throw" for kind, _ in outcomes) and not has_unknown:
+        metadata["analysis_status"] = "no_normal_return"
+        return metadata
+    end_loc = get_nested(func_node, "loc", "end", default={})
+    for _ in normal:
+        returns.append({
             "expression": "implicit fall-through", "type": "undefined",
             "provenance": "normal_fallthrough", "role": "call_result",
             "source_location": {"line": end_loc.get("line"), "column": end_loc.get("column")},
-        }]
-        metadata["analysis_status"] = "complete"
+        })
+    observed = [item for item in returns if item.get("type") != "unknown"]
+    observed_types = _javascript_unique_return_types(observed)
+    is_complete = not has_unknown and all(item.get("type") != "unknown" for item in returns)
+    metadata["analysis_status"] = "complete" if is_complete else "unknown"
+    metadata["inferred"] = returns
+    metadata["inferred_types"] = _javascript_unique_return_types(returns) if is_complete else []
+    metadata["observed"] = [] if is_complete else observed
+    metadata["observed_types"] = [] if is_complete else observed_types
     return metadata
+
+
+def _javascript_unique_return_types(evidence: List[dict]) -> List[str]:
+    result = []
+    for item in evidence:
+        value = item.get("type")
+        if isinstance(value, str) and value != "unknown" and value not in result:
+            result.append(value)
+    return result
+
+
+def _javascript_return_outcomes(statements: List[dict], source: str):
+    """Summarize sequential and if/else paths without joining branch bindings."""
+    uncertain = False
+
+    def return_evidence(statement: dict, history: List[dict], ambiguous: bool, nested: bool):
+        argument = statement.get("argument")
+        loc = get_nested(statement, "loc", "start", default={})
+        if argument is None:
+            return {
+                "expression": "undefined", "type": "undefined", "provenance": "bare_return",
+                "role": "call_result", "source_location": {"line": loc.get("line"), "column": loc.get("column")},
+            }
+        direct = _javascript_direct_literal_evidence(argument, source)
+        if direct is not None:
+            result = {"type": direct["type"], "evidence": []}
+        elif ambiguous or nested:
+            result = _javascript_inferred_type(argument, {}, source)
+        else:
+            result = _javascript_inferred_type(argument, _javascript_local_bindings(history, source), source)
+        return _javascript_return_evidence(argument, statement, source, result)
+
+    def nested_known_returns(statement: dict):
+        found = []
+        def visit(item):
+            if isinstance(item, dict):
+                kind = item.get("type")
+                if kind in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"):
+                    return
+                if kind == "ReturnStatement":
+                    evidence = return_evidence(item, [], True, True)
+                    if evidence.get("type") != "unknown":
+                        found.append(evidence)
+                    return
+                for key, value in item.items():
+                    if key != "loc":
+                        visit(value)
+            elif isinstance(item, list):
+                for value in item:
+                    visit(value)
+        visit(statement)
+        return found
+
+    def sequence(items: List[dict], history: List[dict], ambiguous: bool = False, nested: bool = False):
+        nonlocal uncertain
+        active = [(history, ambiguous)]
+        done = []
+        for statement in items:
+            next_active = []
+            for prior, path_ambiguous in active:
+                kind = statement.get("type")
+                if kind == "ReturnStatement":
+                    done.append(("return", return_evidence(statement, prior, path_ambiguous, nested)))
+                elif kind == "ThrowStatement":
+                    done.append(("throw", None))
+                elif kind == "IfStatement":
+                    consequent = statement.get("consequent", {})
+                    yes_items = consequent.get("body", []) if consequent.get("type") == "BlockStatement" else [consequent]
+                    yes, yes_uncertain = sequence(yes_items, list(prior), path_ambiguous, True)
+                    alternate = statement.get("alternate")
+                    if isinstance(alternate, dict):
+                        no_items = alternate.get("body", []) if alternate.get("type") == "BlockStatement" else [alternate]
+                        no, no_uncertain = sequence(no_items, list(prior), path_ambiguous, True)
+                    else:
+                        no, no_uncertain = [("normal", None)], False
+                    uncertain = uncertain or yes_uncertain or no_uncertain
+                    has_normal_branch = False
+                    for branch_kind, evidence in yes + no:
+                        if branch_kind == "normal":
+                            has_normal_branch = True
+                        else:
+                            done.append((branch_kind, evidence))
+                    if has_normal_branch:
+                        next_active.append(([statement], True))
+                elif kind in ("VariableDeclaration", "ExpressionStatement", "EmptyStatement",
+                              "FunctionDeclaration", "ClassDeclaration"):
+                    next_active.append((prior + [statement], path_ambiguous))
+                else:
+                    uncertain = True
+                    done.extend(("return", item) for item in nested_known_returns(statement))
+                    done.append(("unknown", None))
+            active = next_active
+            if not active:
+                break
+        done.extend(("normal", None) for _ in active)
+        return done, uncertain
+
+    outcomes, _ = sequence(statements, [])
+    return outcomes, uncertain
 
 
 def _javascript_direct_literal_evidence(node: dict, source: str) -> Optional[dict]:

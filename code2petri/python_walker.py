@@ -239,46 +239,6 @@ def _python_local_bindings(
     return bindings
 
 
-def _is_simple_sequential_body(node: ast.AST) -> bool:
-    """Reject control-flow constructs whose normal-return coverage is not proven here."""
-    unsupported_nodes = [
-        ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With,
-        ast.AsyncWith, ast.Raise, ast.Assert, ast.Break, ast.Continue,
-    ]
-    match_node = getattr(ast, "Match", None)
-    if match_node is not None:
-        unsupported_nodes.append(match_node)
-    unsupported = tuple(unsupported_nodes)
-
-    class ControlFlowCheck(ast.NodeVisitor):
-        supported = True
-
-        def generic_visit(self, child: ast.AST) -> None:
-            if isinstance(child, unsupported):
-                self.supported = False
-                return
-            super().generic_visit(child)
-
-        def visit_FunctionDef(self, child: ast.FunctionDef) -> None:
-            if child is not node:
-                self.supported = False
-
-        def visit_AsyncFunctionDef(self, child: ast.AsyncFunctionDef) -> None:
-            if child is not node:
-                self.supported = False
-
-        def visit_ClassDef(self, child: ast.ClassDef) -> None:
-            self.supported = False
-
-        def visit_Lambda(self, child: ast.Lambda) -> None:
-            self.supported = False
-
-    check = ControlFlowCheck()
-    for statement in getattr(node, "body", []):
-        check.visit(statement)
-    return check.supported
-
-
 def _extract_python_return_metadata(
     node: Union[ast.FunctionDef, ast.AsyncFunctionDef],
     function_name: str,
@@ -306,6 +266,9 @@ def _extract_python_return_metadata(
         },
         "analysis_status": "not_applicable" if is_global else "unknown",
         "inferred": [],
+        "inferred_types": [],
+        "observed": [],
+        "observed_types": [],
     }
     if is_global:
         return metadata
@@ -314,57 +277,141 @@ def _extract_python_return_metadata(
     if isinstance(node, ast.AsyncFunctionDef) or _function_has_yield(node):
         return metadata
 
-    returns = _function_returns(node)
-    evidence: List[Dict[str, Any]] = []
-    simple_body = _is_simple_sequential_body(node)
-    if not returns and simple_body:
-        # Sequential bodies without explicit returns complete normally with None.
-        evidence.append({
-            "expression": "implicit fall-through",
-            "type": "NoneType",
-            "provenance": "normal_fallthrough",
-            "role": "call_result",
-            "source_location": {"line": getattr(node, "end_lineno", line), "column": None},
-        })
-    elif len(returns) == 1 and node.body and returns[0] is node.body[-1]:
-        # The return must be the final statement; branches and loops can still
-        # make a local binding incomplete, so such expressions remain unknown.
-        return_node = returns[0]
-        expression = "None" if return_node.value is None else _source_text_for(return_node.value, source_text)
-        inferred = (
-            {"type": "NoneType", "evidence": []} if return_node.value is None
-            else _python_inferred_type(return_node.value, _python_local_bindings(node.body[:-1], source_text))
-        )
-        if not simple_body:
-            inferred = {"type": "unknown", "evidence": []}
-        provenance = "direct_literal" if return_node.value is not None and _direct_literal_type(return_node.value) is not None else (
-            "local_assignment" if isinstance(return_node.value, ast.Name) and inferred["evidence"] else "expression_inference"
-        )
-        evidence.append({
-            "expression": expression or "unknown expression",
-            "type": inferred["type"],
-            "provenance": provenance,
-            "role": "call_result",
-            "source_location": {"line": return_node.lineno, "column": return_node.col_offset},
-            "expression_location": {
-                "line": getattr(return_node.value, "lineno", return_node.lineno),
-                "column": getattr(return_node.value, "col_offset", return_node.col_offset),
-            },
-            "evidence": inferred["evidence"],
-        })
-        if inferred["type"] != "unknown" and simple_body:
-            metadata["analysis_status"] = "complete"
-        metadata["inferred"] = evidence
-        return metadata
-    elif not returns:
-        return metadata
-    else:
-        # Other return shapes need normal-return coverage analysis, outside this ticket.
+    outcomes, uncertain_coverage = _python_return_outcomes(node, source_text)
+    uncertain_coverage = uncertain_coverage or bool(getattr(node, "decorator_list", []))
+    normal = [outcome for outcome in outcomes if outcome[0] == "normal"]
+    returns = [outcome[1] for outcome in outcomes if outcome[0] == "return"]
+    has_unknown = uncertain_coverage or any(item.get("type") == "unknown" for item in returns)
+    if not normal and not returns and outcomes and all(kind == "raise" for kind, _ in outcomes) and not has_unknown:
+        metadata["analysis_status"] = "no_normal_return"
+        metadata["inferred_types"] = []
+        metadata["observed"] = []
+        metadata["observed_types"] = []
         return metadata
 
-    metadata["analysis_status"] = "complete"
-    metadata["inferred"] = evidence
+    for outcome in normal:
+        line_number = getattr(node, "end_lineno", line)
+        returns.append({
+            "expression": "implicit fall-through", "type": "NoneType",
+            "provenance": "normal_fallthrough", "role": "call_result",
+            "source_location": {"line": line_number, "column": None},
+        })
+
+    observed = [item for item in returns if item.get("type") != "unknown"]
+    observed_types = _unique_return_types(observed)
+    is_complete = not has_unknown and all(item.get("type") != "unknown" for item in returns)
+    metadata["analysis_status"] = "complete" if is_complete else "unknown"
+    # Keep return-site records (including unknown expressions) for inspection;
+    # inferred_types is the complete union and is empty when coverage is unknown.
+    metadata["inferred"] = returns
+    metadata["inferred_types"] = _unique_return_types(returns) if is_complete else []
+    metadata["observed"] = [] if is_complete else observed
+    metadata["observed_types"] = [] if is_complete else observed_types
     return metadata
+
+
+def _unique_return_types(evidence: List[Dict[str, Any]]) -> List[str]:
+    result: List[str] = []
+    for item in evidence:
+        value = item.get("type")
+        if isinstance(value, str) and value != "unknown" and value not in result:
+            result.append(value)
+    return result
+
+
+def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
+    """Summarize supported sequential/if paths without merging branch environments."""
+    uncertain = False
+
+    def known_evidence(return_node: ast.Return, history: List[ast.stmt], ambiguous: bool, nested: bool):
+        expression_node = return_node.value
+        if expression_node is None:
+            inferred = {"type": "NoneType", "evidence": []}
+            expression = "None"
+        else:
+            expression = _source_text_for(expression_node, source_text) or "unknown expression"
+            if _direct_literal_type(expression_node) is not None:
+                inferred = _python_inferred_type(expression_node, {})
+            elif ambiguous or nested:
+                inferred = _python_inferred_type(expression_node, {})
+            else:
+                inferred = _python_inferred_type(expression_node, _python_local_bindings(history, source_text))
+        provenance = "bare_return" if expression_node is None else (
+            "direct_literal" if _direct_literal_type(expression_node) is not None else (
+                "local_assignment" if isinstance(expression_node, ast.Name) and inferred["evidence"] else "expression_inference"
+            )
+        )
+        return {
+            "expression": expression, "type": inferred["type"], "provenance": provenance,
+            "role": "call_result", "source_location": {"line": return_node.lineno, "column": return_node.col_offset},
+            "expression_location": {
+                "line": getattr(expression_node, "lineno", return_node.lineno),
+                "column": getattr(expression_node, "col_offset", return_node.col_offset),
+            },
+            "evidence": inferred["evidence"],
+        }
+
+    def collect_known_nested(statement: ast.stmt) -> List[Dict[str, Any]]:
+        found = []
+        class Collector(ast.NodeVisitor):
+            def visit_Return(self, item: ast.Return):
+                evidence = known_evidence(item, [], True, True)
+                if evidence["type"] != "unknown":
+                    found.append(evidence)
+            def visit_FunctionDef(self, item: ast.FunctionDef):
+                return
+            def visit_AsyncFunctionDef(self, item: ast.AsyncFunctionDef):
+                return
+            def visit_Lambda(self, item: ast.Lambda):
+                return
+            def visit_ClassDef(self, item: ast.ClassDef):
+                return
+        Collector().visit(statement)
+        return found
+
+    def sequence(statements: List[ast.stmt], history: List[ast.stmt], ambiguous: bool = False, nested: bool = False):
+        nonlocal uncertain
+        active = [("normal", None, history, ambiguous)]
+        done = []
+        for statement in statements:
+            next_active = []
+            for _, _, prior, path_ambiguous in active:
+                if isinstance(statement, ast.Return):
+                    done.append(("return", known_evidence(statement, prior, path_ambiguous, nested)))
+                elif isinstance(statement, ast.Raise):
+                    done.append(("raise", None))
+                elif isinstance(statement, ast.If):
+                    yes = sequence(statement.body, list(prior), path_ambiguous, True)
+                    if statement.orelse:
+                        no = sequence(statement.orelse, list(prior), path_ambiguous, True)
+                    else:
+                        no = ([ ("normal", None) ], False)
+                    branch_outcomes = yes[0] + no[0]
+                    uncertain = uncertain or yes[1] or no[1]
+                    has_normal_branch = False
+                    for kind, evidence in branch_outcomes:
+                        if kind == "normal":
+                            has_normal_branch = True
+                        else:
+                            done.append((kind, evidence))
+                    if has_normal_branch:
+                        next_active.append(("normal", None, [statement], True))
+                elif isinstance(statement, (ast.Pass, ast.Expr, ast.Assign, ast.AnnAssign, ast.AugAssign,
+                                            ast.Global, ast.Nonlocal, ast.FunctionDef, ast.AsyncFunctionDef,
+                                            ast.ClassDef)):
+                    next_active.append(("normal", None, prior + [statement], path_ambiguous))
+                else:
+                    uncertain = True
+                    done.extend(("return", item) for item in collect_known_nested(statement))
+                    done.append(("unknown", None))
+            active = next_active
+            if not active:
+                break
+        done.extend(("normal", None) for _ in active)
+        return done, uncertain
+
+    outcomes, _ = sequence(list(getattr(node, "body", [])), [])
+    return outcomes, uncertain
 
 
 

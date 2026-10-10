@@ -5530,7 +5530,30 @@ console.log('PASS');
         self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
         self.assertIn("info-return-metadata", html_content)
         self.assertIn("Declared:", html_content)
-        self.assertIn("Returned expression: ' + evidence.expression", html_content)
+        self.assertIn("Observed return expression: ') + evidence.expression", html_content)
+
+    def test_python_partial_return_coverage_is_embedded_with_separate_observations(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "partial.py")
+            html_path = os.path.join(temp_dir, "partial.html")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write(
+                    "def answer(flag):\n"
+                    "    if flag:\n"
+                    "        return 1\n"
+                    "    else:\n"
+                    "        return missing()\n"
+                )
+            result = code2petri(source_path, output_file=html_path, target_function="answer", fold=True)
+            with open(html_path, encoding="utf-8") as html_file:
+                html_content = html_file.read()
+        metadata = _extract_embedded_data(html_content)["document"]["return_metadata"]
+        self.assertEqual(metadata["analysis_status"], "unknown")
+        self.assertEqual(metadata["inferred_types"], [])
+        self.assertEqual(metadata["observed_types"], ["int"])
+        self.assertEqual(metadata["observed"][0]["expression"], "1")
+        self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
+        self.assertIn("Observed types (partial)", html_content)
 
     def test_python_global_return_metadata_is_not_applicable_in_viewer_data(self):
         """Global synthetic wrappers keep a distinct not-applicable analysis status."""
@@ -6193,6 +6216,7 @@ if (old.document.returnMetadata !== undefined) throw new Error('Old snapshot acq
 const metadata = {
   function_name: 'answer', source_file: '/src/example.py', qualified_name: 'answer',
   definition_location: { line: 1, column: 0 }, analysis_status: 'complete', declared: null,
+  inferred_types: ['str'], observed: [], observed_types: [],
   inferred: [{ expression: 'x:y', type: 'str', provenance: 'direct_literal', role: 'call_result',
     source_location: { line: 2, column: 4 }, expression_location: { line: 2, column: 11 },
     evidence: [{ expression: 'x = "a:b"', type: 'str', provenance: 'local_assignment',
@@ -6203,6 +6227,21 @@ if (restoredMetadata.inferred[0].expression !== 'x:y' ||
     restoredMetadata.inferred[0].expression_location.column !== 11 ||
     restoredMetadata.inferred[0].evidence[0].expression !== 'x = "a:b"') {
   throw new Error('New metadata did not survive parsing');
+}
+const partialMetadata = Object.assign({}, metadata, {
+  analysis_status: 'unknown', inferred_types: [], observed_types: ['str'],
+  observed: [metadata.inferred[0]]
+});
+const restoredPartial = parseFoldStateSnapshot(snapshot(partialMetadata)).document.returnMetadata;
+if (restoredPartial.analysis_status !== 'unknown' || restoredPartial.observed_types[0] !== 'str' ||
+    restoredPartial.observed[0].expression !== 'x:y') {
+  throw new Error('Partial observations did not survive parsing');
+}
+const abnormalMetadata = Object.assign({}, metadata, {
+  analysis_status: 'no_normal_return', inferred: [], inferred_types: [], observed: [], observed_types: []
+});
+if (parseFoldStateSnapshot(snapshot(abnormalMetadata)).document.returnMetadata.analysis_status !== 'no_normal_return') {
+  throw new Error('No-normal-return status did not survive parsing');
 }
 const globalMetadata = Object.assign({}, metadata, {
   function_name: 'Global Scope', qualified_name: 'Global Scope',

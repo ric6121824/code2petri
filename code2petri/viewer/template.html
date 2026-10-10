@@ -606,9 +606,21 @@
         if (metadata.declared && typeof metadata.declared.expression === 'string') {
           lines.push('Declared: ' + metadata.declared.expression);
         }
+        if (metadata.analysis_status === 'no_normal_return') {
+          lines.push('Inferred result: No normal return.');
+          return lines.join('\n');
+        }
+        if (metadata.analysis_status === 'complete') {
+          const resultTypes = Array.isArray(metadata.inferred_types) ? metadata.inferred_types : [];
+          lines.push('Inferred result: ' + (resultTypes.length ? resultTypes.join(' | ') : 'Unknown'));
+        } else {
+          lines.push('Inferred result: Unknown — evidence is unavailable or incomplete.');
+          const observedTypes = Array.isArray(metadata.observed_types) ? metadata.observed_types : [];
+          if (observedTypes.length) lines.push('Observed types (partial): ' + observedTypes.join(' | '));
+        }
         if (Array.isArray(metadata.inferred) && metadata.inferred.length) {
           metadata.inferred.forEach(function(evidence) {
-            lines.push('Returned expression: ' + evidence.expression);
+            lines.push((metadata.analysis_status === 'complete' ? 'Returned expression: ' : 'Observed return expression: ') + evidence.expression);
             if (evidence.source_location && evidence.source_location.line) {
               lines.push('Return site: line ' + evidence.source_location.line);
             }
@@ -629,7 +641,9 @@
             }
           });
         } else {
-          lines.push('Inferred: Unknown — evidence is unavailable or incomplete.');
+          if (metadata.analysis_status !== 'complete' && metadata.analysis_status !== 'no_normal_return') {
+            lines.push('Return-site evidence is unavailable.');
+          }
         }
         return lines.join('\n');
       }
@@ -1535,9 +1549,21 @@
           lines.push('Declared evidence: ' + (metadata.declared.provenance || 'Unknown'));
         }
         lines.push('Analysis status: ' + (metadata.analysis_status || 'unknown'));
+        if (metadata.analysis_status === 'no_normal_return') {
+          lines.push('Inferred result: No normal return.');
+          return lines.join('\n');
+        }
+        if (metadata.analysis_status === 'complete') {
+          const resultTypes = Array.isArray(metadata.inferred_types) ? metadata.inferred_types : [];
+          lines.push('Inferred result: ' + (resultTypes.length ? resultTypes.join(' | ') : 'Unknown'));
+        } else {
+          lines.push('Inferred result: Unknown — evidence is unavailable or incomplete.');
+          const observedTypes = Array.isArray(metadata.observed_types) ? metadata.observed_types : [];
+          if (observedTypes.length) lines.push('Observed types (partial): ' + observedTypes.join(' | '));
+        }
         (Array.isArray(metadata.inferred) ? metadata.inferred : []).forEach(function(evidence) {
           const location = evidence.source_location || {};
-          lines.push('Returned expression: ' + (typeof evidence.expression === 'string' ? evidence.expression : 'Unknown'));
+          lines.push((metadata.analysis_status === 'complete' ? 'Returned expression: ' : 'Observed return expression: ') + (typeof evidence.expression === 'string' ? evidence.expression : 'Unknown'));
           lines.push('Inferred type at this return: ' + (typeof evidence.type === 'string' ? evidence.type : 'Unknown'));
           lines.push('Evidence: ' + (evidence.provenance || 'Unknown'));
           lines.push('Role: ' + (evidence.role || 'Unknown'));

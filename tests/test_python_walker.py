@@ -74,8 +74,8 @@ class TestPythonWalkerSequential(unittest.TestCase):
         self.assertEqual(result.return_metadata["function_name"], "choose")
         self.assertEqual(result.return_metadata["source_file"], "/src/sample.py")
         self.assertEqual(result.return_metadata["declared"]["expression"], "'Result[Thing]'")
-        self.assertEqual(result.return_metadata["analysis_status"], "unknown")
-        self.assertEqual(result.return_metadata["inferred"], [])
+        self.assertEqual(result.return_metadata["analysis_status"], "complete")
+        self.assertEqual(result.return_metadata["inferred_types"], ["bool", "int"])
 
     def test_direct_literal_return_has_type_and_return_site(self):
         """A simple direct literal is inferred at its return statement."""
@@ -179,8 +179,52 @@ class TestPythonWalkerSequential(unittest.TestCase):
             with self.subTest(name=name):
                 node = ast.parse(source).body[0]
                 metadata = walker.walk_function(node, name, "/src/scopes.py").return_metadata
+                if name == "outer":
+                    self.assertEqual(metadata["analysis_status"], "complete")
+                    self.assertEqual(metadata["inferred_types"], ["NoneType"])
+                    self.assertEqual(metadata["inferred"][0]["provenance"], "normal_fallthrough")
+                else:
+                    self.assertEqual(metadata["analysis_status"], "unknown")
+                    self.assertEqual(metadata["inferred"], [])
+
+    def test_supported_return_paths_report_complete_unions_and_partial_observations(self):
+        cases = [
+            ("def answer(flag):\n    if flag:\n        return 1\n    else:\n        return 'x'\n", "complete", ["int", "str"], []),
+            ("def answer(flag):\n    if flag:\n        return 1\n    else:\n        return missing()\n", "unknown", [], ["int"]),
+            ("def answer(flag):\n    if flag:\n        return 1\n", "complete", ["int", "NoneType"], []),
+        ]
+        for source, status, inferred_types, observed_types in cases:
+            with self.subTest(source=source):
+                metadata = walker.walk_function(ast.parse(source).body[0], "answer", "/src/paths.py").return_metadata
+                self.assertEqual(metadata["analysis_status"], status)
+                self.assertEqual(metadata.get("inferred_types", []), inferred_types)
+                self.assertEqual(metadata.get("observed_types", []), observed_types)
+                if status == "unknown":
+                    self.assertEqual([item["type"] for item in metadata["observed"]], ["int"])
+
+    def test_supported_completion_distinguishes_bare_returns_abnormal_only_and_unreachable(self):
+        cases = [
+            ("def answer(flag):\n    if flag:\n        return\n    return 1\n", "complete", ["NoneType", "int"], 2),
+            ("def answer(flag):\n    if flag:\n        raise ValueError()\n    else:\n        raise RuntimeError()\n", "no_normal_return", [], 0),
+            ("def answer():\n    return 1\n    return 'unreachable'\n", "complete", ["int"], 1),
+            ("def answer(flag):\n    if flag:\n        x = 1\n    else:\n        x = 'x'\n    return x\n", "unknown", [], 1),
+        ]
+        for source, status, inferred_types, evidence_count in cases:
+            with self.subTest(source=source):
+                metadata = walker.walk_function(ast.parse(source).body[0], "answer", "/src/paths.py").return_metadata
+                self.assertEqual(metadata["analysis_status"], status)
+                self.assertEqual(metadata.get("inferred_types", []), inferred_types)
+                self.assertEqual(len(metadata["inferred"]), evidence_count)
+
+    def test_unsupported_control_flow_keeps_known_returns_as_partial_evidence(self):
+        for source in (
+            "def answer(flag):\n    if flag:\n        return 1\n    while other():\n        pass\n",
+            "def answer():\n    try:\n        return 1\n    finally:\n        cleanup()\n",
+        ):
+            with self.subTest(source=source):
+                metadata = walker.walk_function(ast.parse(source).body[0], "answer", "/src/paths.py").return_metadata
                 self.assertEqual(metadata["analysis_status"], "unknown")
-                self.assertEqual(metadata["inferred"], [])
+                self.assertEqual([item["type"] for item in metadata["observed"]], ["int"])
 
     def test_collect_variable_bindings_baseline(self):
         bindings = walker.collect_variable_bindings(self.tree)

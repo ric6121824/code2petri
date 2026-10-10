@@ -88,6 +88,45 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
                 metadata = self._walk_source_function(source)
                 self.assertEqual(metadata["inferred"][0]["type"], expected_type)
 
+    def test_supported_return_paths_report_complete_unions_and_partial_observations(self):
+        cases = [
+            ("function answer(flag) { if (flag) { return 1; } else { return 'x'; } }", "complete", ["number", "string"], []),
+            ("function answer(flag) { if (flag) { return 1; } else { return missing(); } }", "unknown", [], ["number"]),
+            ("function answer(flag) { if (flag) { return 1; } }", "complete", ["number", "undefined"], []),
+        ]
+        for source, status, inferred_types, observed_types in cases:
+            with self.subTest(source=source):
+                metadata = self._walk_source_function(source, "answer")
+                self.assertEqual(metadata["analysis_status"], status)
+                self.assertEqual(metadata.get("inferred_types", []), inferred_types)
+                self.assertEqual(metadata.get("observed_types", []), observed_types)
+                if status == "unknown":
+                    self.assertEqual([item["type"] for item in metadata["observed"]], ["number"])
+
+    def test_supported_completion_distinguishes_bare_returns_abnormal_only_and_unreachable(self):
+        cases = [
+            ("function answer(flag) { if (flag) { return; } return 1; }", "complete", ["undefined", "number"], 2),
+            ("function answer(flag) { if (flag) { throw new Error(); } else { throw new Error(); } }", "no_normal_return", [], 0),
+            ("function answer() { return 1; return 'unreachable'; }", "complete", ["number"], 1),
+            ("function answer(flag) { let x; if (flag) { x = 1; } else { x = 'x'; } return x; }", "unknown", [], 1),
+        ]
+        for source, status, inferred_types, evidence_count in cases:
+            with self.subTest(source=source):
+                metadata = self._walk_source_function(source, "answer")
+                self.assertEqual(metadata["analysis_status"], status)
+                self.assertEqual(metadata.get("inferred_types", []), inferred_types)
+                self.assertEqual(len(metadata["inferred"]), evidence_count)
+
+    def test_unsupported_control_flow_keeps_known_returns_as_partial_evidence(self):
+        for source in (
+            "function answer(flag) { if (flag) { return 1; } while (other()) {} }",
+            "function answer() { try { return 1; } finally { cleanup(); } }",
+        ):
+            with self.subTest(source=source):
+                metadata = self._walk_source_function(source, "answer")
+                self.assertEqual(metadata["analysis_status"], "unknown")
+                self.assertEqual([item["type"] for item in metadata["observed"]], ["number"])
+
     def test_walk_function_returns_walk_result_for_other_fixtures(self):
         call_path = os.path.join(
             os.path.dirname(__file__),
