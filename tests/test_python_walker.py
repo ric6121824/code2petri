@@ -91,6 +91,62 @@ class TestPythonWalkerSequential(unittest.TestCase):
         self.assertEqual(result.net.to_dict()["return_metadata"], result.return_metadata)
         self.assertEqual(result.net.clone().to_dict()["return_metadata"], result.return_metadata)
 
+    def test_returned_local_includes_assignment_evidence(self):
+        node = ast.parse("def answer():\n    x = 1\n    return x\n").body[0]
+        metadata = walker.walk_function(node, "answer", "/src/sample.py").return_metadata
+
+        self.assertEqual(metadata["analysis_status"], "complete")
+        evidence = metadata["inferred"][0]
+        self.assertEqual(evidence["expression"], "x")
+        self.assertEqual(evidence["type"], "int")
+        self.assertEqual(evidence["source_location"], {"line": 3, "column": 4})
+        self.assertEqual(evidence["expression_location"], {"line": 3, "column": 11})
+        self.assertEqual(evidence["evidence"][0]["expression"], "x = 1")
+        self.assertEqual(evidence["evidence"][0]["source_location"], {"line": 2, "column": 4})
+
+    def test_returned_expression_infers_primitive_container_and_supported_operator(self):
+        cases = [
+            ("x = []; return x", "list"),
+            ("x = [make()]; return x", "list"),
+            ("x = [make()]; return x", "list"),
+            ("x = {}; return x", "dict"),
+            ("x = (); return x", "tuple"),
+            ("x = {1}; return x", "set"),
+            ("x = f'item:{1}'; return x", "str"),
+            ("x = 1; return x + 2", "int"),
+            ("x = 1; return -x / 2", "float"),
+            ("x = True; return not x", "bool"),
+            ("x = 'a'; return x + 'b'", "str"),
+            ("x = 1; return x + 'b'", "unknown"),
+            ("x = [1]; y = x; return y", "list"),
+            ("x, y = (1, 2); return x", "unknown"),
+            ("return values[0]", "unknown"),
+            ("return value", "unknown"),
+            ("return values[0]", "unknown"),
+            ("return value", "unknown"),
+        ]
+        for body, expected_type in cases:
+            with self.subTest(body=body):
+                node = ast.parse("def answer():\n    " + body.replace("; ", "\n    ") + "\n").body[0]
+                metadata = walker.walk_function(node, "answer", "/src/sample.py").return_metadata
+                self.assertEqual(metadata["inferred"][0]["type"], expected_type)
+
+    def test_local_reassignment_invalidates_stale_type_and_control_flow_stays_unknown(self):
+        cases = [
+            ("def answer():\n    x = 1\n    x = make_value()\n    return x\n", "unknown"),
+            ("def answer():\n    x = 1\n    x = 'text'\n    return x\n", "str"),
+            ("def answer(flag):\n    if flag:\n        x = 1\n    else:\n        x = 2\n    return x\n", None),
+        ]
+        for source, expected_type in cases:
+            with self.subTest(source=source):
+                node = ast.parse(source).body[0]
+                metadata = walker.walk_function(node, "answer", "/src/sample.py").return_metadata
+                if expected_type is None:
+                    self.assertEqual(metadata["analysis_status"], "unknown")
+                    self.assertEqual(metadata["inferred"][0]["type"], "unknown")
+                else:
+                    self.assertEqual(metadata["inferred"][0]["type"], expected_type)
+
     def test_python_global_scope_is_not_applicable(self):
         """A synthetic global wrapper does not gain artificial return metadata."""
         node = walker.find_function(ast.parse("print('hello')"), "(global)")

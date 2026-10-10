@@ -233,6 +233,26 @@
         if (!_isObject(evidence.source_location) || !Number.isInteger(evidence.source_location.line)) {
           _invalidSnapshot(description + '.source_location is invalid');
         }
+        if (evidence.expression_location !== undefined &&
+            (!_isObject(evidence.expression_location) ||
+             !Number.isInteger(evidence.expression_location.line) ||
+             (evidence.expression_location.column !== null &&
+              !Number.isInteger(evidence.expression_location.column)))) {
+          _invalidSnapshot(description + '.expression_location is invalid');
+        }
+        if (evidence.evidence !== undefined) {
+          if (!Array.isArray(evidence.evidence)) _invalidSnapshot(description + '.evidence must be an array');
+          evidence.evidence.forEach(function(assignment, evidenceIndex) {
+            const assignmentDescription = description + '.evidence[' + evidenceIndex + ']';
+            if (!_isObject(assignment)) _invalidSnapshot(assignmentDescription + ' must be an object');
+            ['expression', 'type', 'provenance'].forEach(function(key) {
+              _requireString(assignment[key], assignmentDescription + '.' + key);
+            });
+            if (!_isObject(assignment.source_location) || !Number.isInteger(assignment.source_location.line)) {
+              _invalidSnapshot(assignmentDescription + '.source_location is invalid');
+            }
+          });
+        }
       });
     }
     function validateCompounds(compounds, description, nodeIds) {

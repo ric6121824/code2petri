@@ -30,6 +30,13 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
             "global_script.js",
         )
 
+    def _walk_source_function(self, source, name="f"):
+        with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8") as handle:
+            handle.write(source)
+            handle.flush()
+            node = self.walker.find_function(self.walker.parse_file(handle.name), name)
+            return self.walker.walk_function(node, name, "/src/sample.js").return_metadata
+
     def test_implements_walker_protocol(self):
         self.assertIsInstance(self.walker, WalkerProtocol)
 
@@ -43,6 +50,43 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
         self.assertEqual(len(res.call_sites), 1)
         self.assertEqual(res.call_sites[0].callee_name, "print")
         assert_valid_petri_net(self, res.net)
+
+    def test_returned_local_and_simple_expression_include_assignment_evidence(self):
+        source = "function answer() {\n  let x = 1;\n  return x + 2;\n}"
+        metadata = self._walk_source_function(source, "answer")
+
+        self.assertEqual(metadata["analysis_status"], "complete")
+        evidence = metadata["inferred"][0]
+        self.assertEqual(evidence["expression"], "x + 2")
+        self.assertEqual(evidence["type"], "number")
+        self.assertEqual(evidence["source_location"], {"line": 3, "column": 2})
+        self.assertEqual(evidence["evidence"][0]["expression"], "let x = 1;")
+        self.assertEqual(evidence["evidence"][0]["source_location"], {"line": 2, "column": 2})
+
+    def test_javascript_template_container_and_reassignment_inference_are_bounded(self):
+        cases = [
+            ("function f() { const x = []; return x; }", "array"),
+            ("function f() { const x = [make()]; return x; }", "array"),
+            ("function f() { const x = {}; return x; }", "object"),
+            ("function f() { const x = {value: make()}; return x; }", "object"),
+            ("function f() { const x = `a:${1}`; return x; }", "string"),
+            ("function f() { const x = 1; const y = x; return y; }", "number"),
+            ("function f() { let x = 1; x = 'text'; return x; }", "string"),
+            ("function f() { let x = 1; x = make(); return x; }", "unknown"),
+            ("function f() { let x = 1; x++; return x; }", "unknown"),
+            ("function f() { const [x] = [1]; return x; }", "unknown"),
+            ("function f() { const x = 1; return !x; }", "boolean"),
+            ("function f() { const x = 'a'; return x + 'b'; }", "string"),
+            ("function f() { const x = 1; return x + 2; }", "number"),
+            ("function f(flag) { let x; if (flag) x = 1; return x; }", "unknown"),
+            ("function f() { let x = 1; return x + 'text'; }", "unknown"),
+            ("function f(values) { return values[0]; }", "unknown"),
+            ("function f(value) { return value; }", "unknown"),
+        ]
+        for source, expected_type in cases:
+            with self.subTest(source=source):
+                metadata = self._walk_source_function(source)
+                self.assertEqual(metadata["inferred"][0]["type"], expected_type)
 
     def test_walk_function_returns_walk_result_for_other_fixtures(self):
         call_path = os.path.join(

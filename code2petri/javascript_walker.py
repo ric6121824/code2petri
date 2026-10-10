@@ -122,9 +122,10 @@ def _javascript_return_metadata(
 
     body = func_node.get("body", {})
     if func_node.get("type") == "ArrowFunctionExpression" and body.get("type") != "BlockStatement":
-        inferred = _javascript_direct_literal_evidence(body, source)
-        metadata["inferred"] = [inferred or _javascript_unknown_expression_evidence(body, source)]
-        if inferred:
+        result = _javascript_inferred_type(body, {}, source)
+        inferred = _javascript_return_evidence(body, body, source, result)
+        metadata["inferred"] = [inferred]
+        if result["type"] != "unknown":
             metadata["analysis_status"] = "complete"
         return metadata
 
@@ -142,12 +143,17 @@ def _javascript_return_metadata(
             }]
             metadata["analysis_status"] = "complete"
             return metadata
-        inferred = _javascript_direct_literal_evidence(argument, source)
-        if inferred:
-            metadata["inferred"] = [inferred]
+        simple_body = all(
+            statement.get("type") in ("VariableDeclaration", "ExpressionStatement", "EmptyStatement")
+            for statement in statements[:-1]
+        )
+        bindings = _javascript_local_bindings(statements[:-1], source) if simple_body else {}
+        result = _javascript_inferred_type(argument, bindings, source) if simple_body else {"type": "unknown", "evidence": []}
+        inferred = _javascript_return_evidence(argument, returns[0], source, result)
+        metadata["inferred"] = [inferred]
+        if result["type"] != "unknown" and simple_body:
             metadata["analysis_status"] = "complete"
             return metadata
-        metadata["inferred"] = [_javascript_unknown_expression_evidence(argument, source)]
     elif not returns and not _contains_nested_function(body) and all(
         statement.get("type") in ("VariableDeclaration", "ExpressionStatement", "EmptyStatement")
         for statement in statements
@@ -184,12 +190,141 @@ def _javascript_direct_literal_evidence(node: dict, source: str) -> Optional[dic
     }
 
 
-def _javascript_unknown_expression_evidence(node: dict, source: str) -> dict:
-    loc = get_nested(node, "loc", "start", default={})
+def _javascript_inferred_type(node: dict, bindings: dict, source: str) -> dict:
+    """Infer a bounded set of JavaScript primitives, containers, and operators."""
+    node_type = node.get("type")
+    literal = _javascript_direct_literal_evidence(node, source)
+    if literal:
+        return {"type": literal["type"], "evidence": []}
+    if node_type == "ArrayExpression":
+        return {"type": "array", "evidence": []}
+    if node_type == "ObjectExpression":
+        return {"type": "object", "evidence": []}
+    if node_type == "TemplateLiteral":
+        dependencies = []
+        for expression in node.get("expressions", []):
+            part_evidence = _javascript_inferred_type(expression, bindings, source)["evidence"]
+            for item in part_evidence:
+                if item not in dependencies:
+                    dependencies.append(item)
+        return {"type": "string", "evidence": dependencies}
+    if node_type == "Identifier":
+        binding = bindings.get(node.get("name"))
+        return {"type": "unknown", "evidence": []} if binding is None else {
+            "type": binding["type"], "evidence": list(binding["evidence"]),
+        }
+    if node_type == "UnaryExpression":
+        operand = _javascript_inferred_type(node.get("argument", {}), bindings, source)
+        operator = node.get("operator")
+        if operator in ("+", "-") and operand["type"] == "number":
+            result_type = "number"
+        elif operator == "!" and operand["type"] in {"number", "string", "boolean", "null", "undefined"}:
+            result_type = "boolean"
+        else:
+            result_type = "unknown"
+        return {"type": result_type, "evidence": operand["evidence"]}
+    if node_type == "BinaryExpression" and node.get("operator") in ("+", "-", "*", "/"):
+        left = _javascript_inferred_type(node.get("left", {}), bindings, source)
+        right = _javascript_inferred_type(node.get("right", {}), bindings, source)
+        if node.get("operator") == "+" and left["type"] == right["type"] == "string":
+            result_type = "string"
+        elif left["type"] == right["type"] == "number":
+            result_type = "number"
+        else:
+            result_type = "unknown"
+        dependencies = []
+        for item in left["evidence"] + right["evidence"]:
+            if item not in dependencies:
+                dependencies.append(item)
+        return {"type": result_type, "evidence": dependencies}
+    return {"type": "unknown", "evidence": []}
+
+
+def _javascript_binding_names(pattern: dict) -> List[str]:
+    if pattern.get("type") == "Identifier":
+        return [pattern.get("name")]
+    if pattern.get("type") in ("ArrayPattern", "ObjectPattern"):
+        names = []
+        for value in pattern.get("elements", []) or []:
+            if isinstance(value, dict):
+                names.extend(_javascript_binding_names(value))
+        for prop in pattern.get("properties", []) or []:
+            if isinstance(prop, dict):
+                names.extend(_javascript_binding_names(prop.get("value", prop)))
+        return names
+    return []
+
+
+def _javascript_local_bindings(statements: List[dict], source: str) -> dict:
+    bindings = {}
+    declared_locals = set()
+    immutable_locals = set()
+    for statement in statements:
+        declarations = []
+        assignment_statement = False
+        if statement.get("type") == "VariableDeclaration":
+            declarations = statement.get("declarations", [])
+        elif statement.get("type") == "ExpressionStatement":
+            expression = statement.get("expression", {})
+            if expression.get("type") == "AssignmentExpression":
+                assignment_statement = True
+                declarations = [{
+                    "id": expression.get("left", {}),
+                    "init": expression.get("right") if expression.get("operator") == "=" else None,
+                }]
+            elif expression.get("type") == "UpdateExpression":
+                assignment_statement = True
+                declarations = [{"id": expression.get("argument", {}), "init": None}]
+        for declaration in declarations:
+            target = declaration.get("id", {})
+            initializer = declaration.get("init")
+            assigned = _javascript_inferred_type(initializer, bindings, source) if isinstance(initializer, dict) else {
+                "type": "unknown", "evidence": [],
+            }
+            if target.get("type") != "Identifier":
+                assigned = {"type": "unknown", "evidence": []}
+            names = _javascript_binding_names(target)
+            if not names:
+                continue
+            if assignment_statement and names[0] not in declared_locals:
+                continue
+            if assignment_statement and names[0] in immutable_locals:
+                assigned = {"type": "unknown", "evidence": []}
+            assignment_evidence = {
+                "expression": slice_source(source, statement),
+                "type": assigned["type"],
+                "provenance": "local_assignment",
+                "source_location": {
+                    "line": _get_node_lineno(statement),
+                    "column": get_nested(statement, "loc", "start", "column"),
+                },
+            }
+            chain = list(assigned["evidence"])
+            if assignment_evidence not in chain:
+                chain.append(assignment_evidence)
+            for name in names:
+                bindings[name] = {"type": assigned["type"], "evidence": chain}
+                if not assignment_statement:
+                    declared_locals.add(name)
+                    if statement.get("kind") == "const":
+                        immutable_locals.add(name)
+    return bindings
+
+
+def _javascript_return_evidence(expression: dict, return_node: dict, source: str, result: dict) -> dict:
+    expression_loc = get_nested(expression, "loc", "start", default={})
+    return_loc = get_nested(return_node, "loc", "start", default={})
+    direct = _javascript_direct_literal_evidence(expression, source)
     return {
-        "expression": slice_source(source, node), "type": "unknown",
-        "provenance": "return_expression", "role": "call_result",
-        "source_location": {"line": loc.get("line"), "column": loc.get("column")},
+        "expression": slice_source(source, expression),
+        "type": result["type"],
+        "provenance": "direct_literal" if direct else (
+            "local_assignment" if expression.get("type") == "Identifier" and result["evidence"] else "expression_inference"
+        ),
+        "role": "call_result",
+        "source_location": {"line": return_loc.get("line"), "column": return_loc.get("column")},
+        "expression_location": {"line": expression_loc.get("line"), "column": expression_loc.get("column")},
+        "evidence": result["evidence"],
     }
 
 

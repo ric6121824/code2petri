@@ -602,12 +602,27 @@
         if (metadata.declared && typeof metadata.declared.expression === 'string') {
           lines.push('Declared: ' + metadata.declared.expression);
         }
-        if (metadata.analysis_status === 'complete' && Array.isArray(metadata.inferred) && metadata.inferred.length) {
+        if (Array.isArray(metadata.inferred) && metadata.inferred.length) {
           metadata.inferred.forEach(function(evidence) {
-            const role = evidence.role === 'call_result' ? 'Inferred return' : 'Inferred ' + (evidence.role || 'value');
-            const location = evidence.source_location && evidence.source_location.line
-              ? ' at line ' + evidence.source_location.line : '';
-            lines.push(role + ': ' + evidence.type + ' from ' + evidence.expression + location);
+            lines.push('Returned expression: ' + evidence.expression);
+            if (evidence.source_location && evidence.source_location.line) {
+              lines.push('Return site: line ' + evidence.source_location.line);
+            }
+            const inferredType = evidence.type === 'unknown'
+              ? 'Unknown — evidence is unavailable or incomplete.' : evidence.type;
+            lines.push('Inferred type at this return: ' + inferredType);
+            const assignments = Array.isArray(evidence.evidence) ? evidence.evidence : [];
+            if (assignments.length) {
+              lines.push('Evidence: ' + assignments.map(function(item) {
+                const location = item.source_location && item.source_location.line
+                  ? ' at line ' + item.source_location.line : '';
+                return item.expression + ' (' + item.type + location + ')';
+              }).join('; '));
+            } else if (evidence.provenance === 'direct_literal') {
+              lines.push('Evidence: direct literal');
+            } else {
+              lines.push('Evidence: No local assignment evidence.');
+            }
           });
         } else {
           lines.push('Inferred: Unknown — evidence is unavailable or incomplete.');

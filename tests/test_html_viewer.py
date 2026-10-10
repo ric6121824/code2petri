@@ -567,7 +567,10 @@ const payload = {
     function_name: 'initial_root',
     return_metadata: {
       analysis_status: 'complete', declared: { expression: 'Result[str]' },
-      inferred: [{ expression: '"a:b"', type: 'str', role: 'call_result', source_location: { line: 8 } }]
+      inferred: [{ expression: '"a:b"', type: 'str', role: 'call_result',
+        source_location: { line: 8, column: 4 }, expression_location: { line: 8, column: 11 },
+        evidence: [{ expression: 'value = "a:b"', type: 'str', provenance: 'local_assignment',
+          source_location: { line: 7, column: 4 } }] }]
     }
   }
 };
@@ -588,7 +591,9 @@ if (infoFunctionName.textContent !== 'initial_root') {
   throw new Error('Initial root function did not render');
 }
 if (!infoReturnMetadata.textContent.includes('Declared: Result[str]') ||
-    !infoReturnMetadata.textContent.includes('Inferred return: str from "a:b" at line 8')) {
+    !infoReturnMetadata.textContent.includes('Returned expression: "a:b"') ||
+    !infoReturnMetadata.textContent.includes('Inferred type at this return: str') ||
+    !infoReturnMetadata.textContent.includes('Evidence: value = "a:b" (str at line 7)')) {
   throw new Error('Declared and inferred return evidence did not render separately');
 }
 window.code2petriViewer.setActiveDocumentMetadata({
@@ -5440,7 +5445,9 @@ const documentContext = {
     function_name: 'process_order', source_file: '/src/orders.py', qualified_name: 'process_order',
     definition_location: { line: 4, column: 0 }, analysis_status: 'complete', declared: null,
     inferred: [{ expression: 'a:b', type: 'str', provenance: 'direct_literal', role: 'call_result',
-      source_location: { line: 5, column: 4 } }]
+      source_location: { line: 5, column: 4 }, expression_location: { line: 5, column: 11 },
+      evidence: [{ expression: 'x = "a:b"', type: 'str', provenance: 'local_assignment',
+        source_location: { line: 4, column: 2 } }] }]
   },
   originalNet: { places: [{ id: 'p0' }], transitions: [{ id: 't0' }], arcs: [] },
   compounds: [{ id: 'compound_process_order', function_name: 'process_order' }],
@@ -5461,7 +5468,11 @@ if (snapshot.engine.cfg.choice !== 1.25 || snapshot.engine.cfg.loop !== 4.5) thr
 if (!snapshot.engine.rememberedCustomNames.some(entry => entry[1] === 'Validate Order')) throw new Error('remembered name missing');
 if (snapshot.viewport.zoom !== 1.75 || snapshot.viewport.pan.x !== 83 || snapshot.viewport.pan.y !== -41) throw new Error('viewport missing');
 if (snapshot.document.functionName !== 'process_order' || snapshot.document.sourceFile !== '/src/orders.py') throw new Error('identity missing');
-if (!snapshot.document.returnMetadata || snapshot.document.returnMetadata.inferred[0].expression !== 'a:b') throw new Error('return metadata missing');
+if (!snapshot.document.returnMetadata || snapshot.document.returnMetadata.inferred[0].expression !== 'a:b' ||
+    snapshot.document.returnMetadata.inferred[0].expression_location.column !== 11 ||
+    snapshot.document.returnMetadata.inferred[0].evidence[0].expression !== 'x = "a:b"') {
+  throw new Error('separate return expression evidence missing');
+}
 if (!snapshot.document.originalNet || !snapshot.document.calleeNets.helper || snapshot.document.playback.currentStep !== 1) throw new Error('context missing');
 const savedLive = snapshot.elements.find(el => el.group === 'nodes' && el.data.id === liveComponent.id());
 if (!savedLive) throw new Error('live component missing');
@@ -5502,7 +5513,7 @@ console.log('PASS');
             source_path = os.path.join(temp_dir, "returns.py")
             html_path = os.path.join(temp_dir, "returns.html")
             with open(source_path, "w", encoding="utf-8") as source_file:
-                source_file.write("def answer() -> 'Unknown':\n    return True\n")
+                source_file.write("def answer() -> 'Unknown':\n    value = 1\n    return f'item:{value}'\n")
             result = code2petri(
                 source_path, output_file=html_path, target_function="answer", fold=True
             )
@@ -5512,13 +5523,14 @@ console.log('PASS');
         embedded = _extract_embedded_data(html_content)
         metadata = embedded["document"]["return_metadata"]
         self.assertEqual(metadata["declared"]["expression"], "'Unknown'")
-        self.assertEqual(metadata["inferred"][0]["type"], "bool")
-        self.assertEqual(metadata["inferred"][0]["expression"], "True")
-        self.assertEqual(metadata["inferred"][0]["source_location"]["line"], 2)
+        self.assertEqual(metadata["inferred"][0]["type"], "str")
+        self.assertEqual(metadata["inferred"][0]["expression"], "f'item:{value}'")
+        self.assertEqual(metadata["inferred"][0]["source_location"]["line"], 3)
+        self.assertEqual(metadata["inferred"][0]["evidence"][0]["expression"], "value = 1")
         self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
         self.assertIn("info-return-metadata", html_content)
         self.assertIn("Declared:", html_content)
-        self.assertIn("evidence.type + ' from ' + evidence.expression", html_content)
+        self.assertIn("Returned expression: ' + evidence.expression", html_content)
 
     def test_python_global_return_metadata_is_not_applicable_in_viewer_data(self):
         """Global synthetic wrappers keep a distinct not-applicable analysis status."""
@@ -5540,7 +5552,7 @@ console.log('PASS');
             source_path = os.path.join(temp_dir, "returns.js")
             html_path = os.path.join(temp_dir, "returns.html")
             with open(source_path, "w", encoding="utf-8") as source_file:
-                source_file.write("/** @returns {Mystery<Thing>} documented */\nfunction answer() { return true; }\n")
+                source_file.write("/** @returns {Mystery<Thing>} documented */\nfunction answer() { const value = 1; return `item:${value}`; }\n")
             result = code2petri(
                 source_path, output_file=html_path, target_function="answer", fold=True
             )
@@ -5550,10 +5562,10 @@ console.log('PASS');
         metadata = _extract_embedded_data(html_content)["document"]["return_metadata"]
         self.assertEqual(metadata["declared"]["expression"], "Mystery<Thing>")
         self.assertEqual(metadata["declared"]["provenance"], "jsdoc")
-        self.assertEqual(metadata["inferred"], [{
-            "expression": "true", "type": "boolean", "provenance": "direct_literal",
-            "role": "call_result", "source_location": {"line": 2, "column": 27},
-        }])
+        self.assertEqual(metadata["inferred"][0]["expression"], "`item:${value}`")
+        self.assertEqual(metadata["inferred"][0]["type"], "string")
+        self.assertEqual(metadata["inferred"][0]["source_location"]["line"], 2)
+        self.assertEqual(metadata["inferred"][0]["evidence"][0]["expression"], "const value = 1;")
         self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
         self.assertIn("Declared:", html_content)
 
@@ -6104,9 +6116,14 @@ const metadata = {
   function_name: 'answer', source_file: '/src/example.py', qualified_name: 'answer',
   definition_location: { line: 1, column: 0 }, analysis_status: 'complete', declared: null,
   inferred: [{ expression: 'x:y', type: 'str', provenance: 'direct_literal', role: 'call_result',
-    source_location: { line: 2, column: 4 } }]
+    source_location: { line: 2, column: 4 }, expression_location: { line: 2, column: 11 },
+    evidence: [{ expression: 'x = "a:b"', type: 'str', provenance: 'local_assignment',
+      source_location: { line: 1, column: 4 } }] }]
 };
-if (parseFoldStateSnapshot(snapshot(metadata)).document.returnMetadata.inferred[0].expression !== 'x:y') {
+const restoredMetadata = parseFoldStateSnapshot(snapshot(metadata)).document.returnMetadata;
+if (restoredMetadata.inferred[0].expression !== 'x:y' ||
+    restoredMetadata.inferred[0].expression_location.column !== 11 ||
+    restoredMetadata.inferred[0].evidence[0].expression !== 'x = "a:b"') {
   throw new Error('New metadata did not survive parsing');
 }
 const globalMetadata = Object.assign({}, metadata, {

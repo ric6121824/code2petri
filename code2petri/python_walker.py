@@ -133,6 +133,112 @@ def _direct_literal_type(expression: ast.AST) -> Optional[str]:
     return None
 
 
+def _python_inferred_type(expression: ast.AST, bindings: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """Infer a deliberately small set of Python expression types and dependencies."""
+    if isinstance(expression, ast.Constant):
+        value_type = _direct_literal_type(expression)
+        return {"type": value_type or "unknown", "evidence": []}
+    if isinstance(expression, (ast.List, ast.Dict, ast.Tuple, ast.Set)):
+        return {"type": {ast.List: "list", ast.Dict: "dict", ast.Tuple: "tuple", ast.Set: "set"}[type(expression)], "evidence": []}
+    if isinstance(expression, ast.JoinedStr):
+        dependencies = []
+        for part in expression.values:
+            if isinstance(part, ast.FormattedValue):
+                part_evidence = _python_inferred_type(part.value, bindings)["evidence"]
+                for item in part_evidence:
+                    if item not in dependencies:
+                        dependencies.append(item)
+        return {"type": "str", "evidence": dependencies}
+    if isinstance(expression, ast.Name):
+        binding = bindings.get(expression.id)
+        return {"type": "unknown", "evidence": []} if binding is None else {
+            "type": binding["type"], "evidence": list(binding["evidence"]),
+        }
+    if isinstance(expression, ast.UnaryOp):
+        operand = _python_inferred_type(expression.operand, bindings)
+        operand_type = operand["type"]
+        if isinstance(expression.op, ast.Not) and operand_type in {"bool", "int", "float", "complex", "str", "bytes", "NoneType"}:
+            value_type = "bool"
+        elif isinstance(expression.op, (ast.UAdd, ast.USub)) and operand_type in {"int", "float", "complex"}:
+            value_type = operand_type
+        else:
+            value_type = "unknown"
+        return {"type": value_type, "evidence": operand["evidence"]}
+    if isinstance(expression, ast.BinOp) and isinstance(expression.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+        left = _python_inferred_type(expression.left, bindings)
+        right = _python_inferred_type(expression.right, bindings)
+        left_type, right_type = left["type"], right["type"]
+        if isinstance(expression.op, ast.Add) and left_type == right_type == "str":
+            value_type = "str"
+        elif left_type in {"int", "float", "complex"} and right_type in {"int", "float", "complex"}:
+            if isinstance(expression.op, ast.Div):
+                value_type = "float" if "complex" not in (left_type, right_type) else "complex"
+            else:
+                value_type = "complex" if "complex" in (left_type, right_type) else (
+                    "float" if "float" in (left_type, right_type) else "int"
+                )
+        else:
+            value_type = "unknown"
+        dependencies = []
+        for item in left["evidence"] + right["evidence"]:
+            if item not in dependencies:
+                dependencies.append(item)
+        return {"type": value_type, "evidence": dependencies}
+    return {"type": "unknown", "evidence": []}
+
+
+def _python_binding_names(target: ast.AST) -> List[str]:
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return [name for element in target.elts for name in _python_binding_names(element)]
+    return []
+
+
+def _python_local_bindings(
+    statements: List[ast.stmt], source_text: Optional[str],
+) -> Dict[str, Dict[str, Any]]:
+    """Track direct assignments in lexical order, invalidating unsupported writes."""
+    bindings: Dict[str, Dict[str, Any]] = {}
+    excluded = {
+        name
+        for statement in statements
+        if isinstance(statement, (ast.Global, ast.Nonlocal))
+        for name in statement.names
+    }
+    for statement in statements:
+        targets: List[ast.AST] = []
+        value: Optional[ast.AST] = None
+        if isinstance(statement, ast.Assign):
+            targets, value = statement.targets, statement.value
+        elif isinstance(statement, ast.AnnAssign):
+            targets, value = [statement.target], statement.value
+        elif isinstance(statement, ast.AugAssign):
+            targets = [statement.target]
+        else:
+            continue
+
+        assigned = _python_inferred_type(value, bindings) if value is not None else {"type": "unknown", "evidence": []}
+        if any(not isinstance(target, ast.Name) for target in targets):
+            assigned = {"type": "unknown", "evidence": []}
+        names = [name for target in targets for name in _python_binding_names(target)]
+        if not names:
+            continue
+        assignment_evidence = {
+            "expression": _source_text_for(statement, source_text) or "assignment",
+            "type": assigned["type"],
+            "provenance": "local_assignment",
+            "source_location": {"line": getattr(statement, "lineno", None), "column": getattr(statement, "col_offset", None)},
+        }
+        chain = list(assigned["evidence"])
+        if assignment_evidence not in chain:
+            chain.append(assignment_evidence)
+        for name in names:
+            if name not in excluded:
+                bindings[name] = {"type": assigned["type"], "evidence": chain}
+    return bindings
+
+
 def _is_simple_sequential_body(node: ast.AST) -> bool:
     """Reject control-flow constructs whose normal-return coverage is not proven here."""
     unsupported_nodes = [
@@ -180,7 +286,7 @@ def _extract_python_return_metadata(
     source_file: str,
     source_text: Optional[str],
 ) -> Dict[str, Any]:
-    """Extract declared evidence and conservative direct-literal evidence."""
+    """Extract declared evidence and bounded return-expression evidence."""
     line = getattr(node, "lineno", None)
     column = getattr(node, "col_offset", None)
     is_global = function_name == "(global)" or getattr(node, "name", None) == "(global)"
@@ -209,11 +315,9 @@ def _extract_python_return_metadata(
         return metadata
 
     returns = _function_returns(node)
-    if not _is_simple_sequential_body(node):
-        return metadata
-
     evidence: List[Dict[str, Any]] = []
-    if not returns:
+    simple_body = _is_simple_sequential_body(node)
+    if not returns and simple_body:
         # Sequential bodies without explicit returns complete normally with None.
         evidence.append({
             "expression": "implicit fall-through",
@@ -222,23 +326,41 @@ def _extract_python_return_metadata(
             "role": "call_result",
             "source_location": {"line": getattr(node, "end_lineno", line), "column": None},
         })
-    else:
-        # A direct return is complete evidence only when it is the final statement.
-        last_statement = node.body[-1] if node.body else None
-        if len(returns) != 1 or returns[0] is not last_statement:
-            return metadata
+    elif len(returns) == 1 and node.body and returns[0] is node.body[-1]:
+        # The return must be the final statement; branches and loops can still
+        # make a local binding incomplete, so such expressions remain unknown.
         return_node = returns[0]
-        literal_type = "NoneType" if return_node.value is None else _direct_literal_type(return_node.value)
-        if literal_type is None:
-            return metadata
         expression = "None" if return_node.value is None else _source_text_for(return_node.value, source_text)
+        inferred = (
+            {"type": "NoneType", "evidence": []} if return_node.value is None
+            else _python_inferred_type(return_node.value, _python_local_bindings(node.body[:-1], source_text))
+        )
+        if not simple_body:
+            inferred = {"type": "unknown", "evidence": []}
+        provenance = "direct_literal" if return_node.value is not None and _direct_literal_type(return_node.value) is not None else (
+            "local_assignment" if isinstance(return_node.value, ast.Name) and inferred["evidence"] else "expression_inference"
+        )
         evidence.append({
-            "expression": expression,
-            "type": literal_type,
-            "provenance": "direct_literal",
+            "expression": expression or "unknown expression",
+            "type": inferred["type"],
+            "provenance": provenance,
             "role": "call_result",
             "source_location": {"line": return_node.lineno, "column": return_node.col_offset},
+            "expression_location": {
+                "line": getattr(return_node.value, "lineno", return_node.lineno),
+                "column": getattr(return_node.value, "col_offset", return_node.col_offset),
+            },
+            "evidence": inferred["evidence"],
         })
+        if inferred["type"] != "unknown" and simple_body:
+            metadata["analysis_status"] = "complete"
+        metadata["inferred"] = evidence
+        return metadata
+    elif not returns:
+        return metadata
+    else:
+        # Other return shapes need normal-return coverage analysis, outside this ticket.
+        return metadata
 
     metadata["analysis_status"] = "complete"
     metadata["inferred"] = evidence
