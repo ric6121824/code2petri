@@ -273,6 +273,65 @@
           }
         });
       }
+      if (metadata.function_kind !== undefined) {
+        if (!['generator', 'async_generator', 'async_function'].includes(metadata.function_kind)) {
+          _invalidSnapshot('document.returnMetadata.function_kind is invalid');
+        }
+        const roles = metadata.roles;
+        if (!_isObject(roles)) _invalidSnapshot('document.returnMetadata.roles must be an object');
+        const requiredRoles = metadata.function_kind === 'async_function'
+          ? ['immediate', 'awaited'] : ['immediate', 'yielded', 'completion'];
+        requiredRoles.forEach(function(roleName) {
+          const role = roles[roleName];
+          const description = 'document.returnMetadata.roles.' + roleName;
+          if (!_isObject(role)) _invalidSnapshot(description + ' must be an object');
+          if (!['complete', 'unknown', 'no_normal_return', 'not_applicable'].includes(role.analysis_status)) {
+            _invalidSnapshot(description + '.analysis_status is invalid');
+          }
+          if (role.declared !== null && role.declared !== undefined) {
+            if (!_isObject(role.declared)) _invalidSnapshot(description + '.declared is invalid');
+            _requireString(role.declared.expression, description + '.declared.expression');
+            _requireString(role.declared.provenance, description + '.declared.provenance');
+            if (role.declared.source_location !== undefined &&
+                (!_isObject(role.declared.source_location) ||
+                 !Number.isInteger(role.declared.source_location.line) ||
+                 (role.declared.source_location.column !== null &&
+                  !Number.isInteger(role.declared.source_location.column)))) {
+              _invalidSnapshot(description + '.declared.source_location is invalid');
+            }
+          }
+          ['inferred', 'observed'].forEach(function(key) {
+            if (!Array.isArray(role[key])) _invalidSnapshot(description + '.' + key + ' must be an array');
+            role[key].forEach(function(evidence, index) {
+              const itemDescription = description + '.' + key + '[' + index + ']';
+              if (!_isObject(evidence)) _invalidSnapshot(itemDescription + ' must be an object');
+              ['expression', 'type', 'provenance', 'role'].forEach(function(field) {
+                _requireString(evidence[field], itemDescription + '.' + field);
+              });
+              if (!_isObject(evidence.source_location) ||
+                  !Number.isInteger(evidence.source_location.line) ||
+                  (evidence.source_location.column !== null &&
+                   !Number.isInteger(evidence.source_location.column))) {
+                _invalidSnapshot(itemDescription + '.source_location is invalid');
+              }
+              if (evidence.expression_location !== undefined &&
+                  (!_isObject(evidence.expression_location) ||
+                   !Number.isInteger(evidence.expression_location.line) ||
+                   (evidence.expression_location.column !== null &&
+                    !Number.isInteger(evidence.expression_location.column)))) {
+                _invalidSnapshot(itemDescription + '.expression_location is invalid');
+              }
+            });
+          });
+          ['inferred_types', 'observed_types'].forEach(function(key) {
+            if (!Array.isArray(role[key]) || role[key].some(function(value) { return typeof value !== 'string'; })) {
+              _invalidSnapshot(description + '.' + key + ' must be an array of strings');
+            }
+          });
+        });
+      } else if (metadata.roles !== undefined) {
+        _invalidSnapshot('document.returnMetadata.roles requires function_kind');
+      }
     }
     function validateCompounds(compounds, description, nodeIds) {
       if (!Array.isArray(compounds)) _invalidSnapshot(description + ' must be an array');

@@ -63,6 +63,141 @@ def _get_block_lineno(stmts: List[dict], default: Optional[int] = None) -> Optio
     """Returns the line number of the first statement in a block, or default."""
     if stmts and isinstance(stmts, list):
         return _get_node_lineno(stmts[0], default)
+
+
+def _javascript_role_record(evidence: List[dict], declared: Optional[dict] = None,
+                            unknown_coverage: bool = False,
+                            no_normal_return: bool = False) -> dict:
+    known = [item for item in evidence if item.get("type") != "unknown"]
+    complete = not unknown_coverage and len(known) == len(evidence)
+    status = "no_normal_return" if no_normal_return else ("complete" if complete else "unknown")
+    types = _javascript_unique_return_types(evidence)
+    observed_types = _javascript_unique_return_types(known)
+    return {
+        "declared": declared,
+        "analysis_status": status,
+        "inferred": evidence,
+        "inferred_types": types if status == "complete" else [],
+        "observed": [] if status == "complete" else known,
+        "observed_types": [] if status == "complete" else observed_types,
+    }
+
+
+def _javascript_generator_documentation_roles(declared: Optional[dict]) -> dict:
+    """Split only conventional Generator<yield, completion, next> documentation."""
+    if not isinstance(declared, dict) or not isinstance(declared.get("expression"), str):
+        return {}
+    expression = declared["expression"].strip()
+    match = re.fullmatch(r"(?:Async)?Generator\s*<(.+)>", expression)
+    if not match:
+        return {}
+    raw_arguments = match.group(1)
+    arguments, start, depth = [], 0, 0
+    for index, char in enumerate(raw_arguments):
+        if char in "<{[":
+            depth += 1
+        elif char in ">}]":
+            depth -= 1
+        elif char == "," and depth == 0:
+            arguments.append(raw_arguments[start:index].strip())
+            start = index + 1
+    arguments.append(raw_arguments[start:].strip())
+    result = {}
+    if len(arguments) in (2, 3) and all(arguments[:2]):
+        result["yielded"] = dict(declared, expression=arguments[0])
+        result["completion"] = dict(declared, expression=arguments[1])
+    return result
+
+
+def _javascript_yield_evidence(body: dict, source: str) -> List[dict]:
+    statements = body.get("body", []) if body.get("type") == "BlockStatement" else []
+    evidence = []
+
+    def visit(item: Any, history: List[dict], ambiguous: bool = False) -> None:
+        if isinstance(item, list):
+            for child in item:
+                visit(child, history, ambiguous)
+            return
+        if not isinstance(item, dict):
+            return
+        kind = item.get("type")
+        if kind in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression", "ClassDeclaration", "ClassExpression"):
+            return
+        if kind == "YieldExpression":
+            argument = item.get("argument")
+            delegated = bool(item.get("delegate"))
+            if delegated:
+                result = {"type": "unknown", "evidence": []}
+            elif argument is None:
+                result = {"type": "undefined", "evidence": []}
+            elif _javascript_direct_literal_evidence(argument, source) is not None:
+                result = _javascript_inferred_type(argument, {}, source)
+            else:
+                bindings = {} if ambiguous else _javascript_local_bindings(history, source)
+                result = _javascript_inferred_type(argument, bindings, source)
+            loc = get_nested(item, "loc", "start", default={})
+            expression_loc = get_nested(argument, "loc", "start", default=loc)
+            evidence.append({
+                "expression": "undefined" if argument is None else slice_source(source, argument),
+                "type": result["type"],
+                "provenance": "delegated_yield" if delegated else (
+                    "bare_yield" if argument is None else (
+                        "direct_literal" if _javascript_direct_literal_evidence(argument, source) else (
+                            "local_assignment" if argument.get("type") == "Identifier" and result["evidence"] else "expression_inference"
+                        )
+                    )
+                ),
+                "role": "yielded_item",
+                "source_location": {"line": loc.get("line"), "column": loc.get("column")},
+                "expression_location": {"line": expression_loc.get("line"), "column": expression_loc.get("column")},
+                "evidence": result["evidence"],
+            })
+            if argument is not None:
+                visit(argument, history, ambiguous)
+            return
+        nested_ambiguous = ambiguous or kind in (
+            "IfStatement", "WhileStatement", "DoWhileStatement", "ForStatement", "ForInStatement",
+            "ForOfStatement", "SwitchStatement", "TryStatement", "CatchClause",
+        )
+        for key, value in item.items():
+            if key not in ("loc", "start", "end"):
+                visit(value, history, nested_ambiguous)
+
+    for index, statement in enumerate(statements):
+        history = statements[:index]
+        ambiguous_history = any(
+            item.get("type") in (
+                "IfStatement", "WhileStatement", "DoWhileStatement", "ForStatement", "ForInStatement",
+                "ForOfStatement", "SwitchStatement", "TryStatement",
+            )
+            for item in history
+        )
+        visit(statement, history, ambiguous_history)
+    evidence.sort(key=lambda item: (item["source_location"]["line"] or 0, item["source_location"]["column"] or 0))
+    return evidence
+
+
+def _javascript_completion_evidence(outcomes: List[tuple], uncertain: bool, func_node: dict,
+                                    fallthrough_type: str, role_name: str):
+    completion = [value for kind, value in outcomes if kind == "return" and value is not None]
+    no_normal = (
+        not completion
+        and not any(kind == "normal" for kind, _ in outcomes)
+        and bool(outcomes)
+        and all(kind == "throw" for kind, _ in outcomes)
+        and not uncertain
+    )
+    end_loc = get_nested(func_node, "loc", "end", default={})
+    for kind, _ in outcomes:
+        if kind == "normal":
+            completion.append({
+                "expression": "implicit fall-through", "type": fallthrough_type,
+                "provenance": "normal_fallthrough", "role": role_name,
+                "source_location": {"line": end_loc.get("line"), "column": end_loc.get("column")},
+            })
+    for item in completion:
+        item["role"] = role_name
+    return completion, uncertain or any(kind == "unknown" for kind, _ in outcomes), no_normal
     return default
 
 
@@ -102,14 +237,16 @@ def _javascript_return_metadata(
         comment_start >= 0 and comment_start == nearest_comment_start
         and not preceding[comment_end + 2:].strip()
     )
+    declared_yield = None
     if comment_is_adjacent:
         comment = preceding[comment_start:comment_end + 2]
-        tag_match = re.search(r"@returns?\s+\{([^}]+)\}", comment)
-        if tag_match:
-            type_expression = tag_match.group(1).strip()
+        tag_matches = list(re.finditer(r"@(returns?|yields?)\s+\{([^}]+)\}", comment))
+        for tag_match in tag_matches:
+            tag_name = tag_match.group(1)
+            type_expression = tag_match.group(2).strip()
             tag_offset = comment_start + tag_match.start()
             tag_prefix = source[:tag_offset]
-            metadata["declared"] = {
+            declaration = {
                 "expression": type_expression,
                 "provenance": "jsdoc",
                 "source_location": {
@@ -117,10 +254,73 @@ def _javascript_return_metadata(
                     "column": len(tag_prefix.rsplit("\n", 1)[-1]),
                 },
             }
+            if tag_name in ("yield", "yields"):
+                declared_yield = declaration
+            else:
+                metadata["declared"] = declaration
 
-    # Later tickets define the awaited and yielded values. Keep documented
-    # evidence, but do not describe an async/generator body value as immediate.
-    if func_node.get("async") or func_node.get("generator"):
+    generator = bool(func_node.get("generator"))
+    if generator:
+        async_generator = bool(func_node.get("async"))
+        function_kind = "async_generator" if async_generator else "generator"
+        yielded_evidence = _javascript_yield_evidence(func_node.get("body", {}), source)
+        yield_declaration = declared_yield
+        completion_declaration = None
+        generic_roles = _javascript_generator_documentation_roles(metadata.get("declared"))
+        yield_declaration = yield_declaration or generic_roles.get("yielded")
+        completion_declaration = generic_roles.get("completion")
+        yielded_role = _javascript_role_record(yielded_evidence, yield_declaration)
+        immediate_type = function_kind
+        immediate_evidence = [{
+            "expression": "async generator object" if async_generator else "generator object",
+            "type": immediate_type,
+            "provenance": "function_syntax",
+            "role": "immediate_result",
+            "source_location": definition,
+        }]
+
+        if async_generator:
+            outcomes, uncertain = _javascript_return_outcomes(
+                func_node.get("body", {}).get("body", []), source
+            )
+            completion_evidence, completion_uncertain, no_normal = _javascript_completion_evidence(
+                outcomes, uncertain or bool(func_node.get("decorators")), func_node, "undefined", "generator_completion"
+            )
+            completion_role = _javascript_role_record(
+                completion_evidence, completion_declaration,
+                unknown_coverage=completion_uncertain,
+                no_normal_return=no_normal,
+            )
+        else:
+            outcomes, uncertain = _javascript_return_outcomes(
+                func_node.get("body", {}).get("body", []), source
+            )
+            completion_evidence, completion_uncertain, no_normal = _javascript_completion_evidence(
+                outcomes, uncertain or bool(func_node.get("decorators")), func_node, "undefined", "generator_completion"
+            )
+            completion_role = _javascript_role_record(
+                completion_evidence, completion_declaration,
+                unknown_coverage=completion_uncertain,
+                no_normal_return=no_normal,
+            )
+        metadata.update({
+            "function_kind": function_kind,
+            "roles": {
+                "immediate": {
+                    "declared": metadata.get("declared"),
+                    "analysis_status": "complete",
+                    "inferred": immediate_evidence,
+                    "inferred_types": [immediate_type],
+                    "observed": [], "observed_types": [],
+                },
+                "yielded": yielded_role,
+                "completion": completion_role,
+            },
+        })
+        return metadata
+
+    # Async function results are added in the async-role ticket.
+    if func_node.get("async"):
         return metadata
 
     body = func_node.get("body", {})

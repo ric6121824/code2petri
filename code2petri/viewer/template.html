@@ -602,6 +602,9 @@
             : 'Return: Unknown — no return metadata is available.';
         }
         if (metadata.analysis_status === 'not_applicable') return 'Return: Not applicable for global scope.';
+        if (metadata.roles && typeof metadata.roles === 'object') {
+          return formatFunctionRoles(metadata, true);
+        }
         const lines = [];
         if (metadata.declared && typeof metadata.declared.expression === 'string') {
           lines.push('Declared: ' + metadata.declared.expression);
@@ -646,6 +649,53 @@
           }
         }
         return lines.join('\n');
+      }
+
+      function formatFunctionRoles(metadata, compact) {
+        const labels = {
+          immediate: metadata.function_kind === 'async_function' ? 'Immediate coroutine' :
+            (metadata.function_kind === 'async_generator' ? 'Immediate async-generator object' : 'Immediate generator object'),
+          awaited: 'Awaited result', yielded: 'Yielded items', completion: 'Completion value'
+        };
+        const lines = [];
+        if (metadata.function_kind) lines.push('Function kind: ' + metadata.function_kind.replace('_', ' '));
+        Object.keys(metadata.roles).forEach(function(roleName) {
+          const role = metadata.roles[roleName];
+          const label = labels[roleName] || roleName;
+          if (!role || typeof role !== 'object') {
+            lines.push(label + ': Unknown — metadata is unavailable.');
+            return;
+          }
+          if (role.analysis_status === 'not_applicable') {
+            lines.push(label + ': Not applicable.');
+            return;
+          }
+          if (role.declared && typeof role.declared.expression === 'string') {
+            lines.push('Declared ' + label.toLowerCase() + ': ' + role.declared.expression);
+          }
+          if (role.analysis_status === 'no_normal_return') {
+            lines.push(label + ': No normal return.');
+          } else if (role.analysis_status === 'complete') {
+            const types = Array.isArray(role.inferred_types) ? role.inferred_types : [];
+            lines.push(label + ': ' + (types.length ? types.join(' | ') : 'Unknown') + ' (inferred)');
+          } else {
+            lines.push(label + ': Unknown — evidence is unavailable or incomplete.');
+            const observed = Array.isArray(role.observed_types) ? role.observed_types : [];
+            if (observed.length) lines.push('Observed types (partial): ' + observed.join(' | '));
+          }
+          (Array.isArray(role.inferred) ? role.inferred : []).forEach(function(item) {
+            const itemLabel = roleName === 'yielded' ? 'Yielded expression' :
+              (roleName === 'completion' ? 'Completion expression' :
+                (roleName === 'awaited' ? 'Returned expression' : 'Generator object'));
+            lines.push(itemLabel + ': ' + (typeof item.expression === 'string' ? item.expression : 'Unknown'));
+            if (item.source_location && item.source_location.line != null) {
+              lines.push((roleName === 'yielded' ? 'Yield site: line ' : 'Return site: line ') + item.source_location.line);
+            }
+            lines.push((roleName === 'yielded' ? 'Inferred type at this yield: ' : 'Inferred type at this return: ') +
+              (item.type === 'unknown' ? 'Unknown — evidence is unavailable or incomplete.' : item.type));
+          });
+        });
+        return compact ? lines.join('\n') : lines.join('\n');
       }
 
       window.code2petriViewer = window.code2petriViewer || {};
@@ -1543,6 +1593,10 @@
           const definition = metadata.definition_location;
           lines.push('Definition: ' + (definition.line == null ? 'Unknown' : definition.line) +
             (definition.column == null ? '' : ':' + definition.column));
+        }
+        if (metadata.roles && typeof metadata.roles === 'object') {
+          lines.push(formatFunctionRoles(metadata, false));
+          return lines.join('\n');
         }
         if (metadata.declared && typeof metadata.declared.expression === 'string') {
           lines.push('Declared return: ' + metadata.declared.expression);

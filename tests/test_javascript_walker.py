@@ -127,6 +127,56 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
                 self.assertEqual(metadata["analysis_status"], "unknown")
                 self.assertEqual([item["type"] for item in metadata["observed"]], ["number"])
 
+    def test_generator_roles_separate_object_yields_and_completion(self):
+        source = (
+            "/** @yields {number} */\n"
+            "function* values() { yield 1; yield 'two'; return true; }"
+        )
+        metadata = self._walk_source_function(source, "values")
+
+        self.assertEqual(metadata["function_kind"], "generator")
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["generator"])
+        self.assertEqual(metadata["roles"]["yielded"]["analysis_status"], "complete")
+        self.assertEqual(metadata["roles"]["yielded"]["inferred_types"], ["number", "string"])
+        self.assertEqual(metadata["roles"]["yielded"]["declared"]["expression"], "number")
+        self.assertEqual(metadata["roles"]["completion"]["inferred_types"], ["boolean"])
+        self.assertEqual(metadata["roles"]["yielded"]["inferred"][0]["role"], "yielded_item")
+
+    def test_async_generator_roles_keep_unknown_yields_and_nested_scope_out(self):
+        source = (
+            "async function* values() {\n"
+            "  yield makeValue();\n"
+            "  function* nested() { yield 1; return 2; }\n"
+            "  return 'done';\n"
+            "}"
+        )
+        metadata = self._walk_source_function(source, "values")
+
+        self.assertEqual(metadata["function_kind"], "async_generator")
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["async_generator"])
+        self.assertEqual(metadata["roles"]["yielded"]["analysis_status"], "unknown")
+        self.assertEqual(metadata["roles"]["yielded"]["inferred"][0]["type"], "unknown")
+        self.assertEqual(metadata["roles"]["completion"]["inferred_types"], ["string"])
+
+    def test_generator_no_normal_completion_is_separate_from_object_creation(self):
+        metadata = self._walk_source_function(
+            "function* values() { throw new Error(); }", "values"
+        )
+        self.assertEqual(metadata["roles"]["immediate"]["analysis_status"], "complete")
+        self.assertEqual(metadata["roles"]["completion"]["analysis_status"], "no_normal_return")
+
+    def test_generator_yield_binding_after_branch_or_loop_does_not_reuse_stale_type(self):
+        for mutation in (
+            "if (flag) { value = 'branch'; }",
+            "for (const item of items) { value = 'loop'; }",
+        ):
+            source = "function* values(flag, items) { let value = 1; " + mutation + " yield value; }"
+            with self.subTest(mutation=mutation):
+                metadata = self._walk_source_function(source, "values")
+                yielded = metadata["roles"]["yielded"]
+                self.assertEqual(yielded["analysis_status"], "unknown")
+                self.assertEqual(yielded["observed_types"], [])
+
     def test_walk_function_returns_walk_result_for_other_fixtures(self):
         call_path = os.path.join(
             os.path.dirname(__file__),

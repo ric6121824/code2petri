@@ -273,8 +273,75 @@ def _extract_python_return_metadata(
     if is_global:
         return metadata
 
-    # Async and generator return roles are introduced by the later role-specific tickets.
-    if isinstance(node, ast.AsyncFunctionDef) or _function_has_yield(node):
+    has_yield = _function_has_yield(node)
+    if has_yield:
+        async_generator = isinstance(node, ast.AsyncFunctionDef)
+        generator_kind = "async_generator" if async_generator else "generator"
+        annotation_roles = _python_annotation_role_declarations(node, source_text)
+        immediate_type = generator_kind
+        immediate_evidence = [{
+            "expression": "async generator object" if async_generator else "generator object",
+            "type": immediate_type,
+            "provenance": "function_syntax",
+            "role": "immediate_result",
+            "source_location": {"line": line, "column": column},
+        }]
+        yielded_evidence = _python_yield_evidence(node, source_text)
+        yielded_role = _python_role_record(yielded_evidence, annotation_roles.get("yielded"))
+
+        if async_generator:
+            completion_role = {
+                "declared": annotation_roles.get("completion"),
+                "analysis_status": "not_applicable",
+                "inferred": [], "inferred_types": [], "observed": [], "observed_types": [],
+            }
+        else:
+            outcomes, uncertain = _python_return_outcomes(node, source_text)
+            uncertain = uncertain or bool(getattr(node, "decorator_list", []))
+            completion_evidence = [
+                evidence for kind, evidence in outcomes
+                if kind == "return" and evidence is not None
+            ]
+            no_normal_return = (
+                not completion_evidence
+                and not any(kind == "normal" for kind, _ in outcomes)
+                and bool(outcomes)
+                and all(kind == "raise" for kind, _ in outcomes)
+                and not uncertain
+            )
+            for kind, _ in outcomes:
+                if kind == "normal":
+                    completion_evidence.append({
+                        "expression": "implicit fall-through", "type": "NoneType",
+                        "provenance": "normal_fallthrough", "role": "generator_completion",
+                        "source_location": {"line": getattr(node, "end_lineno", line), "column": None},
+                    })
+            for evidence in completion_evidence:
+                evidence["role"] = "generator_completion"
+            completion_role = _python_role_record(
+                completion_evidence,
+                annotation_roles.get("completion"),
+                unknown_coverage=uncertain or any(kind == "unknown" for kind, _ in outcomes),
+                no_normal_return=no_normal_return,
+            )
+        metadata.update({
+            "function_kind": generator_kind,
+            "roles": {
+                "immediate": {
+                    "declared": metadata["declared"],
+                    "analysis_status": "complete",
+                    "inferred": immediate_evidence,
+                    "inferred_types": [immediate_type],
+                    "observed": [], "observed_types": [],
+                },
+                "yielded": yielded_role,
+                "completion": completion_role,
+            },
+        })
+        return metadata
+
+    # Async function results are added in the async-role ticket.
+    if isinstance(node, ast.AsyncFunctionDef):
         return metadata
 
     outcomes, uncertain_coverage = _python_return_outcomes(node, source_text)
@@ -317,6 +384,132 @@ def _unique_return_types(evidence: List[Dict[str, Any]]) -> List[str]:
         if isinstance(value, str) and value != "unknown" and value not in result:
             result.append(value)
     return result
+
+
+def _python_annotation_role_declarations(node: ast.AST, source_text: Optional[str]) -> Dict[str, Dict[str, Any]]:
+    """Return contained-type declarations only for recognized iterator wrappers."""
+    annotation = getattr(node, "returns", None)
+    if not isinstance(annotation, ast.Subscript):
+        return {}
+    wrapper = annotation.value
+    wrapper_name = wrapper.id if isinstance(wrapper, ast.Name) else (
+        wrapper.attr if isinstance(wrapper, ast.Attribute) else ""
+    )
+    arguments = list(annotation.slice.elts) if isinstance(annotation.slice, ast.Tuple) else [annotation.slice]
+    indexes: Dict[str, int] = {}
+    if wrapper_name in {"Iterator", "Iterable", "AsyncIterator", "AsyncIterable"}:
+        indexes["yielded"] = 0
+    elif wrapper_name == "Generator" and len(arguments) == 3:
+        indexes.update(yielded=0, completion=2)
+    elif wrapper_name == "AsyncGenerator" and len(arguments) == 2:
+        indexes["yielded"] = 0
+    result = {}
+    for role, index in indexes.items():
+        argument = arguments[index]
+        expression = _source_text_for(argument, source_text)
+        if expression is not None:
+            result[role] = {
+                "expression": expression,
+                "provenance": "annotation",
+                "source_location": {
+                    "line": getattr(argument, "lineno", getattr(annotation, "lineno", None)),
+                    "column": getattr(argument, "col_offset", getattr(annotation, "col_offset", None)),
+                },
+            }
+    return result
+
+
+def _python_yield_evidence(node: ast.AST, source_text: Optional[str]) -> List[Dict[str, Any]]:
+    statements = list(getattr(node, "body", []))
+    evidence: List[Dict[str, Any]] = []
+
+    class YieldCollector(ast.NodeVisitor):
+        def __init__(self, history: List[ast.stmt], ambiguous: bool):
+            self.history = history
+            self.ambiguous = ambiguous
+
+        def visit_FunctionDef(self, nested: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, nested: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_ClassDef(self, nested: ast.ClassDef) -> None:
+            return
+
+        def visit_Lambda(self, nested: ast.Lambda) -> None:
+            return
+
+        def _record(self, yield_node: ast.AST, expression_node: Optional[ast.AST], delegated: bool = False) -> None:
+            expression = "None" if expression_node is None else (
+                _source_text_for(expression_node, source_text) or "unknown expression"
+            )
+            if delegated:
+                inferred = {"type": "unknown", "evidence": []}
+            elif expression_node is None:
+                inferred = {"type": "NoneType", "evidence": []}
+            elif _direct_literal_type(expression_node) is not None:
+                inferred = _python_inferred_type(expression_node, {})
+            else:
+                bindings = {} if self.ambiguous else _python_local_bindings(self.history, source_text)
+                inferred = _python_inferred_type(expression_node, bindings)
+            provenance = "delegated_yield" if delegated else (
+                "bare_yield" if expression_node is None else (
+                    "direct_literal" if _direct_literal_type(expression_node) is not None else (
+                        "local_assignment" if isinstance(expression_node, ast.Name) and inferred["evidence"]
+                        else "expression_inference"
+                    )
+                )
+            )
+            evidence.append({
+                "expression": expression,
+                "type": inferred["type"],
+                "provenance": provenance,
+                "role": "yielded_item",
+                "source_location": {
+                    "line": getattr(yield_node, "lineno", None),
+                    "column": getattr(yield_node, "col_offset", None),
+                },
+                "expression_location": {
+                    "line": getattr(expression_node, "lineno", getattr(yield_node, "lineno", None)),
+                    "column": getattr(expression_node, "col_offset", getattr(yield_node, "col_offset", None)),
+                },
+                "evidence": inferred["evidence"],
+            })
+
+        def visit_Yield(self, yield_node: ast.Yield) -> None:
+            self._record(yield_node, yield_node.value)
+            self.generic_visit(yield_node.value) if yield_node.value is not None else None
+
+        def visit_YieldFrom(self, yield_node: ast.YieldFrom) -> None:
+            self._record(yield_node, yield_node.value, delegated=True)
+            self.generic_visit(yield_node.value)
+
+    for index, statement in enumerate(statements):
+        direct_history = statements[:index]
+        ambiguous = isinstance(statement, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith))
+        ambiguous = ambiguous or any(
+            isinstance(previous, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try, ast.With, ast.AsyncWith))
+            for previous in direct_history
+        )
+        YieldCollector(direct_history, ambiguous).visit(statement)
+    evidence.sort(key=lambda item: (item["source_location"]["line"] or 0, item["source_location"]["column"] or 0))
+    return evidence
+
+
+def _python_role_record(evidence: List[Dict[str, Any]], declared: Optional[Dict[str, Any]] = None,
+                        unknown_coverage: bool = False, no_normal_return: bool = False) -> Dict[str, Any]:
+    known = [item for item in evidence if item.get("type") != "unknown"]
+    complete = not unknown_coverage and len(known) == len(evidence)
+    status = "no_normal_return" if no_normal_return else ("complete" if complete else "unknown")
+    return {
+        "declared": declared,
+        "analysis_status": status,
+        "inferred": evidence,
+        "inferred_types": _unique_return_types(evidence) if status == "complete" else [],
+        "observed": [] if status == "complete" else known,
+        "observed_types": [] if status == "complete" else _unique_return_types(known),
+    }
 
 
 def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):

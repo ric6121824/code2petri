@@ -187,6 +187,72 @@ class TestPythonWalkerSequential(unittest.TestCase):
                     self.assertEqual(metadata["analysis_status"], "unknown")
                     self.assertEqual(metadata["inferred"], [])
 
+    def test_generator_roles_separate_object_yields_completion_and_annotation(self):
+        node = ast.parse(
+            "from typing import Generator\n"
+            "def values() -> Generator[int, None, str]:\n"
+            "    yield 1\n"
+            "    yield 'two'\n"
+            "    return 'done'\n"
+        ).body[1]
+        metadata = walker.walk_function(node, "values", "/src/generator.py").return_metadata
+
+        self.assertEqual(metadata["function_kind"], "generator")
+        self.assertEqual(metadata["declared"]["expression"], "Generator[int, None, str]")
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["generator"])
+        self.assertEqual(metadata["roles"]["yielded"]["analysis_status"], "complete")
+        self.assertEqual(metadata["roles"]["yielded"]["inferred_types"], ["int", "str"])
+        self.assertEqual(metadata["roles"]["yielded"]["declared"]["expression"], "int")
+        self.assertEqual(metadata["roles"]["completion"]["inferred_types"], ["str"])
+        self.assertEqual(metadata["roles"]["completion"]["declared"]["expression"], "str")
+        self.assertEqual(metadata["roles"]["yielded"]["inferred"][0]["role"], "yielded_item")
+
+    def test_async_generator_roles_have_unknown_yields_and_inapplicable_completion(self):
+        node = ast.parse(
+            "async def values():\n"
+            "    yield make_value()\n"
+            "    async def nested():\n"
+            "        yield 1\n"
+            "        return 2\n"
+            "    return\n"
+        ).body[0]
+        metadata = walker.walk_function(node, "values", "/src/generator.py").return_metadata
+
+        self.assertEqual(metadata["function_kind"], "async_generator")
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["async_generator"])
+        self.assertEqual(metadata["roles"]["yielded"]["analysis_status"], "unknown")
+        self.assertEqual(metadata["roles"]["yielded"]["observed_types"], [])
+        self.assertEqual(metadata["roles"]["yielded"]["inferred"][0]["type"], "unknown")
+        self.assertEqual(metadata["roles"]["completion"]["analysis_status"], "not_applicable")
+
+    def test_generator_nested_yields_are_excluded_and_delegation_is_unknown(self):
+        node = ast.parse(
+            "def values():\n"
+            "    yield 1\n"
+            "    def nested():\n"
+            "        yield 'wrong scope'\n"
+            "    yield from source\n"
+            "    return\n"
+        ).body[0]
+        metadata = walker.walk_function(node, "values", "/src/generator.py").return_metadata
+
+        self.assertEqual(metadata["roles"]["yielded"]["analysis_status"], "unknown")
+        self.assertEqual(metadata["roles"]["yielded"]["observed_types"], ["int"])
+        self.assertEqual([item["type"] for item in metadata["roles"]["yielded"]["inferred"]], ["int", "unknown"])
+        self.assertEqual(metadata["roles"]["completion"]["inferred_types"], ["NoneType"])
+
+    def test_generator_yield_binding_after_branch_or_loop_does_not_reuse_stale_type(self):
+        for mutation in (
+            "if flag:\n        value = 'branch'",
+            "for item in items:\n        value = 'loop'",
+        ):
+            source = "def values(flag, items):\n    value = 1\n    " + mutation + "\n    yield value\n"
+            with self.subTest(mutation=mutation):
+                metadata = walker.walk_function(ast.parse(source).body[0], "values", "/src/generator.py").return_metadata
+                yielded = metadata["roles"]["yielded"]
+                self.assertEqual(yielded["analysis_status"], "unknown")
+                self.assertEqual(yielded["observed_types"], [])
+
     def test_supported_return_paths_report_complete_unions_and_partial_observations(self):
         cases = [
             ("def answer(flag):\n    if flag:\n        return 1\n    else:\n        return 'x'\n", "complete", ["int", "str"], []),

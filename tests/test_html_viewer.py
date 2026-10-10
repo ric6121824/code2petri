@@ -5532,6 +5532,50 @@ console.log('PASS');
         self.assertIn("Declared:", html_content)
         self.assertIn("Observed return expression: ') + evidence.expression", html_content)
 
+    def test_python_generator_roles_are_embedded_and_cloned_with_the_folded_net(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "generator.py")
+            html_path = os.path.join(temp_dir, "generator.html")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write(
+                    "from typing import Generator\n"
+                    "def values() -> Generator[int, None, str]:\n"
+                    "    yield 1\n"
+                    "    return 'done'\n"
+                )
+            result = code2petri(source_path, output_file=html_path, target_function="values", fold=True)
+            with open(html_path, encoding="utf-8") as html_file:
+                embedded = _extract_embedded_data(html_file.read())
+
+        metadata = embedded["document"]["return_metadata"]
+        self.assertEqual(metadata["function_kind"], "generator")
+        self.assertEqual(metadata["roles"]["yielded"]["inferred_types"], ["int"])
+        self.assertEqual(metadata["roles"]["completion"]["inferred_types"], ["str"])
+        self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
+        self.assertEqual(result.initial_net.clone().to_dict()["return_metadata"], metadata)
+
+    def test_javascript_generator_roles_are_embedded_and_saved_with_the_folded_net(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "generator.js")
+            html_path = os.path.join(temp_dir, "generator.html")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write(
+                    "/** @yields {string} */\n"
+                    "function* values() { yield 'item'; return 1; }\n"
+                )
+            result = code2petri(source_path, output_file=html_path, target_function="values", fold=True)
+            with open(html_path, encoding="utf-8") as html_file:
+                html_content = html_file.read()
+            embedded = _extract_embedded_data(html_content)
+
+        metadata = embedded["document"]["return_metadata"]
+        self.assertEqual(metadata["function_kind"], "generator")
+        self.assertEqual(metadata["roles"]["yielded"]["inferred_types"], ["string"])
+        self.assertEqual(metadata["roles"]["completion"]["inferred_types"], ["number"])
+        self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
+        self.assertIn("Yielded items", html_content)
+        self.assertIn("Completion value", html_content)
+
     def test_python_partial_return_coverage_is_embedded_with_separate_observations(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             source_path = os.path.join(temp_dir, "partial.py")
@@ -6250,10 +6294,37 @@ const globalMetadata = Object.assign({}, metadata, {
 if (parseFoldStateSnapshot(snapshot(globalMetadata)).document.returnMetadata.analysis_status !== 'not_applicable') {
   throw new Error('Global Scope metadata did not round-trip');
 }
+const generatorMetadata = Object.assign({}, metadata, {
+  function_kind: 'async_generator',
+  roles: {
+    immediate: { declared: null, analysis_status: 'complete', inferred: [], inferred_types: ['async_generator'], observed: [], observed_types: [] },
+    yielded: { declared: null, analysis_status: 'unknown', inferred: [], inferred_types: [], observed: [], observed_types: ['number'] },
+    completion: { declared: null, analysis_status: 'not_applicable', inferred: [], inferred_types: [], observed: [], observed_types: [] }
+  }
+});
+const restoredGenerator = parseFoldStateSnapshot(snapshot(generatorMetadata)).document.returnMetadata;
+if (restoredGenerator.roles.completion.analysis_status !== 'not_applicable' ||
+    restoredGenerator.roles.yielded.observed_types[0] !== 'number') {
+  throw new Error('Generator role metadata did not round-trip');
+}
+const asyncMetadata = Object.assign({}, metadata, {
+  function_kind: 'async_function',
+  roles: {
+    immediate: { declared: null, analysis_status: 'complete', inferred: [], inferred_types: ['Promise'], observed: [], observed_types: [] },
+    awaited: { declared: null, analysis_status: 'complete', inferred: [], inferred_types: ['number'], observed: [], observed_types: [] }
+  }
+});
+if (parseFoldStateSnapshot(snapshot(asyncMetadata)).document.returnMetadata.roles.awaited.inferred_types[0] !== 'number') {
+  throw new Error('Async role metadata did not round-trip');
+}
 let rejected = false;
 try { parseFoldStateSnapshot(snapshot(Object.assign({}, metadata, { inferred: 'bad' }))); }
 catch (error) { rejected = error.message.includes('Invalid Fold State Snapshot'); }
 if (!rejected) throw new Error('Malformed return metadata was accepted');
+rejected = false;
+try { parseFoldStateSnapshot(snapshot(Object.assign({}, generatorMetadata, { roles: { yielded: {} } }))); }
+catch (error) { rejected = error.message.includes('Invalid Fold State Snapshot'); }
+if (!rejected) throw new Error('Malformed generator role metadata was accepted');
 console.log('PASS');
 """;
         proc = _run_node_script(script)
