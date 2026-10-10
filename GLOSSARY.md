@@ -37,7 +37,7 @@ A structured metadata record capturing the callee name, resolved owner, line num
 _Avoid_: Call transition info, call point
 
 **Function Return Metadata**:
-Information attached to a function's identity that describes its call result and, where applicable, awaited or yielded values for inspection without affecting Petri net control flow or Structural Folding.
+Information attached to a function's identity that describes its call result and, where applicable, awaited, yielded, or completion values for inspection without affecting Petri net control flow or Structural Folding.
 _Avoid_: Return-place type, typed control-flow token
 
 **Resolution Context**:

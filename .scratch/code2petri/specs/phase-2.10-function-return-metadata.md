@@ -1,74 +1,153 @@
 # Phase 2.10: Function Return Metadata
 
-Status: needs-info
+Status: resolved
 
-This document records the ongoing grill-with-docs design discussion. It is not yet a ready-for-agent implementation specification.
+## Problem Statement
 
-## Confirmed Scope
+Users can inspect and fold a function's control flow, but cannot see what data type the function returns. The existing viewer does not expose Python return annotations, JavaScript return documentation, or types that are apparent from simple statements within the function. A returned local name is especially unhelpful without its type: when a function assigns the integer literal 1 to x and returns x, users want to see expression evidence such as x: int.
 
-- Show each function's return contract as information in the viewer. Return metadata does not change Petri net execution semantics, Structural Folding, or Structuredness Metric.
-- Support both currently implemented source languages: Python and JavaScript.
-- Extract declarations/documentation and perform bounded inference within the function. Use Unknown when evidence is incomplete; project-wide inference is outside this phase.
-- Display return metadata in the root-function info panel and the selected-function sidebar. Canvas return-type badges are outside the initial scope.
-- Describe what calling the function returns, and separately describe awaited or yielded values when known for async functions and generators.
-- Use the domain term [Function Return Metadata](../../../GLOSSARY.md).
-- Keep the separately reported called-function boundary-folding defect in [Phase 2.8 Ticket 53](../issues/53-called-function-fold-boundary-trigger.md); it is not a prerequisite for extracting return metadata.
+Function calls, async functions, and generators also produce different kinds of results. Combining a generator object, its yielded items, and its completion value into one return type would mislead users. Likewise, missing evidence must not be mistaken for a function returning None or undefined, and a declared type must not be presented as a verified runtime fact.
 
-## Current Codebase Facts
+Users need this information to remain associated with the correct function through Inline Expansion, Structural Folding, renaming, and saved-session restoration. The feature must preserve the current control-flow Petri net semantics and the compact, offline Save Session / Open Session workflow.
 
-- Python function discovery retains return annotations in the AST, but the walker does not extract them into the net or viewer.
-- JavaScript parsing retains source text and AST function nodes but does not currently collect JSDoc comments. Declared/documented JavaScript return information needs explicit collection and association with the correct function.
-- There is no common function-return metadata record. Root document identity, call-site resolution, and compound identity travel through different paths.
-- Compound boundaries may belong to the caller after Inline Expansion; function metadata cannot rely exclusively on a callee entrance or exit place remaining visible.
-- Snapshot element data can preserve ordinary metadata, but root document capture/restoration selects fields explicitly. Root return metadata therefore needs an intentional Save/Open path.
-- Neither walker has a reusable expression-type or ordered local-assignment analysis. Existing Variable Bindings resolve constructor-owned calls across the file; they are not return-type evidence for a function-local analyzer.
-- The original function AST is the appropriate extraction source. Nested definitions must not contribute their returns/yields to their enclosing function, and expression-bodied JavaScript arrows must be treated as implicit returns.
-- Generated net topology cannot prove normal-return coverage: [standard loop wiring](../../../code2petri/control_flow_builder.py) creates an exit regardless of a literal condition, and returns route through active finally blocks. Unsupported control-flow cases require conservative evidence handling rather than interpreting graph reachability as a type proof.
-- Python async return annotations describe the awaited result, while generator annotations can separately describe yielded and completion values. Preserve annotation text without evaluation; source declarations and syntax-derived kinds do not prove a dynamically decorated callable's runtime contract. See [Python generator/coroutine annotations](https://docs.python.org/3/library/typing.html#annotating-generators-and-coroutines).
-- JavaScript JSDoc collection must associate comments with the owning declaration, including variable-assigned arrows and methods. Existing function-node start offsets alone are insufficient; `@returns`/`@return` and `@yields`/`@yield` are separate evidence. See [Acorn comment collection](https://github.com/acornjs/acorn/blob/master/acorn/README.md), [JSDoc returns](https://jsdoc.app/tags-returns), and [JSDoc yields](https://jsdoc.app/tags-yields).
-- Browser PNML export currently writes weights and opaque-node properties; carrying return metadata in that format would be additional scope. Existing parser limitations, such as BigInt AST transport, are not implicitly expanded by this phase.
+## Solution
 
-## Open Design Decisions
+Add Function Return Metadata for Python and JavaScript. Extract written annotations/documentation and perform bounded inference from each function's own source. Show a concise summary in the root-function info panel and more detailed evidence in the docked sidebar for selected function compounds, including Collapsed Compound State, and unambiguously resolved Call Sites before expansion.
 
-1. The exact bounded-inference boundary: literals/simple expressions versus tracking local assignments, and treatment of unresolved variables/calls.
-2. Multiple return paths, implicit fall-through, exceptions/non-returning paths, and presentation of known evidence alongside Unknown.
-3. Conflicting declared/inferred evidence and provenance; the feature's boundary with type checking.
-4. Generator completion values in addition to call-result and yielded-value information; combined async/generator cases.
-5. Function identity and ownership across unresolved/resolved calls, compounds, arbitrary folded components, expansion, and Component-Local Unfold.
-6. Metadata persistence, older snapshots, export formats, and supported unknown/not-applicable states.
-7. Acceptance fixtures, final shared-understanding confirmation, and implementation tickets after the design is confirmed.
+Show declared/documented and inferred information separately. Include the returned expression and its inferred type where available, scoped to that return statement rather than a permanent type of the variable. Straightforward local assignments can yield the compact display x: int (inferred); branch-dependent or otherwise unresolved values yield x: unknown (inference unavailable). Store expression, type, state, and evidence separately; compact notation is display text only. An incomplete overall result remains unknown while separately showing any known observed types. Distinguish actual NoneType/undefined results, unknown results, No normal return, and Not applicable. A written source type named unknown remains declared evidence, separate from the viewer's unknown analysis status.
 
-## Existing Constraints
+Separate the immediate call result, awaited result, yielded items, and generator completion value where the language and function kind support them. Preserve this metadata in generated HTML, net JSON, and Fold State Snapshots. Reopened sessions remain inspectable without the source files, and existing snapshots without metadata remain readable.
 
-Respect the existing lightweight analysis boundary in [ADR 0001](../../../docs/adr/0001-constructor-only-variable-resolution.md), [boundary place unification](../../../docs/adr/0002-boundary-place-unification.md), the [structural reduction semantics](../../../docs/adr/0003-adopt-prom-local-reduction-algorithm.md), and the [docked inspector](../../../docs/adr/0004-docked-sidebar-instead-of-floating-popover.md). Broader inference would require an explicit scope decision rather than silently extending constructor-only variable resolution.
+## User Stories
 
-## Discussion Record
+1. As an analyst, I want to see a root function's return information, so that I can understand its result while inspecting its control flow.
+2. As an analyst, I want to inspect a called function's return information in the sidebar, so that I can understand its contract without leaving the net.
+3. As an analyst, I want return information for Python functions, so that I can inspect the language's supported source constructs consistently.
+4. As an analyst, I want return information for JavaScript functions, so that I can use the same inspection workflow across both supported languages.
+5. As an analyst, I want Python return annotations preserved as written, so that aliases and custom type names retain their intended meaning.
+6. As an analyst, I want JavaScript return and yield documentation associated with the correct function, so that nearby comments do not describe the wrong result.
+7. As an analyst, I want types inferred from primitive literals, so that unannotated functions still provide useful result information.
+8. As an analyst, I want simple local assignments reflected in return inference, so that returning an integer-valued x can show x: int.
+9. As an analyst, I want returned-expression evidence alongside the function summary, so that I can understand the basis of an inferred type.
+10. As an analyst, I want supported reassignments considered in source order, so that an earlier value does not incorrectly determine a later return type.
+11. As an analyst, I want branch-dependent local values shown as unknown, so that unsupported environment merging does not invent certainty.
+12. As an analyst, I want inferred container outer types, so that I can distinguish a list or Array without requiring element-type analysis.
+13. As an analyst, I want richer declared container types retained independently, so that the initial inference limit does not discard written information.
+14. As an analyst, I want multiple supported direct return paths summarized, so that I can see the possible known normal result types.
+15. As an analyst, I want an incomplete overall result marked unknown, so that a few known returns are not mistaken for complete coverage.
+16. As an analyst, I want known observed types retained beside an unknown result, so that partial evidence remains useful.
+17. As an analyst, I want declared and inferred evidence displayed separately, so that I can assess differences without an unsupported type-error verdict.
+18. As an analyst, I want bare returns and supported normal fall-through represented accurately, so that NoneType and undefined are distinguished from missing evidence.
+19. As an analyst, I want clearly raise-only or throw-only bodies labeled No normal return, so that absence of a normal result is explicit.
+20. As an analyst, I want unsupported control flow to remain conservative, so that loops or finally behavior do not produce misleading result claims.
+21. As an analyst, I want nested functions' returns excluded from their enclosing function, so that each summary describes its own function.
+22. As an analyst, I want expression-bodied JavaScript arrows recognized as returning their expression, so that shorthand syntax retains its result information.
+23. As an analyst, I want an async function's immediate call result separated from its awaited result, so that I do not confuse a wrapper object with the eventual value.
+24. As an analyst, I want a generator object separated from its yielded items, so that I can distinguish calling a generator from iterating it.
+25. As an analyst, I want a generator's completion value shown separately, so that a final return is not confused with a yielded item.
+26. As an analyst, I want unsupported result roles marked Not applicable, so that the viewer does not invent values a language cannot provide.
+27. As an analyst, I want Synthetic Wrappers for Global Scope marked Not applicable, so that synthetic AST details do not imply a function contract.
+28. As an analyst, I want expanded and collapsed function compounds to expose the same metadata, so that folding does not hide a function's result information.
+29. As an analyst, I want unambiguously resolved call transitions to expose callee metadata before expansion, so that I can inspect a result without expanding the function.
+30. As an analyst, I want unresolved or ambiguous calls to avoid borrowed metadata, so that a same-named function cannot supply a false contract.
+31. As an analyst, I want repeated calls and same-named definitions to retain their correct associations, so that inspection remains reliable across files and nested definitions.
+32. As an analyst, I want Component Node Renaming and Component-Local Unfold to preserve function identity, so that editing a label does not change the return information.
+33. As an analyst, I want generated HTML and net JSON to retain return metadata, so that downstream inspection does not depend on the source remaining available.
+34. As an analyst, I want saved sessions to restore return information, so that I can resume inspection and folding offline.
+35. As an analyst, I want older sessions without return metadata to remain readable, so that this feature does not invalidate existing work.
+36. As an analyst, I want opening another session to replace the root return information correctly, so that the panel describes the active document.
+37. As an analyst, I want return metadata to remain compact through nested folds, so that richer inspection does not undo the save optimizations.
+38. As an analyst, I want topology, fold eligibility, weights, and Structuredness Metric unchanged, so that adding return information preserves my control-flow analysis.
+39. As an analyst, I want metadata inspection to leave selection, folding actions, and the viewport usable, so that I can continue the existing viewer workflow.
+40. As an analyst, I want malformed session metadata rejected before replacing my active session, so that opening an invalid file does not lose my current work.
 
-### 2026-10-10 — Round 1
+## Implementation Decisions
 
-The user selected return-contract inspection as the goal (rather than data-flow tracing or type-error detection) and confirmed Python and JavaScript coverage. Extraction/inference scope and presentation remain open.
+1. **Treat return types as inspection metadata.** Function Return Metadata does not add places, transitions, arcs, typed tokens, firing conditions, or data-flow edges. It does not change Faithful Translation, reduction rules or ordering, Transition Weight, Component Penalty, Fold Config, or Structuredness Metric. The scope is return-contract inspection, rather than type checking or data-flow tracing.
 
-### 2026-10-10 — Round 2
+2. **Extract from the original function source.** Extend the Python and JavaScript walkers to collect metadata before Inline Expansion or Structural Folding. Use the original AST and available source text/locations; do not infer from transition labels, synthetic return wiring, boundary places, or net reachability. A function's evidence excludes nested functions, classes, lambdas, and callbacks. Discoverable nested functions may receive their own records. Expression-bodied JavaScript arrows contribute implicit return evidence before any Synthetic Wrapper changes their representation.
 
-The user selected Q3 B, Q4 A, and Q5 A:
+3. **Keep local inference separate from call resolution.** Use a small function-local analyzer with ordered bindings and a conservative source-completion summary. Existing constructor-based Variable Bindings remain dedicated to cross-file Call Site resolution. Do not reuse them as return-type evidence or expand the resolver into project-wide semantic analysis. Never execute source, evaluate annotations, or call user-defined code to obtain types.
 
-- Declarations/documentation plus simple within-function inference, with Unknown when evidence is incomplete.
-- Root-function info panel and selected-function sidebar, without initial canvas badges.
-- Call-result information with separate awaited/yielded information when known.
+4. **Use an explicit bounded inference contract.** The initial supported evidence and fallback behavior are:
 
-The next frontier concerns the precise inference boundary, incomplete or conflicting evidence, generator completion values, which selected function representations expose metadata, and export/persistence scope. No runtime implementation is authorized by this ongoing design interview.
+   | Source evidence | Required behavior |
+   | --- | --- |
+   | Primitive literals | Infer Python bool, int, float, complex, str, bytes, and NoneType; infer JavaScript number, string, boolean, and null. Keep NoneType distinct from unknown and null distinct from undefined. |
+   | Explicit containers | Infer Python list, dict, tuple, and set, and JavaScript Array and object, including empty containers and containers with unknown elements. Do not infer element types or field shapes. |
+   | String interpolation | Infer str for Python f-strings and string for JavaScript template literals. |
+   | Simple operators | Support an explicit static whitelist of numeric unary signs, logical negation, numeric addition/subtraction/multiplication/division, and string addition where known primitive operands make the result type unambiguous under the language's rules. Unsupported, overloaded, or coercion-dependent combinations remain unknown. |
+   | Straight-line local bindings | Track direct assignments, reassignments, and copies from already known local names in source order. An unsupported assigned value invalidates the binding rather than retaining its previous type. |
+   | Branch-dependent or loop-dependent bindings | Display a returned/yielded name as unknown when its value depends on assignments across branches or loops. Do not merge local environments into type unions. Unsupported constructs that may change a binding must not leave a stale known type. |
+   | Returned/yielded expressions | Retain the expression, independently inferred type or unknown state, and available source location. Use the expression evidence to explain the result, rather than creating a general variable inspector. |
+   | Calls, parameters, property access, indexing, delegated yields, and unsupported expressions | Keep the value type unknown. Written return declarations remain available independently. No callee-based, alias-based, or project-wide inference is implied. |
 
-### 2026-10-10 — Round 3 frontier (awaiting answers)
+5. **Separate evidence from coverage.** For each applicable result role, retain written evidence, an inferred summary with an explicit state, and individual source observations. A small supported summary of sequential blocks and if/else paths may combine multiple direct known returns into a deterministic, deduplicated union. This does not authorize merging branch-dependent local bindings. An unknown expression or incomplete relevant control-flow coverage makes the overall inference unknown, while retaining independently known observed types. A partial list must never be labeled as the complete return type. Returns in unreachable statements after a supported terminating statement do not add a normal result.
 
-These are proposals, not confirmed decisions:
+6. **Represent normal completion conservatively.** A bare return contributes NoneType in Python and undefined in JavaScript. Add these types for fall-through only when the supported source summary identifies a possible normal fall-through path; an omitted else can therefore contribute an implicit result. Show No normal return only when all completion paths in that supported summary terminate through explicit raise/throw and no normal return or fall-through remains. Unsupported loops, try/finally, wrappers, or ambiguous control flow must not manufacture a complete result or a No normal return claim. This is a bounded source summary, not general termination or runtime exception analysis.
 
-| Question | Decision | Recommendation |
-| --- | --- | --- |
-| Q6 | Infer only direct literals/simple expressions, also straightforward local assignments, or branch-dependent local bindings? | Also straightforward local assignments; unresolved expressions/reassignments and ambiguous branches degrade to Unknown without extending cross-file call resolution. |
-| Q7 | When the overall inferred result is Unknown, also show known observed types or show Unknown alone? | Show Unknown plus observed types, explicitly distinguished from a complete result. |
-| Q8 | When declarations and body evidence differ, show them separately or use declarations alone whenever present? | Show separate declared/documented and inferred evidence; no type-error verdict or runtime guarantee. |
-| Q9 | For generators, expose only call result/yielded values, or also a separate completion value when known? | Include completion separately, without treating yielded items as the function's final return value. |
-| Q10 | Show metadata only for root/functions compounds, also on resolved call transitions, or on arbitrary folded components listing represented functions? | Root, function compounds including collapsed compounds, and unambiguously resolved call transitions. |
-| Q11 | Preserve metadata in generated HTML, net JSON, and Fold State Snapshots, or additionally extend PNML/DOT exports? | HTML/net JSON/snapshots initially; reopening older snapshots without metadata must remain valid and display Unknown or Not applicable as appropriate. |
+7. **Preserve written types and provenance.** Python annotations and JavaScript JSDoc are declared/documented evidence; inferred results are separate evidence. Retain written type expressions, aliases, custom names, and generics without evaluation or project-wide expansion. Show differing evidence separately without assignability checks, error verdicts, or inferred confidence percentages. Collect JSDoc comments and associate them with the owning function declaration, variable-assigned arrow/function expression, or class method. Handle return/returns and yield/yields tag aliases; unrelated adjacent comments and nested declarations must not be misassigned. Split recognized wrapper annotations into result roles only where their syntax identifies those roles; otherwise preserve the written declaration without inventing missing role types.
 
-After these answers, define the exact supported-expression/control-flow list, language-specific display examples, identity/persistence acceptance fixtures, and any remaining decisions before requesting final shared-understanding confirmation.
+8. **Separate function kinds and result roles.** Syntax determines the function kind; it does not prove that decorators or runtime wrappers preserve that contract.
+
+   | Function kind | Information to expose |
+   | --- | --- |
+   | Ordinary function | Normal call-result declaration/documentation, inferred type/state, and return-expression evidence. |
+   | Async function | Immediate coroutine/Promise wrapper separately from the awaited result. Python async return annotations describe the awaited result. Body-return inference belongs to the awaited result, rather than the wrapper. Preserve JavaScript documented promise information as written. |
+   | Generator | Immediate generator object, yielded-item types, and final completion-value types as distinct roles. Body returns contribute completion evidence; yields contribute item evidence. Each role can independently be known or unknown. |
+   | Async generator | Immediate async-generator object and yielded items separately, with completion information only where the language supports a completion value. Python async-generator completion-value type is Not applicable. |
+   | Global Scope | Not applicable, even when a Synthetic Wrapper contains an artificial return annotation. |
+
+   Inferring an outer coroutine/generator object does not require knowing its contained values. No normal return in an async or generator body applies to the corresponding awaited/completion role; it must not imply that creating the coroutine/generator object itself has no result. Keep unknown, No normal return, and Not applicable distinct from actual type names. Ordinary functions lacking metadata in old documents show unknown.
+
+9. **Attach one record to a stable function identity.** Distinguish source file and definition identity, including qualified name and definition location where needed. Display labels, compound IDs, and a bare function/method name are insufficient. Root identity, resolved Call Sites, callee nets, and Compound Containers must reference the correct function record through generation, cloning, and Inline Expansion. Repeated calls may share the record. Same-named definitions must not cross-contaminate information. Use the existing resolution result when unambiguous; otherwise leave the call's return information unknown rather than guessing or changing resolution behavior.
+
+10. **Carry metadata through existing public boundaries.** Introduce optional function-owned metadata and associations in the walker result/net model and their serialization contracts. Propagate them intentionally through composition, cloning, generated HTML data, net JSON, the viewer's net-to-element adapter, and active document context. Fields explicitly selected by these adapters must retain the associations. Store source expression text, inferred type information, analysis state, provenance/evidence, result role, and available location separately. Never serialize them solely as a compact expression-and-type string, split such text on a colon, or use it as a function/node identity or lookup key. Prefer one function record with lightweight references over full record copies on every Call Site or nested restoration level. Exact internal field names and factoring remain implementation choices.
+
+11. **Inspect through the existing panels.** The root info panel presents a concise return summary. The docked sidebar presents the selected function's identity, declared/documented evidence, inferred state/type, known observations when incomplete, and expression evidence. Support expanded and collapsed function compounds and unambiguously resolved call transitions before expansion. Use language-appropriate names and readable role labels. Prefer explicit fields such as Returned expression, Inferred type at this return, and Evidence. An inferred expression type describes the value at that source site, rather than a permanent type of the variable; the same principle applies to yielded-expression evidence. For a known Python integer local return, a compact summary may show Return: int (inferred) and x: int (inferred); a branch-dependent local may show x: unknown (inference unavailable). Compact notation is display shorthand with context, not a variable-renaming rule or a claim that the source contains an annotation. Keep a written type named unknown under declared/documented evidence, distinct from the lowercase unknown analysis status and its explanatory context. Exact labels and layout are delegated to the implementing agent, while these semantic distinctions are required. Present absent or ambiguous call information honestly. Treat source and documentation text as text, without executing or interpreting it as HTML.
+
+12. **Preserve function associations through folding.** Structural Folding does not recompute or union function return contracts. Function compounds in Collapsed Compound State retain their identity and remain inspectable even when Inline Expansion has unified their boundary places with the caller. Component Node Renaming changes the label rather than the metadata identity. Component-Local Unfold restores the corresponding associations. An arbitrary component spanning several functions does not acquire a fabricated single contract; listing its constituent functions is deferred.
+
+13. **Retain self-contained offline persistence.** Generated HTML embeds the new viewer behavior and metadata; net JSON and Fold State Snapshots retain function records, associations, evidence, and root document context. Save/open restores the information without source access or fresh inference. Opening another session, resetting, and playback must use that session's function records and context. Preserve fold history/counters, names, compound state, weights/SM, configuration, positions, zoom, and pan. Snapshot capture remains detached and must not mutate the active session.
+
+14. **Add metadata compatibly and compactly.** Keep the existing version-1 Fold State Snapshot container and make the new metadata optional. Accept older valid snapshots without it; absence means unknown for an ordinary function and Not applicable for Global Scope. Validate recognized metadata structure and associations before replacing active state, and reject malformed additions through the existing safe-open error path. Do not fabricate evidence from labels when records are missing. Preserve Phase 2.9's canonical restoration fields, compact serialization, and download lifecycle. Do not embed full ASTs/source files or duplicate the full function registry at each nested fold; retain only necessary expression/declaration evidence and references.
+
+## Testing Decisions
+
+- **Primary seam: the existing source-to-viewer/session workflow.** Extend the current compiler/generated-HTML integration and production Node/headless Cytoscape viewer harness. Start with Python or JavaScript source, generate the actual HTML payload, inspect the root/function sidebar, perform supported folds and renaming, save through Save Session, open through the snapshot parser/restoration flow, inspect again, continue folding, and use Component-Local Unfold. This is the highest existing seam spanning the walkers, net model/composition, viewer adapter, inspector, and persistence. Prefer parameterized fixtures through this workflow to creating separate tests of every private analyzer or adapter.
+
+- **Assert observable behavior.** Good tests establish correct function associations, displayed type/state/provenance, expression evidence, complete versus partial results, and resumed behavior. Assert separately identifiable expression/type/evidence fields or contextual compact text such as x: int (inferred) and x: unknown (inference unavailable), and the presence of distinct result roles, without fixing incidental panel markup or exact union ordering. Include a written source type named unknown and source expressions containing colons to demonstrate that analysis states and stored structure do not depend on parsing display text. Existing identifiers remain unchanged. Do not test private helper names, AST traversal order, copied implementation logic, or source-text patterns as proof of behavior. Use small, self-contained fixtures rather than user-specific Drive paths.
+
+- **Source evidence matrix for both languages.** Cover primitive literals, empty and populated containers with unknown elements, string interpolation, the supported operator whitelist, straight-line assignments/copies/reassignments, unsupported reassignment invalidation, unknown call/parameter/property/index values, and branch/loop-dependent locals. Include written custom/generic types alongside outer-only container inference, and declarations that differ from inferred values. For JavaScript, exercise function declarations, assigned arrows/function expressions, methods, expression arrows, JSDoc tag aliases, and unrelated nearby comments through generation.
+
+- **Coverage and scope ownership.** Cover multiple direct known returns, known plus unknown observations, omitted else and normal fall-through, bare return, explicit raise/throw-only bodies, and unsupported loop/try-finally cases. Assert that unknown coverage is not labeled complete or implicitly NoneType/undefined. A nested function/generator's returns/yields must not alter its enclosing function's result or kind. Verify statements after a supported terminating statement do not add normal result types.
+
+- **Function-kind roles.** Cover ordinary, async, generator, and async-generator source fixtures. Use examples whose yielded and completion values differ, and async examples whose wrapper and awaited result differ. Assert each role's independent state, correct annotation provenance, unsupported roles as Not applicable, and the distinction between immediate object creation and No normal return in the body. Global Scope must remain Not applicable; an old ordinary-function document without metadata must remain unknown.
+
+- **Identity, expansion, and inspector continuity.** Cover repeated calls, same-named definitions in different files, qualified/nested identities, and ambiguous/unresolved calls. Inspect a resolved Call Site before expansion and its function compound afterward, including collapsed state, renaming, and unfolding. Verify that caller-owned boundary places do not determine callee metadata and that no neighboring function's contract is borrowed. Use functions foldable under the existing engine, without depending on the separate shared-boundary folding fix.
+
+- **Serialization and compatibility through real consumers.** Assert metadata in generated HTML and public net JSON, including cloned/composite nets. Extend the existing fold-save-open-continue-unfold round trip with metadata on the root and called functions. Open a snapshot for a different root, then exercise reset/playback to establish correct active-document context. Include valid version-1 snapshots without metadata and malformed metadata additions; failures must leave the active graph and context intact. If a focused supporting test is necessary, use the existing public walker or model-serialization contract rather than exposing a new private test seam.
+
+- **Metadata-only and compactness regressions.** Compare equivalent source/fold fixtures with metadata present and absent for identical graph identities/endpoints, initial markings, fold eligibility/results, Transition Weight, Component Penalty, and Structuredness Metric. Retain existing reduction and PNML/DOT export behavior. Extend the existing 12-level nested-fold save/unfold fixture with representative function metadata; retain the below-100-KiB compact snapshot bound and prove lossless restoration. Multiple references and nested folds must not recursively multiply function records. Do not add machine-dependent timing limits or rerun browser download performance work without a relevant change.
+
+Phase acceptance requires correct conservative evidence in both languages, inspection across the selected function representations, lossless compatible persistence, and unchanged control-flow/folding semantics. Extraction-only tests or a successful save without restored inspection do not establish completion.
+
+## Out of Scope
+
+- Typed tokens, Coloured Petri Nets, data-flow tracing, return-value propagation through calls, or type-error/assignability diagnostics.
+- Project-wide inference, full control-flow/termination analysis, environment merging across branches/loops, arbitrary expression evaluation, and resolution of parameter/property/index/delegated-yield types.
+- Inferred container element types, field shapes, or richer generic inference. Written declarations remain visible.
+- Evaluating annotations, resolving external aliases/custom types, executing source, analyzing dynamic decorators/wrappers, or expanding currently unsupported parser syntax.
+- New source languages, a general variable inspector, canvas return-type badges, or constituent-function lists for arbitrary folded components.
+- Return metadata in PNML or DOT; PNML import and general JSON net import are separate work.
+- A standalone app, an external shared viewer bundle, a server, compression, a new snapshot format/version, or a redesign of folding/save/open interactions.
+- Changes to reduction semantics or the called-function shared-boundary folding defect tracked separately in Ticket 53.
+- Automatically upgrading previously generated HTML. Users receive the feature by generating HTML with the updated implementation; compatible old sessions can then be opened in that viewer.
+
+## Further Notes
+
+- The agreed scope and seven-ticket split were approved on 2026-10-10, with explicit display/storage, declaration/inference, return-site, and unknown-state distinctions. The published slices are [54 — Python return inspection](../issues/54-python-function-return-metadata.md), [55 — JavaScript return inspection](../issues/55-javascript-function-return-metadata.md), [56 — Returned locals and expressions](../issues/56-infer-returned-locals-and-expressions.md), [57 — Coverage and normal completion](../issues/57-return-coverage-and-normal-completion.md), [58 — Async results](../issues/58-async-call-and-awaited-results.md), [59 — Generator results](../issues/59-generator-yield-and-completion-results.md), and [60 — Called-function inspection through folding/restoration](../issues/60-called-function-return-inspection.md). Richer container inference and broader presentation may be revisited later; they are not prerequisites for this phase.
+- Use [Function Return Metadata and the existing domain vocabulary](../../../GLOSSARY.md). Preserve [constructor-only cross-file resolution](../../../docs/adr/0001-constructor-only-variable-resolution.md), [boundary place unification](../../../docs/adr/0002-boundary-place-unification.md), [the adopted reduction semantics](../../../docs/adr/0003-adopt-prom-local-reduction-algorithm.md), and [the docked sidebar](../../../docs/adr/0004-docked-sidebar-instead-of-floating-popover.md). Function-local return evidence does not reopen those decisions.
+- [Phase 2.8](./phase-2.8-viewer-interactive-enhancements.md) supplies the selected-function inspector and session workflow; [Phase 2.9](./phase-2.9-session-snapshot-optimization.md) supplies compact, reliable snapshots. Extend those contracts rather than introducing another persistence mechanism.
+- [Ticket 53: Complete called-function folding at shared boundaries](../issues/53-called-function-fold-boundary-trigger.md) addresses the separately reported folding behavior. Phase 2.10 neither depends on that fix for metadata extraction nor absorbs it.
+- Language references supporting role and extraction decisions: [Python generator/coroutine annotations](https://docs.python.org/3/library/typing.html#annotating-generators-and-coroutines), [Python return semantics](https://docs.python.org/3/reference/simple_stmts.html#the-return-statement), [Acorn comment collection](https://github.com/acornjs/acorn/blob/master/acorn/README.md), [JSDoc return documentation](https://jsdoc.app/tags-returns), and [JSDoc yield documentation](https://jsdoc.app/tags-yields).

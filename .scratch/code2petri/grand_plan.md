@@ -418,9 +418,21 @@ Optimize Save Session while retaining the self-contained offline HTML viewer and
 
 Implementation tickets: [51 — Compact, lossless Fold State Snapshot saves](./issues/51-safari-large-session-download.md) and [52 — Reliable large Save Session downloads across browsers](./issues/52-reliable-save-session-downloads.md). Ticket 52 is blocked by Ticket 51 for end-to-end acceptance with the optimized snapshot.
 
-## Phase 2.10 — Function Return Metadata (Design in Progress)
+## Phase 2.10 — Function Return Metadata (Implemented)
 
-Show function return-contract information for both Python and JavaScript while preserving the control-flow net's reduction and metric semantics. The selected scope combines declarations/documentation with bounded inference within each function, shows Unknown for incomplete evidence, and displays results in the root-function info panel and selected-function sidebar. Async/generator metadata distinguishes the call result from awaited/yielded values when known. The [Phase 2.10 design discussion](./specs/phase-2.10-function-return-metadata.md) records remaining decisions about inference limits, evidence, generator completion, identity, and persistence. Implementation tickets follow the completed design.
+Show function return-contract information for both Python and JavaScript while preserving the control-flow net's reduction and metric semantics. The scope combines declarations/documentation with bounded inference, including simple returned local variables and contextual display evidence such as `x: int (inferred)`. It infers container outer types, displays branch-dependent locals as `x: unknown (inference unavailable)`, and distinguishes clearly non-returning bodies from unknown results. Expression, type, analysis state, and provenance are stored separately; notation does not rename variables or define identifiers. Inference describes the expression at its return site, and a written source type named `unknown` remains separate from the analysis status. Declared/inferred evidence appears separately in root info, selected-function compounds, and resolved call transitions; incomplete evidence retains known observations. Async/generator metadata separates the call result, awaited/yielded values, and generator completion. HTML, net JSON, and saved sessions preserve the metadata. The [Phase 2.10 specification](./specs/phase-2.10-function-return-metadata.md) and seven approved implementation tickets are resolved, with acceptance through source generation, viewer inspection, folding, and session restoration.
+
+| Ticket | Delivers | Blocked by |
+| --- | --- | --- |
+| [54 — Inspect Python Function Return Metadata](./issues/54-python-function-return-metadata.md) | Python root inspection, literal/declaration evidence, and compatible save/open | None |
+| [55 — Inspect JavaScript Function Return Metadata](./issues/55-javascript-function-return-metadata.md) | JavaScript root inspection, JSDoc ownership, and arrow returns | 54 |
+| [56 — Infer returned locals and simple expressions](./issues/56-infer-returned-locals-and-expressions.md) | Local assignments, bounded operators, and container outer types in both languages | 55 |
+| [57 — Explain incomplete results and normal completion](./issues/57-return-coverage-and-normal-completion.md) | Complete versus partial results, supported fall-through, and No normal return | 56 |
+| [58 — Separate async call and awaited results](./issues/58-async-call-and-awaited-results.md) | Coroutine/Promise wrappers and awaited values with independent evidence | 57 |
+| [59 — Separate generator objects, yields, and completion](./issues/59-generator-yield-and-completion-results.md) | Generator/async-generator roles and language-specific completion behavior | 57 |
+| [60 — Inspect called functions through folding and restoration](./issues/60-called-function-return-inspection.md) | Resolved Call Site/compound inspection, stable identity, and compact nested restoration | 55 |
+
+Tickets 54–60 are implemented, with their dependencies and acceptance criteria recorded in the linked issue files. The completed scope was reviewed against the Phase 2.10 specification.
 
 The separately reported called-function boundary-folding problem is tracked under Phase 2.8 in [Ticket 53](./issues/53-called-function-fold-boundary-trigger.md).
 
@@ -861,7 +873,7 @@ graph TD
 | Phase 2.7 — Live Fold Reduction & Viewer | 16 tickets (Tickets 29–44) | 12 review rounds | ✅ Complete |
 | Phase 2.8 — Viewer Interactive Enhancements | 7 tickets (Tickets 45–50, 53) | 5 review rounds | ✅ Complete |
 | Phase 2.9 — Compact and Reliable Fold State Snapshots | 2 tickets (Tickets 51–52) | TBD | Planned Next |
-| Phase 2.10 — Function Return Metadata | TBD | TBD | Design in Progress |
+| Phase 2.10 — Function Return Metadata | 7 tickets (Tickets 54–60) | 1 review round | ✅ Implemented |
 | Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned |
 | Phase 4 — C++ + Unreal | 5–6 tickets | 3–4 sessions | Planned |
 | Phase 5 — Project-scale | 4–5 tickets | 2–3 sessions | Planned |
