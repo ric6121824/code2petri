@@ -106,6 +106,7 @@ def _splice_callee_net(
     used_prefixes: Set[str],
     callee_name: Optional[str] = None,
     callee_file: Optional[str] = None,
+    function_ref: Optional[str] = None,
 ) -> None:
     """Splices a callee Petri net into caller_net replacing call_transition."""
     preset_places = [
@@ -119,6 +120,8 @@ def _splice_callee_net(
 
     if not preset_places or not postset_places:
         return
+
+    caller_net.function_metadata_registry.update(callee_net.function_metadata_registry)
 
     # Note on spec deviation: The spec requested wiring directly to callee source and sink places.
     # To preserve the bipartite property of Petri nets (preventing illegal Place -> Place arcs),
@@ -166,6 +169,7 @@ def _splice_callee_net(
         function_name=fn_name,
         file=callee_file or "",
         parent=caller_parent,
+        function_ref=function_ref,
     )
 
     # Re-parent and register any nested compounds from callee_net
@@ -186,6 +190,7 @@ def _splice_callee_net(
             file=c.file or "",
             parent=new_parent,
             node_ids=nested_node_ids,
+            function_ref=c.function_ref,
         )
 
     cloned_transitions: Dict[str, Transition] = {}
@@ -294,6 +299,9 @@ def _inline_expand_recursive(
 ) -> PetriNet:
     """Internal recursive worker for inline expansion."""
     composite_net = net.clone()
+    # Keep the same record association for API callers that expand directly,
+    # as well as for the CLI path that resolved transitions before expansion.
+    symbol_table.resolve_call_sites(composite_net, call_sites)
     if caller_function is None and call_sites:
         caller_function = next((cs.caller_function for cs in call_sites if cs.caller_function), None)
 
@@ -380,6 +388,7 @@ def _inline_expand_recursive(
             used_prefixes=used_prefixes,
             callee_name=callee_fn_name,
             callee_file=callee_file_path,
+            function_ref=(trans.metadata or {}).get("function_ref"),
         )
 
     return composite_net

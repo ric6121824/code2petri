@@ -1,4 +1,5 @@
 import logging
+import json
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
@@ -35,6 +36,7 @@ class Symbol:
     class_name: Optional[str] = None
     line_number: int = 0
     ast_node: Optional[Any] = None
+    return_metadata: Optional[Dict[str, Any]] = None
 
     @property
     def is_method(self) -> bool:
@@ -83,6 +85,8 @@ class SymbolTable:
             class_name=symbol.class_name,
             line_number=symbol.line_number,
             ast_node=symbol.ast_node,
+            return_metadata=(json.loads(json.dumps(symbol.return_metadata))
+                             if symbol.return_metadata is not None else None),
         )
         self._symbols.append(sym)
         self._symbols_by_language.setdefault(norm_lang, []).append(sym)
@@ -144,6 +148,10 @@ class SymbolTable:
                 class_name=class_name,
                 line_number=lineno,
                 ast_node=node,
+                return_metadata=(
+                    walker.walk_function(node, name, filepath=norm_path).return_metadata
+                    if node is not None and hasattr(walker, "walk_function") else None
+                ),
             )
             self.add_symbol(symbol)
 
@@ -322,6 +330,16 @@ class SymbolTable:
                     "resolved_to": sym.name,
                     "target_file": sym.filepath,
                 }
+                if sym.return_metadata is not None:
+                    metadata = json.loads(json.dumps(sym.return_metadata))
+                    definition = metadata.get("definition_location") or {}
+                    line = definition.get("line") or sym.line_number
+                    column = definition.get("column") or 0
+                    record_ref = (
+                        f"{sym.filepath}::{metadata.get('qualified_name', sym.name)}@{line}:{column}"
+                    )
+                    net.function_metadata_registry.setdefault(record_ref, metadata)
+                    res_meta["function_ref"] = record_ref
             else:
                 t.resolution = CallResolution(resolved=False)
                 res_meta = {
