@@ -59,8 +59,9 @@ The project is actively being developed to analyze large-scale game engine codeb
 - **Phase 2 (Completed)**: Cross-File Reference Tracing (resolving function and method calls across multiple files with constructor variable bindings, symbol indexing, and PNML/DOT/JSON serialization).
 - **Phase 2.5 (Completed)**: Structural Component Folding & Structuredness Metric (SM) computation per Lassen & van der Aalst (2008), inline expansion engine (`inline.py`), and standalone Cytoscape.js HTML viewer.
 - **Phase 2.6 (Completed)**: ProM reduction algorithm port (Single-Place Contraction, Atomic Choice Collapse, SESE reachability), nested call resolution, interactive client-side compound subnet expansion, and canvas viewport controls (middle/right drag pan, scroll wheel zoom, node dragging).
-- **Active Next**: Multi-level deep "Expand All" / "Collapse All" viewer control (Ticket 28).
-- **Phase 3 & 4 (Planned)**: **C# / Unity** and **C++ / Unreal Engine** support, mapping engine lifecycles (`Update`, `Tick`, `BeginPlay`) into implicit overarching Petri nets.
+- **Phase 2.7 (Completed)**: Live Fold Reduction, component-local unfold, component renaming, client-side PNML export, boot-to-composite startup, viewport preservation, and extended zoom-out.
+- **Phase 2.8 (Completed)**: Docked inspector sidebar, Batch Place Fold, Fold Entire Function, versioned session snapshot save/open, and root-function identity in the viewer.
+- **Active Next — Phase 3**: **C# / Unity** support, including Unity lifecycle modeling. Phase 4 (**C++ / Unreal Engine**) remains planned.
 
 ## License
 

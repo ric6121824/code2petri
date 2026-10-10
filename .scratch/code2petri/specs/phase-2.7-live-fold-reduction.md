@@ -59,9 +59,14 @@ When an entire inline expansion (a compound node) is fully folded from the insid
 
 ## Out of Scope
 
-- **Lasso/Multi-Selection Drag Folding:** While freeform lasso selection was discussed, interactive reduction is bound to place-centric triggers and transition HUD popover actions.
+- **Freeform Lasso Folding:** Freeform lasso selection remains out of scope. Phase 2.8 later added box selection and Batch Place Fold; component inspection and actions moved from the floating HUD to the docked sidebar.
 - **Round-trip execution:** The exported PNML is one-way. We are not building a feature to re-import a half-folded PNML file back into the `code2petri` CLI.
 
 ## Further Notes
 
 - The decision tree that formed this spec is documented in the project logs, confirming the architectural shift from Python-led reduction to Browser-led interactive reduction.
+
+## Subsequent Updates
+
+- Phase 2.8's final sidebar and selection decisions are recorded in [ADR 0004](../../../docs/adr/0004-docked-sidebar-instead-of-floating-popover.md) and the [Phase 2.8 spec](./phase-2.8-viewer-interactive-enhancements.md).
+- Viewer viewport preservation and extended zoom-out were delivered in [Tickets 43](../issues/43-viewer-camera-viewport-preservation.md) and [44](../issues/44-viewer-extended-zoom-out-range.md).

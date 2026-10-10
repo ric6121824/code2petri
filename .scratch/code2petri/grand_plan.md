@@ -1,6 +1,6 @@
 # code2petri — Grand Roadmap to Unity/Unreal Analysis
 
-### Current State (Tickets 01–42 Complete — Phases 1, 2, 2.5, 2.6 & 2.7 Delivered)
+### Current State (Tickets 01–50 Complete — Phases 1, 2, 2.5, 2.6, 2.7 & 2.8 Delivered)
 
 We have a fully working, multi-language `code2petri` CLI and Python package that:
 - Parses **Python (`.py`)** and **JavaScript (`.js`)** source files, targeting individual functions, methods, callbacks, or global scripts.
@@ -32,12 +32,18 @@ We have a fully working, multi-language `code2petri` CLI and Python package that
   - Implements the complete suite of ProM & Lassen reduction rules directly in JavaScript: Place-Centric Live Fold (Single-Place Contraction for Sequence, Choice Reduction with branch symmetry multiplier, While Loop), plus macro SESE contractions (Marked Graph, State Machine, Well-Structured SESE, and Unstructured Knot isolation).
   - Automates **Collapsed Compound State**: when all internal nodes of an inlined function are reduced to a single component, the container automatically transitions into a compact tile labeled `function_name (c_XX)`.
   - Implements non-linear **Component-Local Unfold**: right-clicking any opaque transition or collapsed compound instantly restores the exact subgraph and boundary arcs consumed without disturbing folds elsewhere.
-  - Features **Floating HUD Popover**: left-clicking a transition or component opens a metadata HUD displaying tau weight, component type, source line number range, and live SM score, with editable semantic renaming (`renameNode`).
+  - Initially featured a **Floating HUD Popover** for component inspection and renaming; Phase 2.8 replaces it with a docked inspector sidebar while retaining component renaming.
   - Implements **Client-Side Export**: downloads the current on-screen canvas state as standard ISO/IEC 15909-2 compliant PNML without server roundtrips, ready for direct analysis in tools like ProM.
+  - Preserves zoom and pan through folds and unfolds, keeps the folded component at the selected place's screen position, and supports zooming out to 0.1% for very large nets (Tickets 43–44).
   - Modularized frontend architecture: extracted `code2petri/viewer/engine/reduction_engine.js` (2,500 lines) and `pnml_exporter.js` (236 lines), eliminating ~3,000 lines of inlined JS from `template.html`.
+- Delivers **Interactive Viewer Enhancements** (Phase 2.8):
+  - Replaces the floating inspector with a docked right sidebar that pushes the canvas and provides a stable home for inspection and reduction actions ([ADR 0004](../../docs/adr/0004-docked-sidebar-instead-of-floating-popover.md)).
+  - Supports box selection and one-pass Batch Place Fold, plus repeated Fold Entire Function passes scoped to a selected compound.
+  - Saves and opens versioned Fold State Snapshots offline, restoring graph and restoration records, engine state, document identity, layout, and viewport.
+  - Displays the active root function alongside the source file; the label continues to describe the root document when a callee is inspected.
 - Outputs PNML (ISO/IEC 15909 compliant XML), Graphviz DOT, JSON, PNG, SVG, and interactive self-contained offline HTML.
-- Fully verified with **over 400 unit, integration, and cross-file validation tests** (including 104 headless viewer DOM and prototype tests), with multi-file validation on real-world targets ([GameOfLife_Simulator](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator): `app.js` and `webgl-engine.js`).
-- Concluded code reviews through Ticket 42 with **0 Hard Violations**, **0 Missing Requirements**, and **0 Logic Defects**.
+- Automated coverage includes **over 400 unit, integration, and cross-file validation tests**, including headless viewer DOM, prototype, and session-resumption coverage; the real-world multi-file target is [GameOfLife_Simulator](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator).
+- Completed the Phase 2.8 review through Round 3 with no blocking standards or specification findings; Round 3 recorded one optional low-priority result-shape cleanup suggestion.
 
 ## End Goal
 
@@ -65,8 +71,11 @@ graph LR
     P2 --> P25["Phase 2.5 ✅\nFolding Engine,\nSM Metric & Viewer"]
     P25 --> P26["Phase 2.6 ✅\nProM Port & Interactive\nCompound Expansion"]
     P26 --> P27["Phase 2.7 ✅\nLive Fold Reduction,\nLocal Unfold & Export"]
-    P27 --> P3["Phase 3\nC# Walker +\nUnity Lifecycle"]
-    P27 --> P4["Phase 4\nC++ Walker +\nUnreal Lifecycle"]
+    P27 --> P28["Phase 2.8 ✅\nViewer Interaction &\nSession Continuity"]
+    P28 --> P29["Phase 2.9\nCompact & Reliable\nSession Saves"]
+    P29 --> P210["Phase 2.10\nFunction Return\nMetadata"]
+    P210 --> P3["Phase 3\nC# Walker +\nUnity Lifecycle"]
+    P210 --> P4["Phase 4\nC++ Walker +\nUnreal Lifecycle"]
     P3 --> P5["Phase 5\nProject-Scale\nComposite Nets"]
     P4 --> P5
     P5 --> P6["Phase 6 — Future\nColoured Petri Nets\nGame State Modeling"]
@@ -75,6 +84,7 @@ graph LR
     style P25 fill:#2d6a2d,color:#fff
     style P26 fill:#2d6a2d,color:#fff
     style P27 fill:#2d6a2d,color:#fff
+    style P28 fill:#2d6a2d,color:#fff
     style P6 stroke-dasharray: 5 5
 ```
 
@@ -307,7 +317,7 @@ While Phase 2.5 established baseline folding, maximal pattern matching failed on
 
 ---
 
-## Phase 2.7 — Live Fold Reduction & Interactive Viewer Architecture (Completed — Tickets 29–42)
+## Phase 2.7 — Live Fold Reduction & Interactive Viewer Architecture (Completed — Tickets 29–44)
 
 ### Motivation & Problem Statement
 
@@ -323,7 +333,7 @@ Phase 2.7 fundamentally rearchitected the viewer around **Live Fold Reduction**,
 > **Resolution of Ticket 28 (Deep Expand All):**  
 > Ticket 28 originally planned an "Expand All" toolbar button. In Phase 2.7, this was superseded by an architecturally superior design: **Boot-to-Composite on Load** (Tickets 29–30). The backend pre-assembles the complete composite net, embedding all nested inlined functions inside visual compound nodes from the start. Users get the full transitive call hierarchy on first open without intermediate layout thrashing.
 
-### Key Architectural Achievements (Tickets 29–42)
+### Key Architectural Achievements (Tickets 29–44)
 
 #### 1. Backend Composite Assembly & Parent Hierarchy (Tickets 29–30)
 - [`code2petri/inline.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/inline.py) pre-assembles the entire composite net with recursive inlining, embedding parent pointers (`parent`) and function ownership (`enclosing_function`).
@@ -354,18 +364,63 @@ Phase 2.7 fundamentally rearchitected the viewer around **Live Fold Reduction**,
 #### 6. Frontend Engine Modularization & Code Reviews
 - Extracted [`reduction_engine.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/reduction_engine.js) (2,500 lines) and [`pnml_exporter.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/pnml_exporter.js) (236 lines) into `code2petri/viewer/engine/`.
 - Reduced [`template.html`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/template.html) from ~4,500 lines to ~1,800 lines, eliminating the monolithic Divergent Change smell.
-- Concluded 3 rounds of comprehensive two-axis code reviews with **0 Hard Standards Violations**, **0 Missing Requirements**, and **0 Logic Defects**.
+- Concluded three rounds of comprehensive two-axis reviews for Tickets 29–42, followed by four focused rounds for viewport Tickets 43–44.
+
+#### 7. Viewport Preservation & Extended Zoom-Out (Tickets 43–44)
+- Shared viewport helpers preserve zoom and pan during Live Fold Reduction and Component-Local Unfold, placing the new component at the selected place's screen position without a `cy.fit()` reset.
+- The viewer lowers the minimum zoom to 0.1%, allowing the initial fit and scroll wheel to show very large composite nets.
 
 ### Deliverables Summary
 
 - [`code2petri/viewer/engine/reduction_engine.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/reduction_engine.js) — Full JavaScript live fold reduction engine
 - [`code2petri/viewer/engine/pnml_exporter.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/pnml_exporter.js) — Client-side PNML XML serializer & export utility
-- [`code2petri/viewer/template.html`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/template.html) — Streamlined HTML viewer with HUD popover, composite boot, and live fold triggers
+- [`code2petri/viewer/template.html`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/template.html) — HTML viewer with docked inspector, composite boot, live fold controls, and session save/open
 - [`code2petri/model.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/model.py) — `CompoundContainer` domain model
 - [`code2petri/inline.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/inline.py) — Composite net assembly with parent hierarchy injection
-- Test suites: **104 passing tests** in [`tests/test_html_viewer.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_html_viewer.py) and [`tests/test_live_fold_prototype.py`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/tests/test_live_fold_prototype.py); over 400 total tests passing repository-wide.
+- Viewer DOM and prototype test suites cover composite boot, live folding, export, and viewport behavior; over 400 tests pass repository-wide.
 
 ---
+
+## Phase 2.8 — Viewer Interactive Enhancements (Completed — Tickets 45–50)
+
+Phase 2.8 extends the self-contained HTML viewer with persistent controls for inspection, bulk reduction, and session continuity. It keeps the generated offline viewer architecture and does not add PNML import or a separate application.
+
+### 1. Docked Inspector Sidebar (Ticket 45)
+- Replaced the floating inspector with a right-side panel that pushes the canvas instead of covering it.
+- The sidebar hosts node metadata, component renaming, and selection-scoped actions. See [ADR 0004: Docked Sidebar instead of Floating Popover](../../docs/adr/0004-docked-sidebar-instead-of-floating-popover.md).
+
+### 2. Batch and Compound-Scoped Folding (Tickets 46–47)
+- Box selection supports a one-pass Batch Place Fold, evaluating selected places in graph order and skipping places that are no longer eligible.
+- Fold Entire Function repeatedly runs place-targeted reductions within the selected compound until it collapses or a complete pass makes no progress. It preserves unrelated folds, caller/sibling nodes, and the viewport.
+
+### 3. Fold State Snapshot Save and Open (Tickets 48–49)
+- Save Session downloads a versioned JSON Fold State Snapshot without bundling another copy of the viewer.
+- Open Session validates the snapshot before replacing active state, then restores graph topology, nested unfold records, engine/document context, names, layout, and viewport. The workflow remains offline and accepts saved session snapshots only.
+
+### 4. Root Function Identity (Ticket 50)
+- The info panel displays the root function name with the source path, including qualified methods and Global Scope. Inspecting an inlined callee does not change the root identity.
+
+### Delivery and Review
+- All six implementation issues are resolved: [45](./issues/45-viewer-docked-sidebar.md), [46](./issues/46-batch-place-fold-selection.md), [47](./issues/47-fold-entire-function-compound.md), [48](./issues/48-save-session.md), [49](./issues/49-smart-open-session-pnml.md), and [50](./issues/50-info-panel-function-name.md).
+- The master specification is [Phase 2.8: Viewer Interactive Enhancements](./specs/phase-2.8-viewer-interactive-enhancements.md).
+- Three review rounds found no remaining blocking standards or specification issues. The optional Round 3 maintainability note is recorded in [the Round 3 report](./reviews/phase-2.8-tickets-45-50-round-03.md).
+
+## Phase 2.9 — Compact and Reliable Fold State Snapshots (Planned)
+
+Optimize Save Session while retaining the self-contained offline HTML viewer and version-1 JSON snapshots. The [Phase 2.9 specification](./specs/phase-2.9-session-snapshot-optimization.md) is `ready-for-agent`.
+
+- Store nested restoration records once under their canonical field before cloning or serialization can duplicate them; keep legacy snapshots readable and preserve complete Component-Local Unfold history.
+- Encode compact JSON with fewer temporary copies, preserving the existing engine/document context, layout, viewport, and non-mutating save behavior.
+- Validate a bounded Blob URL lifecycle for reliable Save Session downloads in Safari, Chrome, and Firefox.
+- Extend save/open round-trip coverage with nested-history size regressions and completed-file browser checks. Workers and compression remain follow-up options after profiling.
+
+Implementation tickets: [51 — Compact, lossless Fold State Snapshot saves](./issues/51-safari-large-session-download.md) and [52 — Reliable large Save Session downloads across browsers](./issues/52-reliable-save-session-downloads.md). Ticket 52 is blocked by Ticket 51 for end-to-end acceptance with the optimized snapshot.
+
+## Phase 2.10 — Function Return Metadata (Design in Progress)
+
+Show function return-contract information for both Python and JavaScript while preserving the control-flow net's reduction and metric semantics. The selected scope combines declarations/documentation with bounded inference within each function, shows Unknown for incomplete evidence, and displays results in the root-function info panel and selected-function sidebar. Async/generator metadata distinguishes the call result from awaited/yielded values when known. The [Phase 2.10 design discussion](./specs/phase-2.10-function-return-metadata.md) records remaining decisions about inference limits, evidence, generator completion, identity, and persistence. Implementation tickets follow the completed design.
+
+The separately reported called-function boundary-folding problem is tracked under Phase 2.8 in [Ticket 53](./issues/53-called-function-fold-boundary-trigger.md).
 
 ## Phase 3 — C# Support & Unity Lifecycle Modeling
 
@@ -786,7 +841,7 @@ graph TD
 
 > [!NOTE]
 > **Q4 (Phase 2.5C / Phase 2.7): Client-side selective folding & local unfold.**
-> **Resolved & Delivered in Phase 2.7 (Tickets 29–42):** Full client-side Live Fold Reduction engine implemented in JavaScript with Place-Centric folding, SESE macro contractions, non-linear Component-Local Unfold, HUD node renaming, and client-side PNML export.
+> **Resolved & Delivered in Phase 2.7 (Tickets 29–44):** Full client-side Live Fold Reduction engine implemented in JavaScript with Place-Centric folding, SESE macro contractions, non-linear Component-Local Unfold, component renaming, client-side PNML export, and viewport preservation.
 
 > [!NOTE]
 > **Q5 (Phase 5B): How to define "system" boundaries for system-level nets.**
@@ -801,10 +856,15 @@ graph TD
 | Phase 2 — Cross-file tracing | 5 tickets (Tickets 11–15) | 6 review rounds | ✅ Complete |
 | Phase 2.5 — Structural folding & viewer | 6 tickets (Tickets 16–21) | 3 review rounds | ✅ Complete |
 | Phase 2.6 — ProM port & compound expansion | 6 tickets (Tickets 22–27) | 4 review rounds | ✅ Complete |
-| Phase 2.7 — Live Fold Reduction & Viewer | 14 tickets (Tickets 29–42) | 12 review rounds | ✅ Complete |
-| Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned Next |
+| Phase 2.7 — Live Fold Reduction & Viewer | 16 tickets (Tickets 29–44) | 12 review rounds | ✅ Complete |
+| Phase 2.8 — Viewer Interactive Enhancements | 6 tickets (Tickets 45–50) | 3 review rounds | ✅ Complete |
+| Phase 2.9 — Compact and Reliable Fold State Snapshots | 2 tickets (Tickets 51–52) | TBD | Planned Next |
+| Phase 2.10 — Function Return Metadata | TBD | TBD | Design in Progress |
+| Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned |
 | Phase 4 — C++ + Unreal | 5–6 tickets | 3–4 sessions | Planned |
 | Phase 5 — Project-scale | 4–5 tickets | 2–3 sessions | Planned |
-| **Phases 1–5 Total** | **~44–50 tickets** | **~25–30 sessions** | |
+| **Phases 1–5 Total** | **~50–56 tickets** | **~27–33 sessions** | |
 | Phase 6 — CPN (future) | 4–6 tickets | 3–5 sessions | Future |
-| **Grand Total (incl. future)** | **~48–56 tickets** | **~28–35 sessions** | |
+| **Grand Total (incl. future)** | **~54–62 tickets** | **~30–38 sessions** | |
+
+The existing total estimates exclude Phases 2.9 and 2.10 pending effort updates.

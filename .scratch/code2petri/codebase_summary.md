@@ -32,19 +32,22 @@ code2flow/
 │   ├── javascript_walker.py       # JavaScript Acorn AST walker implementing WalkerProtocol & variable binding extraction
 │   ├── fold.py                    # Structural component detection, fold reduction engine, & SM computation (Tickets 17-18)
 │   ├── inline.py                  # Inline expansion engine, composite net splicing, & parent hierarchy assembly (Tickets 19, 29)
-│   ├── viewer/                    # Interactive offline HTML viewer generator & embedded assets (Tickets 21, 29-42)
+│   ├── viewer/                    # Interactive offline HTML viewer generator & embedded assets (Tickets 21, 29-50)
 │   │   ├── __init__.py            # HTML generator dispatch (`generate_html`) with modular script injection
-│   │   ├── template.html          # Streamlined Cytoscape.js player template with Dagre animations & floating HUD
-│   │   ├── engine/                # Extracted client-side Live Fold & PNML export engines (Phase 2.7)
+│   │   ├── template.html          # Cytoscape.js viewer template with docked sidebar and session controls
+│   │   ├── engine/                # Client-side fold, viewport, snapshot, and PNML modules (Phases 2.7–2.8)
 │   │   │   ├── reduction_engine.js # Ported ProM/Lassen LiveFoldReductionEngine (2,500 lines)
-│   │   │   └── pnml_exporter.js   # Client-Side PNML export serializer (236 lines)
+│   │   │   ├── pnml_exporter.js   # Client-Side PNML export serializer (236 lines)
+│   │   │   ├── session_snapshot.js # Versioned Fold State Snapshot validation and serialization
+│   │   │   └── viewport.js       # Shared viewport capture and restore helpers
 │   │   └── vendor/                # Embedded minified client libraries (cytoscape.min.js, dagre.min.js, cytoscape-dagre.js)
 │   └── engine.py                  # Pipeline orchestrator, CLI (`code2petri`), `--context` file discovery & Graphviz renderer
 ├── docs/                          # Architecture decision records and specifications
 │   └── adr/
 │       ├── 0001-constructor-only-variable-resolution.md # ADR on constructor-only variable binding resolution
 │       ├── 0002-boundary-place-unification.md           # ADR on boundary place unification for bipartite graph integrity
-│       └── 0003-adopt-prom-local-reduction-algorithm.md # ADR on adopting ProM local reduction algorithms
+│       ├── 0003-adopt-prom-local-reduction-algorithm.md # ADR on adopting ProM local reduction algorithms
+│       └── 0004-docked-sidebar-instead-of-floating-popover.md # ADR on the persistent right-side inspector
 ├── tests/                         # Comprehensive unit, integration, & validation test suites (over 400 passing tests)
 │   ├── petri_assertions.py        # Shared structural assertion utilities for Petri nets
 │   ├── test_petri_model.py        # Tests for Place, Transition, Arc, PetriNet, CompoundContainer, and serializers
@@ -58,8 +61,8 @@ code2flow/
 │   ├── test_fold_reduction.py     # Fold reduction engine & SM computation tests (Tickets 18, 23, 24)
 │   ├── test_inline_expansion.py   # Inline expansion engine, composite assembly, & recursion guard tests (Tickets 19, 22, 29)
 │   ├── test_cli_fold_inline.py    # CLI integration tests for --fold, --inline, and headless exports (Ticket 20)
-│   ├── test_html_viewer.py        # Offline HTML viewer, composite boot, live fold, HUD, & export DOM tests (Tickets 21, 25-42, 98 tests)
-│   ├── test_live_fold_prototype.py # Headless Node.js tests for prototype runner & engine scripts (Tickets 32-42, 6 tests)
+│   ├── test_html_viewer.py        # Offline viewer, composite boot, live fold, sidebar, session, and export tests (Tickets 21, 25-50)
+│   ├── test_live_fold_prototype.py # Headless Node.js tests for prototype runner and viewer engine scripts (Tickets 32-47)
 │   ├── test_petri_if_branching.py # Python if/elif/else branching tests
 │   ├── test_petri_loops.py        # Python while/for loop tests
 │   ├── test_petri_try.py          # Python try/except/finally tests
@@ -71,9 +74,9 @@ code2flow/
 └── .scratch/code2petri/           # Local documentation, grand roadmap, specs, issues, and review logs
     ├── codebase_summary.md        # This document
     ├── grand_plan.md              # Grand roadmap from Phase 1 to Phase 6
-    ├── issues/                    # Detailed ticket task specifications (Tickets 01–42)
-    ├── specs/                     # Master phase specifications (Phases 1, 2, 2.5, 2.6, 2.7)
-    └── reviews/                   # Two-axis code review audit reports
+    ├── issues/                    # Detailed ticket task specifications (Tickets 01–50)
+    ├── specs/                     # Master phase specifications (Phases 1, 2, 2.5, 2.6, 2.7, 2.8)
+    └── reviews/                   # Two-axis code review reports, including all three Phase 2.8 rounds
 ```
 
 ---
@@ -182,13 +185,16 @@ Splices resolved callee subnets into caller Petri nets at the data-model level:
 
 ### 8. `code2petri/viewer/` (Self-Contained Offline HTML Viewer)
 Generates single-file standalone interactive visualization using Cytoscape.js and Dagre layout:
-- **`generate_html(net_or_fold, title)`**: Inlines `template.html`, minified vendor JS (`cytoscape.min.js`, `dagre.min.js`, `cytoscape-dagre.js`), and modular engine scripts (`reduction_engine.js`, `pnml_exporter.js`) into a zero-dependency `.html` document. Strictly typed for `Union[PetriNet, FoldResult]`.
+- **`generate_html(net_or_fold, title)`**: Inlines `template.html`, minified vendor JS (`cytoscape.min.js`, `dagre.min.js`, `cytoscape-dagre.js`), and modular engine/state scripts (`reduction_engine.js`, `pnml_exporter.js`, `session_snapshot.js`, `viewport.js`) into a zero-dependency `.html` document. Strictly typed for `Union[PetriNet, FoldResult]`.
 - **Boot-to-Composite on Load (Ticket 30)**: In composite mode, boots immediately with all inlined callees nested inside visual Cytoscape compound nodes.
-- **Floating HUD Popover (Ticket 41)**: Left-clicking a transition or component opens a metadata HUD displaying tau weight, component type, source line number, and running SM score as compact stat pills, with semantic node renaming (`applyComponentNodeRename`).
-- **Interactive Controls**: Viewport drag panning (right/middle click), cursor-anchored scroll zoom, and left-click place fold triggers.
+- **Docked Inspector Sidebar (Ticket 45)**: Replaces the Phase 2.7 floating HUD with a persistent panel that pushes the canvas and hosts selection-aware controls.
+- **Batch and Compound Folding (Tickets 46–47)**: Supports one-pass selected-place folding and repeated place-targeted folding scoped to one function compound.
+- **Session Continuity (Tickets 48–49)**: Saves and opens versioned Fold State Snapshots in the offline viewer, restoring the active graph, unfold records, document context, and viewport.
+- **Root Function Identity (Ticket 50)**: Displays the active document's root function alongside its source path.
+- **Interactive Controls**: Viewport drag panning (right/middle click), cursor-anchored scroll zoom down to 0.1%, fold/unfold viewport preservation, box selection, component renaming, and local unfold.
 
-### 9. `code2petri/viewer/engine/` (Client-Side Live Fold & PNML Engines — Phase 2.7)
-Modularized browser-side execution engine extracted from `template.html` (Tickets 29–42):
+### 9. `code2petri/viewer/engine/` (Client-Side Viewer Engines — Phases 2.7–2.8)
+Modularized browser-side execution engines and state helpers used by `template.html`:
 - **`LiveFoldReductionEngine` ([`reduction_engine.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/reduction_engine.js))**:
   - **Place-Centric Live Fold**: Single-Place Contraction ($1 \to 1 \to 1$), Choice Reduction with branch symmetry multiplier $\text{diff}(X)$, and While Loop reduction.
   - **SESE & Knot Reductions**: Bidirectional BFS reachability, Marked Graph Contraction, State Machine Contraction, Well-Structured SESE Reduction, and Unstructured Knot Isolation with ProM penalty formula ($5 \times (||F_C| - (|P_C| + |T_C|)| + 1)$).
@@ -198,6 +204,8 @@ Modularized browser-side execution engine extracted from `template.html` (Ticket
 - **Client-Side PNML Exporter ([`pnml_exporter.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/pnml_exporter.js))**:
   - `exportClientSidePnml(cy, filename)`: Converts on-screen Cytoscape elements (reflecting live folds and user-renamed labels) into standard ISO/IEC 15909-2 compliant PNML XML.
   - Triggers pure client-side file download via Blob URL without server dependencies, importable directly into ProM.
+- **Fold State Snapshot module (`session_snapshot.js`)**: Serializes and validates versioned session snapshots, including graph and nested restoration records, engine/document context, and viewport state.
+- **Viewport module (`viewport.js`)**: Captures and restores zoom and pan for fold actions and session resumption.
 
 ---
 

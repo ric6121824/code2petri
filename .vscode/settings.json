@@ -1,0 +1,9 @@
+{
+  "python.defaultInterpreterPath": "/usr/local/bin/python3",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}"
+  ],
+  "terminal.integrated.env.osx": {
+    "PYTHONPATH": "${workspaceFolder}"
+  }
+}

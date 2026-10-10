@@ -36,6 +36,10 @@ _Avoid_: Normalization, cleanup
 A structured metadata record capturing the callee name, resolved owner, line number, and transition ID for a function call within a Petri net.
 _Avoid_: Call transition info, call point
 
+**Function Return Metadata**:
+Information attached to a function's identity that describes its call result and, where applicable, awaited or yielded values for inspection without affecting Petri net control flow or Structural Folding.
+_Avoid_: Return-place type, typed control-flow token
+
 **Resolution Context**:
 The set of source files provided via `--context` parsed to build a symbol table for cross-file call resolution, without being analysis targets.
 _Avoid_: Secondary files, include paths, library files
@@ -95,3 +99,15 @@ _Avoid_: Node relabeling, text edit
 **Client-Side Export**:
 The process of serializing the current interactive graph state (including any Live Fold Reductions) directly from the browser's in-memory model to a downloadable format (like PNML or DOT) without requiring a backend server.
 _Avoid_: Browser download, frontend save
+
+**Batch Place Fold**:
+A single user gesture that sequentially evaluates and folds all contractible places in a selection or set, skipping non-contractible ones in a single pass.
+_Avoid_: Multi-fold, mass collapse
+
+**Fold-Entire-Function**:
+A specific interaction variant of Batch Place Fold scoped to all places inside a single compound node, repeating until no further progress is possible or the compound fully collapses.
+_Avoid_: Function collapse, auto-fold all
+
+**Fold State Snapshot**:
+A saved record of a net's current fold state and viewing state, sufficient to resume Live Fold Reduction and Component-Local Unfold with its component names, weights, layout, and viewport preserved.
+_Avoid_: Save file, session dump
