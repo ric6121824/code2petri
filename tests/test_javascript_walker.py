@@ -142,6 +142,17 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
         self.assertEqual(metadata["roles"]["completion"]["inferred_types"], ["boolean"])
         self.assertEqual(metadata["roles"]["yielded"]["inferred"][0]["role"], "yielded_item")
 
+    def test_async_function_roles_remain_distinct_from_generator_roles(self):
+        metadata = self._walk_source_function(
+            "/** @returns {Promise<number>} */\nasync function fetch() { return 1; }", "fetch"
+        )
+        self.assertEqual(metadata["function_kind"], "async_function")
+        self.assertIsNone(metadata["declared"])
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["Promise"])
+        self.assertEqual(metadata["roles"]["immediate"]["declared"]["expression"], "Promise<number>")
+        self.assertEqual(metadata["roles"]["awaited"]["declared"]["expression"], "number")
+        self.assertEqual(metadata["roles"]["awaited"]["inferred_types"], ["number"])
+
     def test_async_generator_roles_keep_unknown_yields_and_nested_scope_out(self):
         source = (
             "async function* values() {\n"
@@ -176,6 +187,14 @@ class TestJavascriptWalkerSkeleton(unittest.TestCase):
                 yielded = metadata["roles"]["yielded"]
                 self.assertEqual(yielded["analysis_status"], "unknown")
                 self.assertEqual(yielded["observed_types"], [])
+
+    def test_delegated_javascript_yield_is_unknown_but_keeps_direct_observations(self):
+        metadata = self._walk_source_function(
+            "function* values() { yield* source; yield 1; return; }", "values"
+        )
+        self.assertEqual(metadata["roles"]["yielded"]["analysis_status"], "unknown")
+        self.assertEqual(metadata["roles"]["yielded"]["observed_types"], ["number"])
+        self.assertEqual(metadata["roles"]["completion"]["inferred_types"], ["undefined"])
 
     def test_walk_function_returns_walk_result_for_other_fixtures(self):
         call_path = os.path.join(

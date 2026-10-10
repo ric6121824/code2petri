@@ -207,6 +207,16 @@ class TestPythonWalkerSequential(unittest.TestCase):
         self.assertEqual(metadata["roles"]["completion"]["declared"]["expression"], "str")
         self.assertEqual(metadata["roles"]["yielded"]["inferred"][0]["role"], "yielded_item")
 
+    def test_async_function_roles_remain_distinct_from_generator_roles(self):
+        node = ast.parse("async def fetch() -> int:\n    return 1\n").body[0]
+        metadata = walker.walk_function(node, "fetch", "/src/async.py").return_metadata
+
+        self.assertEqual(metadata["function_kind"], "async_function")
+        self.assertIsNone(metadata["declared"])
+        self.assertEqual(metadata["roles"]["immediate"]["inferred_types"], ["coroutine"])
+        self.assertEqual(metadata["roles"]["awaited"]["declared"]["expression"], "int")
+        self.assertEqual(metadata["roles"]["awaited"]["inferred_types"], ["int"])
+
     def test_async_generator_roles_have_unknown_yields_and_inapplicable_completion(self):
         node = ast.parse(
             "async def values():\n"
@@ -252,6 +262,12 @@ class TestPythonWalkerSequential(unittest.TestCase):
                 yielded = metadata["roles"]["yielded"]
                 self.assertEqual(yielded["analysis_status"], "unknown")
                 self.assertEqual(yielded["observed_types"], [])
+
+    def test_generator_raise_only_completion_does_not_hide_generator_object(self):
+        source = "def values():\n    yield 1\n    raise RuntimeError()\n"
+        metadata = walker.walk_function(ast.parse(source).body[0], "values", "/src/generator.py").return_metadata
+        self.assertEqual(metadata["roles"]["immediate"]["analysis_status"], "complete")
+        self.assertEqual(metadata["roles"]["completion"]["analysis_status"], "no_normal_return")
 
     def test_supported_return_paths_report_complete_unions_and_partial_observations(self):
         cases = [

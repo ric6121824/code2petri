@@ -319,8 +319,15 @@ def _javascript_return_metadata(
         })
         return metadata
 
-    # Async function results are added in the async-role ticket.
-    if func_node.get("async"):
+    if func_node.get("async") and not func_node.get("generator"):
+        metadata["function_kind"] = "async_function"
+        wrapper_declared = metadata["declared"] if _javascript_is_promise_declaration(metadata["declared"]) else None
+        awaited_declared = _javascript_inner_return_declaration(metadata["declared"])
+        metadata["declared"] = None
+        metadata["roles"] = {
+            "immediate": _javascript_known_wrapper_role("Promise", "async_function_syntax", definition, wrapper_declared),
+            "awaited": _javascript_result_role(func_node, source, awaited_declared, "awaited"),
+        }
         return metadata
 
     body = func_node.get("body", {})
@@ -358,6 +365,73 @@ def _javascript_return_metadata(
     metadata["observed"] = [] if is_complete else observed
     metadata["observed_types"] = [] if is_complete else observed_types
     return metadata
+
+
+def _javascript_promise_inner(declared: Optional[dict]) -> Optional[str]:
+    if not isinstance(declared, dict) or not isinstance(declared.get("expression"), str):
+        return None
+    expression = declared["expression"].strip()
+    prefix = re.match(r"^Promise\s*<", expression)
+    if prefix is None or not expression.endswith(">"):
+        return None
+    inner = expression[prefix.end():-1].strip()
+    depth = 0
+    for character in inner:
+        if character == "<":
+            depth += 1
+        elif character == ">":
+            depth -= 1
+            if depth < 0:
+                return None
+    return inner if inner and depth == 0 else None
+
+
+def _javascript_is_promise_declaration(declared: Optional[dict]) -> bool:
+    if not isinstance(declared, dict) or not isinstance(declared.get("expression"), str):
+        return False
+    return declared["expression"].strip() == "Promise" or _javascript_promise_inner(declared) is not None
+
+
+def _javascript_inner_return_declaration(declared: Optional[dict]) -> Optional[dict]:
+    inner = _javascript_promise_inner(declared)
+    if inner is None:
+        return None
+    return {
+        "expression": inner,
+        "provenance": declared.get("provenance", "jsdoc"),
+        "source_location": declared.get("source_location"),
+    }
+
+
+def _javascript_known_wrapper_role(wrapper_type: str, provenance: str, location: dict,
+                                   declared: Optional[dict]) -> dict:
+    return {
+        "declared": declared,
+        "analysis_status": "complete",
+        "inferred": [{
+            "expression": "async function syntax", "type": wrapper_type,
+            "provenance": provenance, "role": "immediate", "source_location": location,
+        }],
+        "inferred_types": [wrapper_type], "observed": [], "observed_types": [],
+    }
+
+
+def _javascript_result_role(func_node: dict, source: str, declared: Optional[dict], role: str) -> dict:
+    body = func_node.get("body", {})
+    if func_node.get("type") == "ArrowFunctionExpression" and body.get("type") != "BlockStatement":
+        result = _javascript_inferred_type(body, {}, source)
+        evidence = _javascript_return_evidence(body, body, source, result)
+        evidence["role"] = role
+        return _javascript_role_record([evidence], declared)
+    statements = body.get("body", []) if body.get("type") == "BlockStatement" else []
+    outcomes, uncertain = _javascript_return_outcomes(statements, source)
+    uncertain = uncertain or bool(func_node.get("decorators"))
+    evidence, unknown_coverage, no_normal = _javascript_completion_evidence(
+        outcomes, uncertain, func_node, "undefined", role
+    )
+    return _javascript_role_record(
+        evidence, declared, unknown_coverage=unknown_coverage, no_normal_return=no_normal,
+    )
 
 
 def _javascript_unique_return_types(evidence: List[dict]) -> List[str]:

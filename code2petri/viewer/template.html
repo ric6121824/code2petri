@@ -693,6 +693,16 @@
             }
             lines.push((roleName === 'yielded' ? 'Inferred type at this yield: ' : 'Inferred type at this return: ') +
               (item.type === 'unknown' ? 'Unknown — evidence is unavailable or incomplete.' : item.type));
+            const assignmentEvidence = Array.isArray(item.evidence) ? item.evidence : [];
+            if (assignmentEvidence.length) {
+              lines.push('Evidence: ' + assignmentEvidence.map(function(assignment) {
+                const location = assignment.source_location && assignment.source_location.line != null
+                  ? ' at line ' + assignment.source_location.line : '';
+                return assignment.expression + ' (' + assignment.type + location + ')';
+              }).join('; '));
+            } else {
+              lines.push('Evidence: ' + (item.provenance || 'Unknown'));
+            }
           });
         });
         return compact ? lines.join('\n') : lines.join('\n');

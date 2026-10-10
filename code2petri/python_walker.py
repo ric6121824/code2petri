@@ -254,16 +254,17 @@ def _extract_python_return_metadata(
         None if is_global or node.returns is None
         else _source_text_for(node.returns, source_text)
     )
+    declared = None if declared_expression is None else {
+        "expression": declared_expression,
+        "provenance": "annotation",
+        "source_location": {"line": line, "column": column},
+    }
     metadata: Dict[str, Any] = {
         "function_name": "Global Scope" if is_global else function_name,
         "source_file": source_file,
         "qualified_name": "Global Scope" if is_global else qualified_name,
         "definition_location": {"line": line, "column": column},
-        "declared": None if declared_expression is None else {
-            "expression": declared_expression,
-            "provenance": "annotation",
-            "source_location": {"line": line, "column": column},
-        },
+        "declared": declared,
         "analysis_status": "not_applicable" if is_global else "unknown",
         "inferred": [],
         "inferred_types": [],
@@ -340,8 +341,13 @@ def _extract_python_return_metadata(
         })
         return metadata
 
-    # Async function results are added in the async-role ticket.
     if isinstance(node, ast.AsyncFunctionDef):
+        metadata["function_kind"] = "async_function"
+        metadata["declared"] = None
+        metadata["roles"] = {
+            "immediate": _python_known_wrapper_role("coroutine", "async_function_syntax", line, column),
+            "awaited": _python_result_role(node, source_text, declared, "awaited"),
+        }
         return metadata
 
     outcomes, uncertain_coverage = _python_return_outcomes(node, source_text)
@@ -377,6 +383,44 @@ def _extract_python_return_metadata(
     return metadata
 
 
+def _python_known_wrapper_role(wrapper_type: str, provenance: str, line: Optional[int], column: Optional[int]) -> Dict[str, Any]:
+    return {
+        "declared": None,
+        "analysis_status": "complete",
+        "inferred": [{
+            "expression": "async function syntax", "type": wrapper_type,
+            "provenance": provenance, "role": "immediate",
+            "source_location": {"line": line, "column": column},
+        }],
+        "inferred_types": [wrapper_type], "observed": [], "observed_types": [],
+    }
+
+
+def _python_result_role(node: ast.AST, source_text: Optional[str],
+                        declared: Optional[Dict[str, Any]], role: str) -> Dict[str, Any]:
+    outcomes, uncertain = _python_return_outcomes(node, source_text)
+    uncertain = uncertain or bool(getattr(node, "decorator_list", []))
+    evidence = [value for kind, value in outcomes if kind == "return" and value is not None]
+    no_normal = (
+        not evidence and not any(kind == "normal" for kind, _ in outcomes) and bool(outcomes)
+        and all(kind == "raise" for kind, _ in outcomes) and not uncertain
+    )
+    for kind, _ in outcomes:
+        if kind == "normal":
+            evidence.append({
+                "expression": "implicit fall-through", "type": "NoneType",
+                "provenance": "normal_fallthrough", "role": role,
+                "source_location": {"line": getattr(node, "end_lineno", getattr(node, "lineno", None)), "column": None},
+            })
+    for item in evidence:
+        item["role"] = role
+    return _python_role_record(
+        evidence, declared,
+        unknown_coverage=uncertain or any(kind == "unknown" for kind, _ in outcomes),
+        no_normal_return=no_normal,
+    )
+
+
 def _unique_return_types(evidence: List[Dict[str, Any]]) -> List[str]:
     result: List[str] = []
     for item in evidence:
@@ -389,6 +433,13 @@ def _unique_return_types(evidence: List[Dict[str, Any]]) -> List[str]:
 def _python_annotation_role_declarations(node: ast.AST, source_text: Optional[str]) -> Dict[str, Dict[str, Any]]:
     """Return contained-type declarations only for recognized iterator wrappers."""
     annotation = getattr(node, "returns", None)
+    synthetic_annotation = False
+    if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+        try:
+            annotation = ast.parse(annotation.value, mode="eval").body
+            synthetic_annotation = True
+        except SyntaxError:
+            return {}
     if not isinstance(annotation, ast.Subscript):
         return {}
     wrapper = annotation.value
@@ -406,7 +457,7 @@ def _python_annotation_role_declarations(node: ast.AST, source_text: Optional[st
     result = {}
     for role, index in indexes.items():
         argument = arguments[index]
-        expression = _source_text_for(argument, source_text)
+        expression = ast.unparse(argument) if synthetic_annotation and hasattr(ast, "unparse") else _source_text_for(argument, source_text)
         if expression is not None:
             result[role] = {
                 "expression": expression,
