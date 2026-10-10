@@ -61,4 +61,6 @@ The existing generated HTML remains the self-contained viewer, with its graph an
 
 ## Delivery Record
 
-Tickets 45–50 are resolved. The docked sidebar, selection and compound folding actions, offline Fold State Snapshot save/open flow, and root-function info panel are delivered. See the [Phase 2.8 Round 3 review report](../reviews/phase-2.8-tickets-45-50-round-03.md) for the final review outcome.
+Tickets 45–50 are resolved. The docked sidebar, selection and compound folding actions, offline Fold State Snapshot save/open flow, and root-function info panel are delivered. See the [Phase 2.8 Round 3 review report](../reviews/phase-2.8-tickets-45-50-round-03.md) for their final review outcome.
+
+Ticket 53 is a resolved Phase 2.8 follow-up for Choice folding at shared caller boundaries. It retains caller-owned boundary places, restricts consumed transitions to the eligible function container, and supports both split and merge trigger directions. Generated-viewer/headless regressions cover individual and batch folds, Fold-Entire-Function, containment rejection, session continuation, nested local unfolding, and viewport preservation. The [Ticket 53 Round 02 report](../reviews/phase-2.8-ticket-53-round-02.md) records 150 passing viewer tests; the full suite had three unrelated errors, and its implementation note records the Aeroblasters manual acceptance check as passed.

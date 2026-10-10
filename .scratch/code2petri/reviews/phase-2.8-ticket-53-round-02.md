@@ -3,7 +3,7 @@
 **Commit reviewed:** `f1c84d6` (`Fix called-function boundary choice folding`)
 **Comparison base:** `3c8f019` (the parent of `f1c84d6`, corresponding to Round 01's `HEAD~1`)
 **Diff:** `git diff 3c8f019...f1c84d6` (1 file changed, 137 insertions, 49 deletions). No later Ticket 53 implementation or test commit was present for this round.
-**Ticket:** [53 — Complete called-function folding at shared boundaries](../issues/53-called-function-boundary-trigger.md)
+**Ticket:** [53 — Complete called-function folding at shared boundaries](../issues/53-called-function-fold-boundary-trigger.md)
 **Previous Review:** [Ticket 53, Round 01](./phase-2.8-ticket-53-round-01.md)
 **Standards:** [AGENTS.md](../../../AGENTS.md), [issue tracker conventions](../../../docs/agents/issue-tracker.md), [triage labels](../../../docs/agents/triage-labels.md), [domain guidance](../../../docs/agents/domain.md), [GLOSSARY.md](../../../GLOSSARY.md), [ADR 0002](../../../docs/adr/0002-boundary-place-unification.md), [ADR 0003](../../../docs/adr/0003-adopt-prom-local-reduction-algorithm.md), and Fowler's 12-smell baseline. No dedicated coding-standard or contributing guide was found.
 **Tests:** Not run during this review.
@@ -32,19 +32,19 @@
 
 **P2 — Mixed-parent Choice validation can accept unrelated containers**
 
-Ticket 53 requires that “the reduction must consume only transitions belonging to the same eligible function container” and retain protection against “siblings, or caller transitions” ([ticket](../issues/53-called-function-boundary-trigger.md)). At [reduction_engine.js:1118](../../code2petri/viewer/engine/reduction_engine.js#L1118), a parent that differs from the first candidate is allowed if it has folded into one component. This condition is not restricted to the eligible function and its retained caller boundary, so a bundle can include transitions from unrelated collapsed sibling or caller containers. The merge-direction guard has the same weakness.
+Ticket 53 requires that “the reduction must consume only transitions belonging to the same eligible function container” and retain protection against “siblings, or caller transitions” ([ticket](../issues/53-called-function-fold-boundary-trigger.md)). At [reduction_engine.js:1118](../../code2petri/viewer/engine/reduction_engine.js#L1118), a parent that differs from the first candidate is allowed if it has folded into one component. This condition is not restricted to the eligible function and its retained caller boundary, so a bundle can include transitions from unrelated collapsed sibling or caller containers. The merge-direction guard has the same weakness.
 
 > **Suggestion:** Validate the complete Choice bundle against the eligible function container and its retained shared boundary before mutation. Reject unrelated parents even when each has collapsed to one component. Add a regression where sibling/caller transitions are excluded while the valid boundary case remains eligible.
 
 **P2 — Ticket-required headless regressions are absent**
 
-The ticket asks to “Add regressions at the generated-viewer/headless action seam” for both boundary directions, containment rejection, nested unfolding, session resumption, and viewport preservation ([ticket](../issues/53-called-function-boundary-trigger.md)). The reviewed diff changes only `reduction_engine.js`; it adds no tests for these acceptance cases.
+The ticket asks to “Add regressions at the generated-viewer/headless action seam” for both boundary directions, containment rejection, nested unfolding, session resumption, and viewport preservation ([ticket](../issues/53-called-function-fold-boundary-trigger.md)). The reviewed diff changes only `reduction_engine.js`; it adds no tests for these acceptance cases.
 
 > **Suggestion:** Add focused generated-viewer/headless coverage for the split-exit and merge-entrance shapes, green eligibility, individual place folding, Batch Place Fold, sidebar Fold-Entire-Function behavior, containment rejection, local unfolding, save/open continuation, and viewport preservation.
 
 ### (b) Manual Acceptance Checks
 
-The ticket also calls for replaying the original Aeroblasters net and verifying all four affected call occurrences, then confirming newly generated HTML embeds the fix ([ticket](../issues/53-called-function-boundary-trigger.md)). These checks were not evidenced in the review material.
+The ticket also calls for replaying the original Aeroblasters net and verifying all four affected call occurrences, then confirming newly generated HTML embeds the fix ([ticket](../issues/53-called-function-fold-boundary-trigger.md)). These checks were not evidenced in the review material.
 
 > **Manual steps:** Regenerate the Aeroblasters viewer from the current source, then replay the original net. Check all four reported function-call occurrences for complete folding, preserved caller/sibling boundaries, and working local unfold after save/open. Confirm the regenerated HTML contains the updated behavior. Previously exported HTML keeps its embedded engine and must be regenerated to include the fix.
 

@@ -381,7 +381,7 @@ Phase 2.7 fundamentally rearchitected the viewer around **Live Fold Reduction**,
 
 ---
 
-## Phase 2.8 — Viewer Interactive Enhancements (Completed — Tickets 45–50)
+## Phase 2.8 — Viewer Interactive Enhancements (Completed — Tickets 45–50 and Ticket 53 follow-up)
 
 Phase 2.8 extends the self-contained HTML viewer with persistent controls for inspection, bulk reduction, and session continuity. It keeps the generated offline viewer architecture and does not add PNML import or a separate application.
 
@@ -404,6 +404,8 @@ Phase 2.8 extends the self-contained HTML viewer with persistent controls for in
 - All six implementation issues are resolved: [45](./issues/45-viewer-docked-sidebar.md), [46](./issues/46-batch-place-fold-selection.md), [47](./issues/47-fold-entire-function-compound.md), [48](./issues/48-save-session.md), [49](./issues/49-smart-open-session-pnml.md), and [50](./issues/50-info-panel-function-name.md).
 - The master specification is [Phase 2.8: Viewer Interactive Enhancements](./specs/phase-2.8-viewer-interactive-enhancements.md).
 - Three review rounds found no remaining blocking standards or specification issues. The optional Round 3 maintainability note is recorded in [the Round 3 report](./reviews/phase-2.8-tickets-45-50-round-03.md).
+- The separately tracked [Ticket 53](./issues/53-called-function-fold-boundary-trigger.md) follow-up is also resolved. It enables eligible called-function Choices at shared caller boundaries, rejects mixed-parent bundles, and covers both boundary directions through generated-viewer/headless action regressions.
+- Ticket 53's two review rounds found no blocking standards or specification findings. The implementation report records the Aeroblasters replay acceptance check as passed and the generated-viewer/headless test results in [the Round 02 report](./reviews/phase-2.8-ticket-53-round-02.md).
 
 ## Phase 2.9 — Compact and Reliable Fold State Snapshots (Planned)
 
@@ -857,7 +859,7 @@ graph TD
 | Phase 2.5 — Structural folding & viewer | 6 tickets (Tickets 16–21) | 3 review rounds | ✅ Complete |
 | Phase 2.6 — ProM port & compound expansion | 6 tickets (Tickets 22–27) | 4 review rounds | ✅ Complete |
 | Phase 2.7 — Live Fold Reduction & Viewer | 16 tickets (Tickets 29–44) | 12 review rounds | ✅ Complete |
-| Phase 2.8 — Viewer Interactive Enhancements | 6 tickets (Tickets 45–50) | 3 review rounds | ✅ Complete |
+| Phase 2.8 — Viewer Interactive Enhancements | 7 tickets (Tickets 45–50, 53) | 5 review rounds | ✅ Complete |
 | Phase 2.9 — Compact and Reliable Fold State Snapshots | 2 tickets (Tickets 51–52) | TBD | Planned Next |
 | Phase 2.10 — Function Return Metadata | TBD | TBD | Design in Progress |
 | Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned |
