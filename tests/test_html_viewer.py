@@ -5534,6 +5534,111 @@ console.log('PASS');
         self.assertEqual(metadata["analysis_status"], "not_applicable")
         self.assertEqual(metadata["function_name"], "Global Scope")
 
+    def test_javascript_root_return_metadata_is_embedded_and_saved(self):
+        """The production JavaScript-to-viewer path retains JSDoc and direct return evidence."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "returns.js")
+            html_path = os.path.join(temp_dir, "returns.html")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write("/** @returns {Mystery<Thing>} documented */\nfunction answer() { return true; }\n")
+            result = code2petri(
+                source_path, output_file=html_path, target_function="answer", fold=True
+            )
+            with open(html_path, encoding="utf-8") as html_file:
+                html_content = html_file.read()
+
+        metadata = _extract_embedded_data(html_content)["document"]["return_metadata"]
+        self.assertEqual(metadata["declared"]["expression"], "Mystery<Thing>")
+        self.assertEqual(metadata["declared"]["provenance"], "jsdoc")
+        self.assertEqual(metadata["inferred"], [{
+            "expression": "true", "type": "boolean", "provenance": "direct_literal",
+            "role": "call_result", "source_location": {"line": 2, "column": 27},
+        }])
+        self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
+        self.assertIn("Declared:", html_content)
+
+    def test_javascript_assigned_functions_keep_owner_jsdoc_and_expression_text(self):
+        """JSDoc attaches only to its declaration and unknown expressions keep their source text."""
+        source = '''/** @returns {WrongOwner} */
+const ignored = 0;
+
+/** @return {Alias<Item>} */
+const expressionArrow = () => ({ value: "x:y" });
+
+/** @returns {DocType} */
+const blockArrow = () => { return; };
+
+/** @returns {FunctionType} */
+const functionValue = function () { return "ok"; };
+
+/** @returns {Alias<Item>} */
+const literalArrow = () => 42;
+
+/** @returns {unknown} */
+function unknownDocumented() { return compute({ a: 1 }); }
+
+function nullResult() { return null; }
+
+function fallsThrough() { const value = 1; }
+
+/** @returns {Promise<number>} */
+async function asyncValue() { return 1; }
+
+/** @returns {number} */
+function* generatorValue() { return 2; }
+
+class Box {
+  /** @returns {MethodType} */
+  value() { return 3; }
+}
+
+function outer() { function nested() { return false; } return "outer"; }
+'''
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "assigned.js")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write(source)
+            for target, declared, inferred_expression, inferred_type, status in [
+                ("expressionArrow", "Alias<Item>", '{ value: "x:y" }', "unknown", "unknown"),
+                ("blockArrow", "DocType", "undefined", "undefined", "complete"),
+                ("functionValue", "FunctionType", '"ok"', "string", "complete"),
+                ("literalArrow", "Alias<Item>", "42", "number", "complete"),
+                ("unknownDocumented", "unknown", "compute({ a: 1 })", "unknown", "unknown"),
+                ("nullResult", None, "null", "null", "complete"),
+                ("fallsThrough", None, "implicit fall-through", "undefined", "complete"),
+                ("Box.value", "MethodType", "3", "number", "complete"),
+                ("outer", None, '"outer"', "string", "complete"),
+            ]:
+                html_path = os.path.join(temp_dir, target.replace(".", "_") + ".html")
+                result = code2petri(source_path, output_file=html_path, target_function=target)
+                with open(html_path, encoding="utf-8") as html_file:
+                    metadata = _extract_embedded_data(html_file.read())["document"]["return_metadata"]
+                actual_declared = metadata["declared"]
+                self.assertEqual(None if actual_declared is None else actual_declared["expression"], declared)
+                self.assertEqual(metadata["analysis_status"], status)
+                self.assertEqual(metadata["inferred"][0]["expression"], inferred_expression)
+                self.assertEqual(metadata["inferred"][0]["type"], inferred_type)
+                self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
+
+            global_html = os.path.join(temp_dir, "global.html")
+            global_result = code2petri(source_path, output_file=global_html, target_function="(global)")
+            with open(global_html, encoding="utf-8") as html_file:
+                global_metadata = _extract_embedded_data(html_file.read())["document"]["return_metadata"]
+            self.assertEqual(global_metadata["function_name"], "Global Scope")
+            self.assertEqual(global_metadata["analysis_status"], "not_applicable")
+            self.assertEqual(global_result.initial_net.to_dict()["return_metadata"], global_metadata)
+
+            for target, declared in [("asyncValue", "Promise<number>"), ("generatorValue", "number")]:
+                html_path = os.path.join(temp_dir, target + ".html")
+                result = code2petri(source_path, output_file=html_path, target_function=target)
+                with open(html_path, encoding="utf-8") as html_file:
+                    metadata = _extract_embedded_data(html_file.read())["document"]["return_metadata"]
+                self.assertEqual(metadata["declared"]["expression"], declared)
+                self.assertEqual(metadata["analysis_status"], "unknown")
+                self.assertEqual(metadata["inferred"], [])
+                self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
+
+
     _SIMPLE_SEQUENCE_NET_LITERAL = """{
   places: [
     { id: 'p0', label: 'p0' },

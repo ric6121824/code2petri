@@ -1,4 +1,5 @@
 import shutil
+import re
 from typing import Optional, List, Any, Union, NamedTuple, Dict
 from code2flow.engine import LanguageParams
 from code2flow.javascript import Javascript
@@ -63,6 +64,143 @@ def _get_block_lineno(stmts: List[dict], default: Optional[int] = None) -> Optio
     if stmts and isinstance(stmts, list):
         return _get_node_lineno(stmts[0], default)
     return default
+
+
+def _javascript_return_metadata(
+    func_node: dict,
+    function_name: str,
+    source_file: str,
+    source: str,
+    jsdoc_anchor: Optional[int] = None,
+) -> dict:
+    """Describe source-owned JavaScript return evidence for one function."""
+    is_global = function_name == "(global)"
+    loc = get_nested(func_node, "loc", "start", default={})
+    definition = {"line": loc.get("line"), "column": loc.get("column")}
+    qualified_name = "Global Scope" if is_global else func_node.get("_qual_name", function_name)
+    metadata = {
+        "function_name": "Global Scope" if is_global else function_name,
+        "source_file": source_file,
+        "qualified_name": qualified_name,
+        "definition_location": definition,
+        "declared": None,
+        "analysis_status": "not_applicable" if is_global else "unknown",
+        "inferred": [],
+    }
+    if is_global:
+        return metadata
+
+    anchor = jsdoc_anchor if jsdoc_anchor is not None else func_node.get("start", 0)
+    preceding = source[:anchor]
+    comment_end = preceding.rfind("*/")
+    comment_start = preceding.rfind("/**", 0, comment_end) if comment_end >= 0 else -1
+    nearest_comment_start = preceding.rfind("/*", 0, comment_end) if comment_end >= 0 else -1
+    comment_is_adjacent = (
+        comment_start >= 0 and comment_start == nearest_comment_start
+        and not preceding[comment_end + 2:].strip()
+    )
+    if comment_is_adjacent:
+        comment = preceding[comment_start:comment_end + 2]
+        tag_match = re.search(r"@returns?\s+\{([^}]+)\}", comment)
+        if tag_match:
+            type_expression = tag_match.group(1).strip()
+            tag_offset = comment_start + tag_match.start()
+            tag_prefix = source[:tag_offset]
+            metadata["declared"] = {
+                "expression": type_expression,
+                "provenance": "jsdoc",
+                "source_location": {
+                    "line": tag_prefix.count("\n") + 1,
+                    "column": len(tag_prefix.rsplit("\n", 1)[-1]),
+                },
+            }
+
+    # Later tickets define the awaited and yielded values. Keep documented
+    # evidence, but do not describe an async/generator body value as immediate.
+    if func_node.get("async") or func_node.get("generator"):
+        return metadata
+
+    body = func_node.get("body", {})
+    if func_node.get("type") == "ArrowFunctionExpression" and body.get("type") != "BlockStatement":
+        inferred = _javascript_direct_literal_evidence(body, source)
+        metadata["inferred"] = [inferred or _javascript_unknown_expression_evidence(body, source)]
+        if inferred:
+            metadata["analysis_status"] = "complete"
+        return metadata
+
+    statements = body.get("body", []) if body.get("type") == "BlockStatement" else []
+    returns = [statement for statement in statements if statement.get("type") == "ReturnStatement"]
+    if len(returns) == 1 and returns[0] is statements[-1]:
+        argument = returns[0].get("argument")
+        if argument is None:
+            return_loc = get_nested(returns[0], "loc", "start", default={})
+            metadata["inferred"] = [{
+                "expression": "undefined", "type": "undefined", "provenance": "bare_return",
+                "role": "call_result", "source_location": {
+                    "line": return_loc.get("line"), "column": return_loc.get("column"),
+                },
+            }]
+            metadata["analysis_status"] = "complete"
+            return metadata
+        inferred = _javascript_direct_literal_evidence(argument, source)
+        if inferred:
+            metadata["inferred"] = [inferred]
+            metadata["analysis_status"] = "complete"
+            return metadata
+        metadata["inferred"] = [_javascript_unknown_expression_evidence(argument, source)]
+    elif not returns and not _contains_nested_function(body) and all(
+        statement.get("type") in ("VariableDeclaration", "ExpressionStatement", "EmptyStatement")
+        for statement in statements
+    ):
+        end_loc = get_nested(func_node, "loc", "end", default={})
+        metadata["inferred"] = [{
+            "expression": "implicit fall-through", "type": "undefined",
+            "provenance": "normal_fallthrough", "role": "call_result",
+            "source_location": {"line": end_loc.get("line"), "column": end_loc.get("column")},
+        }]
+        metadata["analysis_status"] = "complete"
+    return metadata
+
+
+def _javascript_direct_literal_evidence(node: dict, source: str) -> Optional[dict]:
+    if node.get("type") != "Literal":
+        return None
+    value = node.get("value")
+    if value is None:
+        value_type = "null"
+    elif isinstance(value, bool):
+        value_type = "boolean"
+    elif isinstance(value, (int, float)):
+        value_type = "number"
+    elif isinstance(value, str):
+        value_type = "string"
+    else:
+        return None
+    loc = get_nested(node, "loc", "start", default={})
+    return {
+        "expression": slice_source(source, node), "type": value_type,
+        "provenance": "direct_literal", "role": "call_result",
+        "source_location": {"line": loc.get("line"), "column": loc.get("column")},
+    }
+
+
+def _javascript_unknown_expression_evidence(node: dict, source: str) -> dict:
+    loc = get_nested(node, "loc", "start", default={})
+    return {
+        "expression": slice_source(source, node), "type": "unknown",
+        "provenance": "return_expression", "role": "call_result",
+        "source_location": {"line": loc.get("line"), "column": loc.get("column")},
+    }
+
+
+def _contains_nested_function(node: Any) -> bool:
+    if isinstance(node, dict):
+        if node.get("type") in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"):
+            return True
+        return any(_contains_nested_function(value) for key, value in node.items() if key != "loc")
+    if isinstance(node, list):
+        return any(_contains_nested_function(value) for value in node)
+    return False
 
 
 def _get_class_name(node: dict) -> str:
@@ -781,7 +919,7 @@ class JavascriptWalker(WalkerProtocol):
         """Recursively collects all function declarations, class methods, and callbacks."""
         results: List[FunctionInfo] = []
 
-        def _traverse(node: Any, scope: List[str]) -> None:
+        def _traverse(node: Any, scope: List[str], jsdoc_anchor: Optional[int] = None) -> None:
             if isinstance(node, dict):
                 ntype = node.get("type")
                 if ntype == "ClassDeclaration":
@@ -799,6 +937,7 @@ class JavascriptWalker(WalkerProtocol):
                             if isinstance(val, dict):
                                 val["_qual_name"] = qual_name
                                 val["_bare_name"] = key
+                                val["_jsdoc_anchor"] = elem.get("start", val.get("start"))
                             results.append(FunctionInfo(
                                 qual_name=qual_name,
                                 bare_name=key,
@@ -811,7 +950,7 @@ class JavascriptWalker(WalkerProtocol):
 
                 elif ntype in ("FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"):
                     func_id = node.get("id")
-                    name = func_id.get("name") if func_id else None
+                    name = func_id.get("name") if func_id else node.get("_assigned_name")
                     lineno = _get_node_lineno(node, 0)
                     if name:
                         qual_name = f"{'.'.join(scope)}.{name}" if scope else name
@@ -822,6 +961,7 @@ class JavascriptWalker(WalkerProtocol):
 
                     node["_qual_name"] = qual_name
                     node["_bare_name"] = bare_name
+                    node["_jsdoc_anchor"] = jsdoc_anchor if jsdoc_anchor is not None else node.get("start")
 
                     results.append(FunctionInfo(
                         qual_name=qual_name,
@@ -833,9 +973,27 @@ class JavascriptWalker(WalkerProtocol):
                     _traverse(node.get("body"), new_scope)
                     return
 
+                if ntype == "VariableDeclaration":
+                    for declaration in node.get("declarations", []):
+                        _traverse(declaration, scope, node.get("start"))
+                    return
+
+                if ntype == "VariableDeclarator":
+                    init = node.get("init")
+                    identifier = node.get("id", {})
+                    if isinstance(init, dict) and init.get("type") in (
+                        "FunctionExpression", "ArrowFunctionExpression",
+                    ) and identifier.get("type") == "Identifier":
+                        init["_assigned_name"] = identifier.get("name")
+                    _traverse(init, scope, jsdoc_anchor if jsdoc_anchor is not None else node.get("start"))
+                    for key, value in node.items():
+                        if key not in ("loc", "init"):
+                            _traverse(value, scope)
+                    return
+
                 for k, v in node.items():
                     if k != "loc":
-                        _traverse(v, scope)
+                        _traverse(v, scope, jsdoc_anchor if ntype in ("VariableDeclaration",) else None)
 
             elif isinstance(node, list):
                 for item in node:
@@ -983,6 +1141,15 @@ class JavascriptWalker(WalkerProtocol):
             )
 
         active_filepath = filepath or getattr(self, "filepath", "") or ""
+        if self.tree is not None and "_jsdoc_anchor" not in func_node:
+            self._collect_all_functions(self.tree)
+        return_metadata = _javascript_return_metadata(
+            func_node,
+            function_name=func_name,
+            source_file=active_filepath,
+            source=self.raw_source,
+            jsdoc_anchor=func_node.get("_jsdoc_anchor"),
+        )
 
         net = PetriNet()
         start_lineno = _get_node_lineno(func_node) or _get_node_lineno(ast_node, 1)
@@ -1026,6 +1193,6 @@ class JavascriptWalker(WalkerProtocol):
             filepath=active_filepath,
         )
         walker.walk_block(statements, current_place=start_place, target_exit=end_place)
-
-        return WalkResult(net=net, call_sites=walker.call_sites)
+        net.return_metadata = return_metadata
+        return WalkResult(net=net, call_sites=walker.call_sites, return_metadata=return_metadata)
 
