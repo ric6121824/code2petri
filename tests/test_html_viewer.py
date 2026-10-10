@@ -5756,7 +5756,7 @@ function outer() { function nested() { return false; } return "outer"; }
             with open(source_path, "w", encoding="utf-8") as source_file:
                 source_file.write(source)
             for target, declared, inferred_expression, inferred_type, status in [
-                ("expressionArrow", "Alias<Item>", '{ value: "x:y" }', "unknown", "unknown"),
+                ("expressionArrow", "Alias<Item>", '{ value: "x:y" }', "object", "complete"),
                 ("blockArrow", "DocType", "undefined", "undefined", "complete"),
                 ("functionValue", "FunctionType", '"ok"', "string", "complete"),
                 ("literalArrow", "Alias<Item>", "42", "number", "complete"),
@@ -5790,7 +5790,11 @@ function outer() { function nested() { return false; } return "outer"; }
                 result = code2petri(source_path, output_file=html_path, target_function=target)
                 with open(html_path, encoding="utf-8") as html_file:
                     metadata = _extract_embedded_data(html_file.read())["document"]["return_metadata"]
-                self.assertEqual(metadata["declared"]["expression"], declared)
+                declaration = metadata["declared"]
+                if target == "asyncValue":
+                    declaration = metadata["roles"]["immediate"]["declared"]
+                    self.assertEqual(metadata["roles"]["awaited"]["declared"]["expression"], "number")
+                self.assertEqual(declaration["expression"], declared)
                 self.assertEqual(metadata["analysis_status"], "unknown")
                 self.assertEqual(metadata["inferred"], [])
                 self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
