@@ -11,6 +11,17 @@ from code2petri.model import PetriNet, Transition, Place
 from code2petri.viewer import generate_html
 
 
+_CANONICAL_SNAPSHOT_ASSERTION_JS = r"""
+function assertCanonicalSnapshot(value) {
+  if (!value || typeof value !== 'object') return;
+  if (value.group === 'nodes' && value.data && Object.prototype.hasOwnProperty.call(value.data, 'consumedSubgraph')) {
+    throw new Error('snapshot retained a legacy restoration alias');
+  }
+  Object.keys(value).forEach(key => assertCanonicalSnapshot(value[key]));
+}
+"""
+
+
 def _extract_embedded_data(html_content: str) -> dict:
     """Helper to extract and parse the embedded code2petri-data JSON block."""
     match = re.search(
@@ -6069,7 +6080,7 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
     def test_fold_save_open_continue_and_unfold_round_trip(self):
-        script = r"""
+        script = _CANONICAL_SNAPSHOT_ASSERTION_JS + r"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 const { LiveFoldReductionEngine } = require('./code2petri/viewer/engine/reduction_engine.js');
 const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
@@ -6094,7 +6105,38 @@ const doc = {
   originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
   calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
 };
-const snapshot = parseFoldStateSnapshot(serializeFoldStateSnapshot({ cy: cy1, engine: engine1, document: doc }));
+const serialized = serializeFoldStateSnapshot({ cy: cy1, engine: engine1, document: doc });
+const snapshot = parseFoldStateSnapshot(serialized);
+function makeCompatibilityVariant(mode) {
+  const variant = JSON.parse(JSON.stringify(serialized));
+  function visit(value) {
+    if (Array.isArray(value)) return value.forEach(visit);
+    if (!value || typeof value !== 'object') return;
+    if (value.group === 'nodes' && value.data && value.data.consumedSubnet) {
+      if (mode === 'legacy' || (mode === 'mixed' && value.data.id === 'c_01')) {
+        value.data.consumedSubgraph = value.data.consumedSubnet;
+        delete value.data.consumedSubnet;
+      } else if (mode === 'both') {
+        value.data.consumedSubgraph = JSON.parse(JSON.stringify(value.data.consumedSubnet));
+      }
+    }
+    Object.keys(value).forEach(key => visit(value[key]));
+  }
+  visit(variant);
+  return variant;
+}
+for (const mode of ['legacy', 'both', 'mixed']) {
+  const opened = parseFoldStateSnapshot(JSON.stringify(makeCompatibilityVariant(mode)));
+  const resumedCy = cytoscape({ elements: opened.elements });
+  const resumedEngine = new LiveFoldReductionEngine(resumedCy);
+  resumedEngine.cfg = opened.engine.cfg;
+  resumedEngine.stepCounter = opened.engine.stepCounter;
+  resumedEngine.rememberedCustomNames = new Map(opened.engine.rememberedCustomNames);
+  const resumedFold = resumedEngine.executeSinglePlaceContraction(resumedCy.getElementById('p3'));
+  if (!resumedFold.success) throw new Error(mode + ' session could not continue folding: ' + resumedFold.reason);
+  const resaved = serializeFoldStateSnapshot({ cy: resumedCy, engine: resumedEngine, document: doc });
+  assertCanonicalSnapshot(resaved);
+}
 const cy2 = cytoscape({ elements: snapshot.elements });
 const engine2 = new LiveFoldReductionEngine(cy2);
 engine2.cfg = snapshot.engine.cfg;
@@ -6130,7 +6172,7 @@ console.log('PASS');
 
     def test_deeply_nested_session_download_is_compact_and_lossless(self):
         """Ticket 51: production download keeps one restoration branch and unfolds all levels."""
-        script = r"""
+        script = _CANONICAL_SNAPSHOT_ASSERTION_JS + r"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 const { LiveFoldReductionEngine } = require('./code2petri/viewer/engine/reduction_engine.js');
 const { downloadFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
@@ -6170,14 +6212,7 @@ for (let i = 1; i < measurements.length; i++) {
   if (measurements[i].bytes > measurements[i - 1].bytes * 4) throw new Error('nested snapshot size grew recursively');
 }
 if (/\n\s+"/.test(result.json)) throw new Error('download JSON is indented');
-function assertCanonical(value) {
-  if (!value || typeof value !== 'object') return;
-  if (value.group === 'nodes' && value.data && Object.prototype.hasOwnProperty.call(value.data, 'consumedSubgraph')) {
-    throw new Error('legacy consumedSubgraph alias was serialized for ' + value.data.id);
-  }
-  Object.keys(value).forEach(key => assertCanonical(value[key]));
-}
-assertCanonical(result.snapshot);
+assertCanonicalSnapshot(result.snapshot);
 const restored = parseFoldStateSnapshot(result.json);
 const cy2 = cytoscape({ elements: restored.elements });
 const engine2 = new LiveFoldReductionEngine(cy2);
@@ -6204,9 +6239,95 @@ console.log('PASS ' + JSON.stringify(measurements));
         print(proc.stdout.strip())
         self.assertRegex(proc.stdout, r"PASS \[\{\"depth\":3,\"bytes\":\d+,\"elapsedMs\":\d+\}")
 
+    def test_snapshot_profile_separates_stages_across_900_node_shapes(self):
+        """Record capture, encoding, Blob, initiation, and output size for three snapshot shapes."""
+        script = r"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const { performance } = require('node:perf_hooks');
+const { LiveFoldReductionEngine } = require('./code2petri/viewer/engine/reduction_engine.js');
+const { serializeFoldStateSnapshot, downloadFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+function makeElements() {
+  const elements = [];
+  for (let i = 0; i < 14; i++) elements.push({ group: 'nodes', data: { id: 'p' + i, type: 'Place', label: 'p' + i }, classes: 'place' });
+  for (let i = 0; i < 13; i++) {
+    elements.push({ group: 'nodes', data: { id: 't' + i, type: 'Transition', label: 't' + i, tau: 1.5 }, classes: 'transition' });
+    elements.push({ group: 'edges', data: { id: 'chain-' + (2 * i), source: 'p' + i, target: 't' + i, weight: 1 } });
+    elements.push({ group: 'edges', data: { id: 'chain-' + (2 * i + 1), source: 't' + i, target: 'p' + (i + 1), weight: 1 } });
+  }
+  for (let i = 0; i < 873; i++) elements.push({ group: 'nodes', data: { id: 'x' + i, type: i % 2 ? 'Transition' : 'Place', label: 'x' + i } });
+  for (let i = 0; i < 878; i++) elements.push({ group: 'edges', data: { id: 'extra-' + i, source: 'x' + (i % 873), target: 'x' + ((i + 1) % 873), weight: 1 } });
+  return elements;
+}
+const documentContext = {
+  title: '900 Node Profile', sourceFile: '', filename: 'profile.pnml', functionName: '', mode: 'composite',
+  originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
+  calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
+};
+function profile(shape, foldCount) {
+  const cy = cytoscape({ elements: makeElements() });
+  const engine = new LiveFoldReductionEngine(cy);
+  for (let i = 1; i <= foldCount; i++) {
+    const folded = engine.executeSinglePlaceContraction(cy.getElementById('p' + i));
+    if (!folded.success) throw new Error(shape + ' setup failed at fold ' + i + ': ' + folded.reason);
+  }
+  let started = performance.now();
+  const snapshot = serializeFoldStateSnapshot({ cy, engine, document: documentContext });
+  const captureMs = performance.now() - started;
+  started = performance.now();
+  const json = JSON.stringify(snapshot);
+  const encodingMs = performance.now() - started;
+  started = performance.now();
+  const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+  const blobCreationMs = performance.now() - started;
+  if (blob.size !== Buffer.byteLength(json, 'utf8')) throw new Error(shape + ' Blob byte count mismatch');
+  let objectUrlCreatedAt = null;
+  let downloadInitiationMs = null;
+  global.URL = {
+    createObjectURL() { objectUrlCreatedAt = performance.now(); return 'blob:' + shape; },
+    revokeObjectURL() {}
+  };
+  global.document = {
+    body: { appendChild() {}, removeChild() {} },
+    createElement() {
+      return { click() { downloadInitiationMs = performance.now() - objectUrlCreatedAt; } };
+    }
+  };
+  global.setTimeout = () => 1;
+  started = performance.now();
+  const saved = downloadFoldStateSnapshot({ cy, engine, document: documentContext });
+  const totalSaveMs = performance.now() - started;
+  const byteLength = Buffer.byteLength(saved.json, 'utf8');
+  if (byteLength !== blob.size) throw new Error(shape + ' saved JSON byte count changed');
+  if (downloadInitiationMs === null) throw new Error(shape + ' did not reach the anchor click');
+  return {
+    shape,
+    originalNodes: 900,
+    visibleNodes: cy.nodes().length,
+    bytes: byteLength,
+    captureMs,
+    encodingMs,
+    blobCreationMs,
+    downloadInitiationMs,
+    totalSaveMs
+  };
+}
+const results = [profile('fresh', 0), profile('folded', 1), profile('deeply-folded', 12)];
+console.log(JSON.stringify(results));
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Node profile failed: {proc.stderr}")
+        profiles = json.loads(proc.stdout.strip())
+        self.assertEqual([item["shape"] for item in profiles], ["fresh", "folded", "deeply-folded"])
+        for item in profiles:
+            self.assertEqual(item["originalNodes"], 900)
+            self.assertGreater(item["bytes"], 0)
+            for stage in ("captureMs", "encodingMs", "blobCreationMs", "downloadInitiationMs", "totalSaveMs"):
+                self.assertGreaterEqual(item[stage], 0)
+        print("Snapshot stage profile:", json.dumps(profiles, sort_keys=True))
+
     def test_snapshot_capture_normalizes_legacy_aliases_without_mutating_live_data(self):
         """Legacy-only and dual-field restoration records canonicalize on capture."""
-        script = r"""
+        script = _CANONICAL_SNAPSHOT_ASSERTION_JS + r"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
 const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
 const child = id => ({ group: 'nodes', data: { id }, classes: 'transition' });
@@ -6270,18 +6391,11 @@ const bothInput = JSON.parse(JSON.stringify(snapshot));
 transformRestoration(bothInput, 'both', false);
 const mixedInput = JSON.parse(JSON.stringify(snapshot));
 transformRestoration(mixedInput, 'legacy', true);
-function assertCanonical(value) {
-  if (!value || typeof value !== 'object') return;
-  if (value.group === 'nodes' && value.data && Object.prototype.hasOwnProperty.call(value.data, 'consumedSubgraph')) {
-    throw new Error('resave retained legacy restoration alias');
-  }
-  Object.keys(value).forEach(key => assertCanonical(value[key]));
-}
 for (const input of [legacyInput, bothInput, mixedInput]) {
   const opened = parseFoldStateSnapshot(JSON.stringify(input));
   const reopenedCy = cytoscape({ elements: opened.elements });
   const resaved = serializeFoldStateSnapshot({ cy: reopenedCy, engine, document: documentContext });
-  assertCanonical(resaved);
+  assertCanonicalSnapshot(resaved);
 }
 const bothParsed = parseFoldStateSnapshot(JSON.stringify(bothInput));
 const bothNode = bothParsed.elements.find(element => element.data.id === 'canonical-owner').data;
