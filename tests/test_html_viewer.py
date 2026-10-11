@@ -5494,10 +5494,11 @@ let filename = null;
 global.Blob = function(parts, options) { this.content = parts.join(''); this.type = options.type; blob = this; };
 const download = downloadFoldStateSnapshot({
   cy, engine, document: documentContext,
+  htmlFilename: '/reports/Generated Diagram.html',
   downloadBlob: function(createdBlob, createdFilename) { blob = createdBlob; filename = createdFilename; }
 });
 const parsed = JSON.parse(download.json);
-if (filename !== 'Order Flow_session.json') throw new Error('wrong filename: ' + filename);
+if (filename !== 'Generated Diagram_session_save.json') throw new Error('wrong filename: ' + filename);
 if (!blob || blob.type !== 'application/json;charset=utf-8') throw new Error('wrong Blob type');
 if (parsed.elements.length !== snapshot.elements.length) throw new Error('download payload differs');
 if (download.json.includes('CLIENT-SIDE APPLICATION LOGIC') || download.json.includes('<script')) throw new Error('viewer code leaked');

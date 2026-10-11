@@ -99,12 +99,19 @@
     };
   }
 
-  function getFoldStateSnapshotFilename(netTitle) {
-    const raw = String(netTitle || '').trim();
-    const safeTitle = raw
+  function getFoldStateSnapshotFilename(htmlFilename) {
+    const raw = String(htmlFilename || '').trim();
+    let basename = raw.replace(/\\/g, '/').split('/').pop();
+    try {
+      basename = decodeURIComponent(basename);
+    } catch (_) {
+      // Keep the literal filename when the URL contains malformed escapes.
+    }
+    const htmlStem = basename.replace(/\.html?$/i, '');
+    const safeStem = htmlStem
       .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
       .replace(/[. ]+$/g, '');
-    return (safeTitle || 'petri_net') + '_session.json';
+    return (safeStem || 'petri_net') + '_session_save.json';
   }
 
   function _invalidSnapshot(reason) {
@@ -691,7 +698,8 @@
     const snapshot = serializeFoldStateSnapshot(opts);
     const json = JSON.stringify(snapshot);
     const title = opts.document && opts.document.title;
-    const filename = opts.filename || getFoldStateSnapshotFilename(title);
+    const htmlFilename = opts.htmlFilename || (opts.document && opts.document.htmlFilename) || title;
+    const filename = opts.filename || getFoldStateSnapshotFilename(htmlFilename);
     if (typeof Blob !== 'function') throw new Error('This browser cannot create a session download');
     const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
     const downloadBlob = opts.downloadBlob || _downloadBlob;

@@ -2293,6 +2293,9 @@
             downloadFoldStateSnapshot({
               cy: cy,
               engine: foldEngine,
+              htmlFilename: window.location && window.location.pathname
+                ? window.location.pathname.split('/').pop()
+                : '',
               document: getFoldStateDocumentContext()
             });
           } catch (error) {
