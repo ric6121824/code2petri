@@ -9,6 +9,7 @@ from code2petri.engine import code2petri, main, TEXT_SERIALIZERS
 from code2petri.fold import FoldConfig, fold_net, FoldResult
 from code2petri.model import PetriNet, Transition, Place
 from code2petri.viewer import generate_html
+from tests.petri_assertions import assert_valid_petri_net
 
 
 _CANONICAL_SNAPSHOT_ASSERTION_JS = r"""
@@ -868,6 +869,62 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
         self.assertEqual(data["document"]["function_name"], "Global Scope")
         self.assertIn(">Global Scope</span>", content)
         self.assertNotIn(">(global)</span>", content)
+
+    def test_single_file_global_html_starts_with_same_file_callees_inlined(self):
+        source_path = os.path.join(self.temp_dir.name, "single_file_global.py")
+        out_html = os.path.join(self.temp_dir.name, "single_file_global.html")
+        with open(source_path, "w", encoding="utf-8") as source_file:
+            source_file.write(
+                "def leaf():\n    value = 1\n\n"
+                "def middle():\n    leaf()\n\n"
+                "def outer():\n    middle()\n\n"
+                "def recursive_a():\n    recursive_a()\n\n"
+                "outer()\nrecursive_a()\n"
+            )
+
+        result = code2petri(
+            source_path=source_path,
+            target_function="(global)",
+            output_file=out_html,
+            inline_depth=2,
+        )
+        self.assertIsInstance(result, PetriNet)
+        with open(out_html, encoding="utf-8") as html_file:
+            data = _extract_embedded_data(html_file.read())
+
+        self.assertEqual(data["mode"], "composite")
+        composite = data["composite_net"]
+        assert_valid_petri_net(self, result)
+        compounds = composite["compounds"]
+        inlined_names = [compound["function_name"] for compound in compounds]
+        self.assertIn("outer", inlined_names)
+        self.assertIn("middle", inlined_names)
+        self.assertNotIn("leaf", inlined_names, "inline depth 2 must stop before a third callee")
+        self.assertIn("recursive_a", inlined_names)
+        self.assertTrue(any((t.get("metadata") or {}).get("recursive_cycle") for t in composite["transitions"]))
+
+    def test_multi_file_global_html_still_starts_with_callees_inlined(self):
+        source_path = os.path.join(self.temp_dir.name, "entry.py")
+        helper_path = os.path.join(self.temp_dir.name, "helper.py")
+        out_html = os.path.join(self.temp_dir.name, "entry_global.html")
+        with open(source_path, "w", encoding="utf-8") as source_file:
+            source_file.write("helper()\n")
+        with open(helper_path, "w", encoding="utf-8") as helper_file:
+            helper_file.write("def helper():\n    value = 1\n")
+
+        result = code2petri(
+            source_path=source_path,
+            target_function="(global)",
+            context=[helper_path],
+            output_file=out_html,
+        )
+        self.assertIsInstance(result, PetriNet)
+        with open(out_html, encoding="utf-8") as html_file:
+            data = _extract_embedded_data(html_file.read())
+
+        self.assertEqual(data["mode"], "composite")
+        assert_valid_petri_net(self, result)
+        self.assertTrue(any(c.get("function_name") == "helper" for c in data["composite_net"]["compounds"]))
 
     def test_cli_engine_preserves_qualified_method_identity(self):
         """Qualified root method names remain intact in the viewer identity."""

@@ -205,7 +205,9 @@ def code2petri(
 
     # Determine execution modes
     is_html = (ext == "html")
-    effective_inline = inline or (is_html and bool(context) and not fold)
+    effective_inline = inline or (
+        is_html and (bool(context) or target_function == "(global)") and not fold
+    )
     is_composite_html = is_html and (inline or effective_inline)
 
     if is_composite_html and fold:
@@ -220,7 +222,7 @@ def code2petri(
 
     # Inline Expansion (runs first if active)
     if effective_inline:
-        if not context:
+        if not context and not (is_html and target_function == "(global)" and not inline):
             raise AssertionError("Inline expansion requires --context to be provided.")
         if symbol_table is None:
             symbol_table = SymbolTable()
