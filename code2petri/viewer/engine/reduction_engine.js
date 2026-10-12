@@ -613,6 +613,133 @@
           return false;
         }
 
+        _ordinarySingletonTransition(compoundIdOrNode) {
+          const compoundId = typeof compoundIdOrNode === 'string'
+            ? compoundIdOrNode
+            : (compoundIdOrNode && typeof compoundIdOrNode.id === 'function' ? compoundIdOrNode.id() : null);
+          if (!compoundId) return null;
+          const compoundNode = this.cy.getElementById(compoundId);
+          if (!compoundNode || compoundNode.length === 0 || !compoundNode.hasClass('compound')) return null;
+          const children = this.cy.nodes().filter(function(node) {
+            return node.data('parent') === compoundId && node.inside();
+          });
+          if (children.length !== 1 || !children[0].hasClass('transition') || this.isOpaqueTransition(children[0])) return null;
+          return children[0];
+        }
+
+        _isFunctionAtomicForBoundary(compoundIdOrNode) {
+          return this.isFunctionFoldedIntoSingleComponent(compoundIdOrNode) ||
+            Boolean(this._ordinarySingletonTransition(compoundIdOrNode));
+        }
+
+        _allocateComponentId() {
+          let stepNumber = this.stepCounter;
+          let componentId;
+          do {
+            stepNumber++;
+            componentId = 'c_' + String(stepNumber).padStart(2, '0');
+          } while (this.cy.getElementById(componentId).length > 0);
+          this.stepCounter = stepNumber;
+          return { stepNumber: stepNumber, componentId: componentId };
+        }
+
+        _completeOrdinarySingletonFunction(compoundIdOrNode) {
+          const compoundId = typeof compoundIdOrNode === 'string'
+            ? compoundIdOrNode
+            : (compoundIdOrNode && typeof compoundIdOrNode.id === 'function' ? compoundIdOrNode.id() : null);
+          const child = this._ordinarySingletonTransition(compoundId);
+          if (!child) return null;
+
+          const inEdges = child.incomers('edge');
+          const outEdges = child.outgoers('edge');
+          if (inEdges.length !== 1 || outEdges.length !== 1 ||
+              !inEdges[0].source().hasClass('place') || !outEdges[0].target().hasClass('place')) return null;
+
+          const allocation = this._allocateComponentId();
+          const opaqueId = allocation.componentId;
+          const originalNode = {
+            group: 'nodes',
+            data: Object.assign({}, child.data()),
+            classes: child.classes().join(' '),
+            position: Object.assign({}, child.position())
+          };
+          const copyArc = function(edge, direction) {
+            return {
+              edgeId: edge.id(),
+              sourceId: edge.source().id(),
+              targetId: edge.target().id(),
+              originalSourceId: direction === 'out' ? child.id() : undefined,
+              originalTargetId: direction === 'in' ? child.id() : undefined,
+              data: Object.assign({}, edge.data()),
+              weight: edge.data('weight') === undefined ? 1 : edge.data('weight'),
+              classes: edge.classes().join(' ')
+            };
+          };
+          const boundaryInArcs = inEdges.map(function(edge) {
+            const arc = copyArc(edge, 'in');
+            arc.targetId = opaqueId;
+            return arc;
+          });
+          const boundaryOutArcs = outEdges.map(function(edge) {
+            const arc = copyArc(edge, 'out');
+            arc.sourceId = opaqueId;
+            return arc;
+          });
+          const tauValue = child.data('tau') === undefined || child.data('tau') === null
+            ? 1.0
+            : parseFloat(child.data('tau'));
+          const tau = isNaN(tauValue) ? 1.0 : tauValue;
+          const consumedSubnet = {
+            stepNumber: allocation.stepNumber,
+            opaqueId: opaqueId,
+            componentType: 'Function',
+            omega: 0,
+            tau: tau,
+            parentCompound: compoundId,
+            consumedTransIds: [child.id()],
+            nodes: [originalNode],
+            internalEdges: [],
+            consumedCompounds: [],
+            boundaryInArcs: boundaryInArcs,
+            boundaryOutArcs: boundaryOutArcs,
+            atomicFunctionCompletion: true
+          };
+
+          inEdges.concat(outEdges).forEach(edge => this.cy.remove(edge));
+          this.cy.remove(child);
+          const opaqueNode = this._createOpaqueComponentNode({
+            opaqueId: opaqueId,
+            label: opaqueId,
+            rawLabel: child.data('raw_label') || child.data('label') || child.id(),
+            tau: tau,
+            omega: 0,
+            componentType: 'Function',
+            parentId: compoundId,
+            consumedSubnet: consumedSubnet,
+            position: originalNode.position
+          });
+          const self = this;
+          boundaryInArcs.concat(boundaryOutArcs).forEach(function(arc, index) {
+            const baseId = `arc_atomic_${opaqueId}_${index}`;
+            let edgeId = baseId;
+            let suffix = 0;
+            while (self.cy.getElementById(edgeId).length > 0) edgeId = `${baseId}_${++suffix}`;
+            const edgeData = Object.assign({}, arc.data || {}, {
+              id: edgeId,
+              source: arc.sourceId,
+              target: arc.targetId,
+              weight: arc.weight
+            });
+            self.cy.add({
+              group: 'edges',
+              data: edgeData,
+              classes: arc.classes || 'arc'
+            });
+          });
+          this._updateCollapsedCompoundStates();
+          return { opaqueId: opaqueId, stepNumber: allocation.stepNumber, node: opaqueNode, consumedSubnet: consumedSubnet };
+        }
+
         _findInternalOpaqueChild(compoundId) {
           const self = this;
           const directOpaqueChildren = this.cy.nodes().filter(function(n) {
@@ -633,14 +760,15 @@
             edgeId = `${baseEdgeId}_${++counter}`;
           }
 
+          const edgeData = Object.assign({}, bArc.data || {}, {
+            id: edgeId,
+            source: sourceId,
+            target: targetId,
+            weight: bArc.weight === undefined ? 1 : bArc.weight
+          });
           this.cy.add({
             group: 'edges',
-            data: {
-              id: edgeId,
-              source: sourceId,
-              target: targetId,
-              weight: bArc.weight || 1
-            },
+            data: edgeData,
             classes: bArc.classes || 'arc'
           });
         }
@@ -868,7 +996,7 @@
           const parentSnk = t_snk.data('parent') || null;
 
           if (parentSrc !== null && parentSrc !== parentPlace) {
-            if (!this.isFunctionFoldedIntoSingleComponent(parentSrc)) {
+            if (!this._isFunctionAtomicForBoundary(parentSrc)) {
               return {
                 ok: false,
                 reason: `Preceding transition belongs to function container '${parentSrc}', which is not yet folded into a single component node.`
@@ -876,7 +1004,7 @@
             }
           }
           if (parentSnk !== null && parentSnk !== parentPlace) {
-            if (!this.isFunctionFoldedIntoSingleComponent(parentSnk)) {
+            if (!this._isFunctionAtomicForBoundary(parentSnk)) {
               return {
                 ok: false,
                 reason: `Succeeding transition belongs to function container '${parentSnk}', which is not yet folded into a single component node.`
@@ -1375,6 +1503,23 @@
               message: 'This function is already fully collapsed.'
             };
           }
+
+          const nestedCompounds = compound.descendants().filter(function(node) {
+            return node.hasClass('compound');
+          }).sort((left, right) =>
+            this._getNodeAncestors(right.id()).length - this._getNodeAncestors(left.id()).length
+          );
+          nestedCompounds.push(compound);
+          nestedCompounds.forEach(function(functionNode) {
+            const completion = this._completeOrdinarySingletonFunction(functionNode);
+            if (completion) {
+              folded.push({
+                placeId: null,
+                foldType: 'function_singleton',
+                componentId: completion.opaqueId
+              });
+            }
+          }, this);
 
           while (compound.inside() && !this.isFunctionFoldedIntoSingleComponent(compound)) {
             const descendantPlaces = compound.descendants().filter(function(node) {

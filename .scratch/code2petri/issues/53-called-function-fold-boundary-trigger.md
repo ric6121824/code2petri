@@ -48,3 +48,21 @@ The [diagnostic replay and reproduction notes](../debug/called-function-boundary
 ### 2026-10-10 — Ticket rewrite
 
 Rewritten with to-tickets as one complete, independently verifiable folding fix covering eligibility, UI actions, restoration, and regression evidence. No prefactoring ticket or outstanding blocking edge is required.
+
+### 2026-10-12 — Reopened: Tic Tac Toe `create_board()`
+
+The user reports that `create_board()` also cannot be folded in the Tic Tac Toe global viewer because its entrance and exit places are not marked green. This is a new affected game/function occurrence for the called-function folding issue. The reported missing green highlights suggest the boundary places are not being offered as eligible fold triggers; inspect the generated viewer and determine whether this is the same shared-boundary eligibility/trigger problem described above.
+
+The supplied Tic Tac Toe global session save (`/Users/pingchungtsai/Downloads/tic_tac_toe_global_foldable_session_save.json`) contains two depth-0 `create_board()` compounds (`compound_create_board` and `compound_inline_create_board_t123`) with preassembled subnets. The snapshot captures the saved graph state but does not encode green-highlight state or a fold attempt, so it is supporting context rather than a reproduction. Re-triage and inspect this occurrence before treating the ticket's previous acceptance checks as complete.
+
+### 2026-10-12 — Ordinary singleton acceptance case
+
+- [x] An ordinary singleton-transition function stays expanded and retains its called-function compound until the user selects Fold Entire Function. Initial load/highlight refresh does not create a component or advance the fold counter.
+- [x] A safe ordinary singleton with caller-owned entry/exit places is accepted as atomic for the surrounding Sequence boundary eligibility checks, without relaxing containment for other function shapes.
+- [x] Fold Entire Function replaces only the singleton transition with one reversible opaque component inside the same compound, keeps the existing brown Collapsed Compound State presentation, preserves caller boundaries, source/function identity, transition weight, zero penalty, and SM, and reports success/completion with zero place-reduction passes.
+- [x] Repeating the function action is a safe no-op. Component-Local Unfold restores the original ordinary transition, metadata, hierarchy, and arcs; if a caller Sequence later consumes the completed function, unfolding that Sequence restores the function's previously expanded or explicitly collapsed state.
+- [x] The sidebar action reports completion, performs one final layout, and preserves zoom/pan. Existing Choice, containment, nested-function, and unfold behavior remains covered by the Ticket 53 regressions.
+
+### 2026-10-12 — Implementation complete
+
+Added a reversible zero-penalty completion for ordinary singleton-transition functions and narrowly allowed that shape through function-boundary Sequence eligibility. The action traverses nested compounds before reducing the selected function's places. Regression coverage verifies initial state, highlights, collapsed styling, repeated action, weight/SM preservation, metadata and arc restoration, caller-boundary Sequence folding/unfolding, sidebar viewport/layout behavior, and existing Ticket 53 protections. Focused and full-suite results are recorded in the round-03 implementation review.

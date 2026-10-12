@@ -6460,6 +6460,147 @@ console.log('PASS');
 
 
 class TestFoldEntireFunction(unittest.TestCase):
+    def test_ordinary_singleton_nested_function_is_completed_by_outer_action(self):
+        net = """{
+  compounds: [
+    { id: 'caller', label: 'caller()' },
+    { id: 'outer', label: 'outer()', function_name: 'outer', parent: 'caller' },
+    { id: 'inner', label: 'create_board()', function_name: 'create_board', parent: 'outer' }
+  ],
+  places: [{ id: 'caller_entry', parent: 'caller' }, { id: 'caller_exit', parent: 'caller' }, { id: 'outer_entry', parent: 'outer' }, { id: 'outer_exit', parent: 'outer' }],
+  transitions: [{ id: 'outer_before', parent: 'outer' }, { id: 'inner_return', parent: 'inner', tau: 2 }, { id: 'outer_after', parent: 'outer' }],
+  arcs: [
+    { source: 'caller_entry', target: 'outer_before' }, { source: 'outer_before', target: 'outer_entry' },
+    { source: 'outer_entry', target: 'inner_return' }, { source: 'inner_return', target: 'outer_exit' },
+    { source: 'outer_exit', target: 'outer_after' }, { source: 'outer_after', target: 'caller_exit' }
+  ]
+}"""
+        test_logic = r"""
+const result = foldEngine.executeFoldEntireFunction('outer');
+if (!result.success || !result.complete) throw new Error('Outer function action did not complete nested singleton: ' + JSON.stringify(result));
+if (!result.folded.some(item => item.foldType === 'function_singleton')) throw new Error('Nested singleton completion was not recorded as progress');
+if (!cy.getElementById('outer').hasClass('collapsed-compound')) throw new Error('Outer function did not collapse after nested completion');
+if (!cy.getElementById('caller_entry').length || !cy.getElementById('caller_exit').length) throw new Error('Nested completion consumed caller boundaries');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Nested singleton completion failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_ordinary_singleton_function_is_boundary_eligible_and_reversibly_foldable(self):
+        net = """{
+  compounds: [
+    { id: 'caller', label: 'caller()' },
+    { id: 'fn', label: 'create_board()', function_name: 'create_board', parent: 'caller', function_ref: 'objects.py::create_board@28:0' }
+  ],
+  places: [
+    { id: 'p_entry', label: 'entry', parent: 'caller' },
+    { id: 'p_exit', label: 'exit', parent: 'caller' }
+  ],
+  transitions: [
+    { id: 't_before', label: 'initialize()', parent: 'caller', tau: 1.25 },
+    { id: 't_return', label: "return ['#']", raw_label: "return ['#']", parent: 'fn', tau: 2.5, metadata: { function_ref: 'objects.py::create_board@28:0' } },
+    { id: 't_after', label: 'render()', parent: 'caller', tau: 3.0 }
+  ],
+  arcs: [
+    { id: 'a0', source: 't_before', target: 'p_entry', weight: 2, custom: 'in' },
+    { id: 'a1', source: 'p_entry', target: 't_return', weight: 3, custom: 'return-in' },
+    { id: 'a2', source: 't_return', target: 'p_exit', weight: 4, custom: 'return-out' },
+    { id: 'a3', source: 'p_exit', target: 't_after', weight: 5, custom: 'out' }
+  ]
+}"""
+        test_logic = r"""
+const fn = cy.getElementById('fn');
+const entry = cy.getElementById('p_entry');
+const exit = cy.getElementById('p_exit');
+cy.getElementById('a1').data({ weight: 3, custom: 'return-in' });
+cy.getElementById('a2').data({ weight: 4, custom: 'return-out' });
+const originalSm = foldEngine.calculateSMScore();
+if (!entry.hasClass('contractible') || !exit.hasClass('contractible')) throw new Error('Caller boundaries were not highlighted initially');
+if (!cy.getElementById('t_return').length || cy.getElementById('t_return').data('is_opaque')) throw new Error('Initial return transition was not visible and ordinary');
+if (fn.hasClass('collapsed-compound') || foldEngine.stepCounter !== 0) throw new Error('Initial highlight refresh changed the function representation');
+if (foldEngine.isFunctionFoldedIntoSingleComponent(fn)) throw new Error('Expanded singleton was incorrectly treated as explicitly folded');
+if (foldEngine.getFoldType(entry) !== 'sequence' || foldEngine.getFoldType(exit) !== 'sequence') throw new Error('Boundary places are not eligible for the usual Sequence action');
+const completion = foldEngine.executeFoldEntireFunction(fn);
+if (!completion.success || !completion.complete || completion.passes !== 0) throw new Error('Singleton completion failed: ' + JSON.stringify(completion));
+if (!fn.hasClass('collapsed-compound') || !fn.data('label').includes('create_board (c_')) throw new Error('Function did not enter the brown component-style collapsed state');
+if (cy.nodes().filter(n => n.data('parent') === 'fn').length !== 1) throw new Error('Expected one opaque child inside the function');
+const component = cy.nodes().filter(n => n.data('parent') === 'fn')[0];
+const componentId = component.id();
+if (!component.data('is_opaque') || component.data('tau') !== 2.5 || component.data('omega') !== 0) throw new Error('Opaque child did not preserve weight and zero penalty');
+if (!component.data('consumedSubnet') || !component.data('consumedSubnet').atomicFunctionCompletion) throw new Error('Missing atomic singleton restoration record');
+if (!entry.inside() || !exit.inside() || !cy.getElementById('t_before').length || !cy.getElementById('t_after').length) throw new Error('Function completion changed caller graph elements');
+if (foldEngine.calculateSMScore() !== originalSm) throw new Error('Singleton completion changed Structuredness Metric');
+const stepAfterFold = foldEngine.stepCounter;
+const repeated = foldEngine.executeFoldEntireFunction(fn);
+if (repeated.success || !repeated.complete || foldEngine.stepCounter !== stepAfterFold || cy.getElementById(componentId).length !== 1) throw new Error('Repeated function action was not a safe no-op');
+const unfolded = foldEngine.executeComponentLocalUnfold(fn);
+if (!unfolded.success || fn.hasClass('collapsed-compound')) throw new Error('Component-Local Unfold failed to restore expanded function');
+const restored = cy.getElementById('t_return');
+if (!restored.length || restored.data('function_ref') !== 'objects.py::create_board@28:0') throw new Error('Function reference metadata was not restored');
+for (const [id, source, target, weight, custom] of [['a1','p_entry','t_return',3,'return-in'],['a2','t_return','p_exit',4,'return-out']]) {
+  const arc = cy.getElementById(id);
+  if (!arc.length || arc.data('source') !== source || arc.data('target') !== target || arc.data('weight') !== weight || arc.data('custom') !== custom) throw new Error('Original arc was not exactly restored: ' + id);
+}
+if (foldEngine._ordinarySingletonTransition(fn).id() !== 't_return') throw new Error('Restored function is not an ordinary singleton');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Ordinary singleton completion failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_ordinary_singleton_sidebar_action_and_boundary_sequence_unfold_preserve_prior_state(self):
+        html = _read_template_html()
+        action_match = re.search(
+            r"function handleFoldEntireFunction\(compoundNode\) \{.*?"
+            r"if \(hudEls\.foldEntireFunctionBtnEl\) \{.*?\n      \}", html, re.DOTALL
+        )
+        fold_helpers = re.search(
+            r"function refreshFoldActionView\(viewportBefore\) \{.*?"
+            r"function formatFoldActionResult\(result\) \{.*?\n      \}", html, re.DOTALL
+        )
+        self.assertIsNotNone(action_match)
+        self.assertIsNotNone(fold_helpers)
+        net = """{
+  compounds: [{ id: 'caller', label: 'caller()' }, { id: 'fn', label: 'create_board()', function_name: 'create_board', parent: 'caller' }],
+  places: [{ id: 'entry', parent: 'caller' }, { id: 'exit', parent: 'caller' }],
+  transitions: [{ id: 'before', parent: 'caller' }, { id: 'body', parent: 'fn', tau: 1.75 }, { id: 'after', parent: 'caller' }],
+  arcs: [{ source: 'before', target: 'entry' }, { source: 'entry', target: 'body' }, { source: 'body', target: 'exit' }, { source: 'exit', target: 'after' }]
+}"""
+        test_logic = f"""
+const inspectorActionResult = {{ textContent: '' }};
+const hudBtnFoldEntireFunction = {{ style: {{ display: 'none' }}, listener: null, addEventListener: function(name, listener) {{ this.listener = listener; }} }};
+const hudEls = {{ foldEntireFunctionBtnEl: hudBtnFoldEntireFunction }};
+const DAGRE_LAYOUT_OPTIONS = {{ name: 'dagre' }};
+let layoutCount = 0;
+cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
+cy.zoom(1.4); cy.pan({{ x: 27, y: -13 }});
+{action_match.group(0)}
+{fold_helpers.group(0)}
+const compound = cy.getElementById('fn');
+openInspector(compound);
+if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('Singleton function action was hidden initially');
+hudBtnFoldEntireFunction.listener({{ stopPropagation: function() {{}} }});
+if (!compound.hasClass('collapsed-compound') || !inspectorActionResult.textContent.includes('fully collapsed')) throw new Error('Sidebar did not complete singleton function');
+if (layoutCount !== 1 || cy.zoom() !== 1.4 || cy.pan().x !== 27 || cy.pan().y !== -13) throw new Error('Sidebar action did not preserve the viewport with one layout');
+if (hudBtnFoldEntireFunction.style.display !== 'none') throw new Error('Fold action remained visible after completion');
+const component = cy.nodes().filter(n => n.data('parent') === 'fn')[0];
+const componentId = component.id();
+const trigger = cy.getElementById('entry');
+if (foldEngine.getFoldType(trigger) !== 'sequence') throw new Error('Entry was not eligible after explicit function folding');
+const boundaryFold = foldEngine.executeSinglePlaceContraction(trigger);
+if (!boundaryFold.success) throw new Error('Surrounding boundary Sequence fold failed: ' + boundaryFold.message);
+const restoredBoundary = foldEngine.executeComponentLocalUnfold(cy.getElementById(boundaryFold.node.id()));
+const restoredCompound = cy.getElementById('fn');
+if (!restoredBoundary.success || !restoredCompound.hasClass('collapsed-compound') || !cy.getElementById(componentId).length) throw new Error('Boundary unfold did not restore the prior explicitly collapsed function state');
+const functionUnfold = foldEngine.executeComponentLocalUnfold(restoredCompound);
+if (!functionUnfold.success || cy.getElementById('fn').hasClass('collapsed-compound') || !cy.getElementById('body').length) throw new Error('Function unfold did not restore the ordinary singleton: ' + JSON.stringify({{result:functionUnfold, compound:cy.getElementById('fn').json(), children:cy.nodes().filter(n => n.data('parent') === 'fn').map(n => n.json())}}));
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Singleton sidebar/boundary behavior failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_compound_inspector_offers_action_and_reports_completion(self):
         html = _read_template_html()
         self.assertIn('id="hud-btn-fold-entire-function"', html)
