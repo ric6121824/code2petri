@@ -107,6 +107,7 @@ def code2petri(
     weights: Optional[Union[str, FoldConfig]] = None,
     inline: bool = False,
     inline_depth: Optional[int] = None,
+    project_title: Optional[str] = None,
 ) -> Union[PetriNet, FoldResult, None]:
     """Generates a Petri net from a source file and writes the serialized output.
 
@@ -121,6 +122,7 @@ def code2petri(
     :param weights: Path or JSON string overriding default FoldConfig penalty weights.
     :param inline: If True, activates inline expansion of resolved call transitions (requires context).
     :param inline_depth: Maximum recursion depth for inline expansion (default: unlimited for composite HTML, 1 otherwise).
+    :param project_title: Optional explicit Project Title for generated HTML, independent of the header title.
     :return: The generated PetriNet instance (or FoldResult if fold is active), or None if list_functions is True.
     """
     logger = logging.getLogger("code2petri")
@@ -273,6 +275,7 @@ def code2petri(
                 serializer_kwargs["source_file"] = source_path
                 serializer_kwargs["function_name"] = target_function
                 serializer_kwargs["return_metadata"] = walk_res.return_metadata
+                serializer_kwargs["project_title"] = project_title
                 if symbol_table is not None:
                     serializer_kwargs["callee_nets"] = precompute_callee_nets(
                         call_sites=call_sites,
@@ -310,6 +313,10 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
         "--output", "-o",
         default="out.pnml",
         help="Output file path (.pnml, .dot, .gv, .json, .png, .svg, .html).",
+    )
+    parser.add_argument(
+        "--project-title",
+        help="Explicit human-readable source-project title for HTML output.",
     )
     parser.add_argument(
         "--list-functions",
@@ -386,6 +393,7 @@ def main(sys_argv: Optional[List[str]] = None) -> None:
         weights=args.weights,
         inline=args.inline,
         inline_depth=args.inline_depth,
+        project_title=args.project_title,
     )
 
 

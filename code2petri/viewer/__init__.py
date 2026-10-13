@@ -80,6 +80,7 @@ def generate_html(
     source_file: Optional[str] = None,
     function_name: Optional[str] = None,
     return_metadata: Optional[Dict[str, Any]] = None,
+    project_title: Optional[str] = None,
 ) -> str:
     """Generates a 100% self-contained offline HTML viewer for a PetriNet or FoldResult.
 
@@ -90,6 +91,7 @@ def generate_html(
     :param source_file: Optional source file path or name being visualized.
     :param function_name: Optional root-function identity for the active document.
     :param return_metadata: Optional source-owned return evidence for the root function.
+    :param project_title: Optional human-readable source-project identity, separate from the header title.
     :return: Complete HTML document string with inlined Cytoscape, Dagre, and graph data.
     """
     template = _load_template()
@@ -145,6 +147,10 @@ def generate_html(
     else:
         raise TypeError(f"Expected PetriNet or FoldResult, got {type(net_or_fold).__name__}")
 
+    if project_title is not None and not isinstance(project_title, str):
+        raise TypeError("project_title must be a string or None")
+    normalized_project_title = project_title if project_title and project_title.strip() else None
+
     payload["source_file"] = full_source_path
     payload["filename"] = file_display
     document_metadata = {
@@ -152,6 +158,8 @@ def generate_html(
         "filename": file_display,
         "function_name": root_function_name,
     }
+    if normalized_project_title is not None:
+        document_metadata["project_title"] = normalized_project_title
     root_return_metadata = return_metadata or getattr(
             net_or_fold.initial_net if isinstance(net_or_fold, FoldResult) else net_or_fold,
             "return_metadata", None,

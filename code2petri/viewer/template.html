@@ -427,6 +427,10 @@
     <div id="cy"></div>
 
     <div id="info-panel">
+      <div id="info-project-box" class="info-identity-row">
+        <span class="info-identity-label">Project:</span>
+        <span id="info-project-title" class="info-identity-value">Unavailable</span>
+      </div>
       <div id="info-file-box" class="info-identity-row" style="{{FILE_BOX_STYLE}}">
         <span class="info-identity-label">File:</span>
         <span id="info-filename" class="info-identity-value" title="{{SOURCE_FILE}}">{{FILENAME}}</span>
@@ -547,6 +551,7 @@
 
       const unavailableFunctionName = 'Unavailable';
       let activeDocument = Object.assign({
+        project_title: '',
         source_file: '',
         filename: '',
         function_name: unavailableFunctionName
@@ -561,6 +566,7 @@
           ? documentMetadata
           : {};
         activeDocument = Object.assign({
+          project_title: '',
           source_file: '',
           filename: '',
           function_name: unavailableFunctionName
@@ -572,10 +578,19 @@
         }
 
         const infoFileBox = document.getElementById('info-file-box');
+        const infoProjectTitle = document.getElementById('info-project-title');
         const infoFilename = document.getElementById('info-filename');
         const infoFunctionName = document.getElementById('info-function-name');
         if (infoFileBox) {
           infoFileBox.style.display = activeDocument.filename ? 'flex' : 'none';
+        }
+        const projectTitle = typeof activeDocument.project_title === 'string' &&
+          activeDocument.project_title.trim()
+          ? activeDocument.project_title
+          : 'Unavailable';
+        if (infoProjectTitle) {
+          infoProjectTitle.textContent = projectTitle;
+          infoProjectTitle.title = projectTitle;
         }
         if (infoFilename) {
           infoFilename.textContent = activeDocument.filename;
@@ -2266,6 +2281,7 @@
         const rootCompound = compounds.find(function(compound) { return !compound.parent; }) || null;
         return {
           title: payload.title || {{TITLE_JSON}},
+          projectTitle: typeof activeDocument.project_title === 'string' ? activeDocument.project_title : '',
           sourceFile: payload.source_file || '',
           filename: payload.filename || '',
           functionName: activeDocument.function_name ||
@@ -2360,6 +2376,7 @@
         foldEngine.stepCounter = snapshot.engine.stepCounter;
         foldEngine.rememberedCustomNames = new Map(snapshot.engine.rememberedCustomNames);
         setActiveDocumentMetadata({
+          project_title: typeof doc.projectTitle === 'string' ? doc.projectTitle : '',
           source_file: doc.sourceFile,
           filename: doc.filename,
           function_name: doc.functionName,

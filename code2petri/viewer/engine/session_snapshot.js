@@ -210,6 +210,9 @@
     ['title', 'sourceFile', 'filename', 'functionName', 'mode'].forEach(function(key) {
       _requireString(documentContext[key], 'document.' + key);
     });
+    if (Object.prototype.hasOwnProperty.call(documentContext, 'projectTitle')) {
+      _requireString(documentContext.projectTitle, 'document.projectTitle');
+    }
     if (documentContext.returnMetadata !== undefined && documentContext.returnMetadata !== null) {
       const metadata = documentContext.returnMetadata;
       if (!_isObject(metadata)) _invalidSnapshot('document.returnMetadata must be an object');
