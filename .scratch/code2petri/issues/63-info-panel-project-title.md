@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** resolved
+**Status:** ready-for-human
 
 - [x] The existing CLI and generation API accept an optional explicit Project Title and carry it into the self-contained generated viewer's active document metadata. Preserve human-readable capitalization, spaces, punctuation, and Unicode. Omitted or blank titles are unavailable; do not guess from source/output folders, filenames, run suffixes, or source comments.
 - [x] Batch generation supplies each game's original human-readable name to all Global Scope and named-function HTML outputs before filename normalization. Tic Tac Toe and Dots & Boxes retain those titles across dated and fixed-run outputs; moving or renaming the generated HTML does not change project identity.
@@ -30,4 +30,4 @@ The user approved all Project Title decisions through grill-with-docs and reques
 
 ### 2026-10-13 — Implemented
 
-Implemented in commits `3ec9664` and `ef115ab`. The focused Ticket 63 tests pass, including all-games batch fixtures for Tic Tac Toe and Dots & Boxes across dated/fixed outputs. The full unittest suite ran 563 tests; five pre-existing environment/baseline failures remain (missing `pytest`, missing `pygraphviz`, unrelated walker/API mismatches, and the prototype runner's unavailable test port). The browser tool policy blocked opening a local preview, so the long-title browser rendering check and direct post-open interaction sequence were not performed; the active document metadata is only reset during initialization or incoming-session restore.
+Implementation is complete in commits `3ec9664` and `ef115ab`; human verification remains. The focused Ticket 63 tests pass, including all-games batch fixtures for Tic Tac Toe and Dots & Boxes across dated/fixed outputs. The full unittest suite ran 563 tests; five pre-existing environment/baseline failures remain (missing `pytest`, missing `pygraphviz`, unrelated walker/API mismatches, and the prototype runner's unavailable test port). The browser tool policy blocked opening a local preview, so the long-title browser rendering check and direct post-open interaction sequence were not performed; the active document metadata is only reset during initialization or incoming-session restore.
