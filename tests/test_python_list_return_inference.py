@@ -4,7 +4,11 @@ import tempfile
 import unittest
 
 from code2petri.engine import code2petri
-from tests.test_html_viewer import _extract_embedded_data, _run_node_script
+from tests.test_html_viewer import (
+    _extract_embedded_data,
+    _run_node_script,
+    _setup_live_fold_test_harness,
+)
 
 
 class TestPythonListReturnInferenceWorkflow(unittest.TestCase):
@@ -46,6 +50,10 @@ class TestPythonListReturnInferenceWorkflow(unittest.TestCase):
         self.assertEqual(metadata["inferred"][0]["expression"], "['|'] + [' ' for _ in range(9)]")
         self.assertEqual(metadata["inferred"][0]["type"], "list")
         self.assertEqual(metadata["inferred"][0]["role"], "call_result")
+        self.assertEqual(metadata["inferred"][0]["provenance"], "expression_inference")
+        self.assertEqual(metadata["inferred"][0]["source_location"], {"line": 2, "column": 4})
+        self.assertEqual(metadata["inferred"][0]["expression_location"], {"line": 2, "column": 11})
+        self.assertEqual(metadata["inferred"][0]["evidence"], [])
         self.assertEqual(result.initial_net.to_dict()["return_metadata"], metadata)
         self.assertIn('id="info-return-metadata"', html_content)
 
@@ -86,6 +94,22 @@ if (JSON.stringify(reopened.document.returnMetadata) !== JSON.stringify(metadata
 }}
 if (JSON.stringify(reopened.document.originalNet.return_metadata) !== JSON.stringify(metadata)) {{
   throw new Error('public net metadata changed during offline save/open');
+}}
+const reopenedVisible = display(reopened.document.returnMetadata);
+if (!reopenedVisible.root.includes('Inferred result: list') ||
+    !reopenedVisible.call.includes('Inferred type at this return: list')) {{
+  throw new Error('reopened offline viewer no longer displays list metadata');
+}}
+const olderUnknown = JSON.parse(JSON.stringify(metadata));
+olderUnknown.analysis_status = 'unknown';
+olderUnknown.inferred_types = [];
+olderUnknown.inferred[0].type = 'unknown';
+document.returnMetadata = olderUnknown;
+document.originalNet.return_metadata = olderUnknown;
+const oldSnapshot = serializeFoldStateSnapshot({{ cy, engine, document }});
+const oldReopened = parseFoldStateSnapshot(oldSnapshot);
+if (JSON.stringify(oldReopened.document.returnMetadata) !== JSON.stringify(olderUnknown)) {{
+  throw new Error('previously saved unknown result was reanalyzed or changed on open');
 }}
 console.log('PASS');
 """
@@ -243,6 +267,34 @@ def partial_list_observation(rows):
             composite_result.to_dict()["function_metadata_registry"][references[0]]["inferred_types"],
             ["list"],
         )
+
+        source_transition = next(
+            item for item in composite_net["transitions"]
+            if item.get("parent") == board_compound["id"]
+        )
+        fold_logic = f"""
+const fn = cy.getElementById({json.dumps(board_compound['id'])});
+const functionRef = {json.dumps(references[0])};
+const functionId = {json.dumps(board_compound['id'])};
+const transitionId = {json.dumps(source_transition['id'])};
+const metadataBefore = JSON.stringify(net.function_metadata_registry[functionRef]);
+const folded = foldEngine.executeFoldEntireFunction(fn);
+if (!folded.success || !folded.complete || !fn.hasClass('collapsed-compound')) throw new Error('Function did not collapse: ' + JSON.stringify(folded));
+if (fn.data('function_ref') !== functionRef || JSON.stringify(net.function_metadata_registry[functionRef]) !== metadataBefore) throw new Error('Collapse changed function metadata association');
+const component = cy.nodes().filter(function(node) {{ return node.data('parent') === functionId && node.data('opaque'); }}).first();
+if (!component.length) throw new Error('Folded function component missing');
+foldEngine.renameNode(component, 'Board internals');
+const unfolded = foldEngine.executeComponentLocalUnfold(component);
+if (!unfolded.success || fn.hasClass('collapsed-compound')) throw new Error('Renamed component could not unfold');
+if (fn.data('function_ref') !== functionRef || JSON.stringify(net.function_metadata_registry[functionRef]) !== metadataBefore) throw new Error('Rename/unfold changed function metadata association');
+if (!cy.getElementById(transitionId).length) throw new Error('Source-generated function transition was not restored');
+console.log('PASS');
+"""
+        proc = _run_node_script(
+            _setup_live_fold_test_harness(json.dumps(composite_net), fold_logic)
+        )
+        self.assertEqual(proc.returncode, 0, f"Fold/rename/unfold changed metadata: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
 
 
 if __name__ == "__main__":
