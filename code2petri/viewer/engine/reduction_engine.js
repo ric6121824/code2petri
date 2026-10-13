@@ -1335,10 +1335,11 @@
         // Adheres to Lassen & van der Aalst (2008) Definition 21 (Order of Reductions):
         // Elementary reductions (Sequence -> Choice -> Loop) take precedence and must be
         // exhausted before evaluating SESE structural fold reductions.
-        hasElementaryReductions() {
+        hasElementaryReductions(scopeId = null) {
           const self = this;
-          let found = false;
-          const places = this.cy.nodes('.place');
+          const places = this.cy.nodes('.place').filter(function(place) {
+            return !scopeId || self._getNodeAncestors(place.id()).includes(scopeId);
+          });
           for (let i = 0; i < places.length; i++) {
             const p = places[i];
             if (self.canSinglePlaceContract(p).ok) return true;
@@ -1352,38 +1353,38 @@
           return [
             {
               foldTypes: ['marked_graph', 'state_machine'],
-              run: function(engine) {
+              run: function(engine, scopeId) {
                 return {
-                  marked_graph: engine.detectMarkedGraphs(),
-                  state_machine: engine.detectStateMachines()
+                  marked_graph: engine.detectMarkedGraphs(scopeId),
+                  state_machine: engine.detectStateMachines(scopeId)
                 };
               }
             },
             {
               foldTypes: ['well_structured'],
-              run: function(engine) {
+              run: function(engine, scopeId) {
                 return {
-                  well_structured: engine.detectWellStructured()
+                  well_structured: engine.detectWellStructured(scopeId)
                 };
               }
             },
             {
               foldTypes: ['unstructured'],
-              run: function(engine) {
+              run: function(engine, scopeId) {
                 return {
-                  unstructured: engine.detectUnstructured()
+                  unstructured: engine.detectUnstructured(scopeId)
                 };
               }
             }
           ];
         }
 
-        getActiveStructuralCandidates() {
-          if (this.hasElementaryReductions()) {
+        getActiveStructuralCandidates(scopeId = null) {
+          if (this.hasElementaryReductions(scopeId)) {
             return {};
           }
           for (const tier of LiveFoldReductionEngine.STRUCTURAL_DETECTORS) {
-            const results = tier.run(this);
+            const results = tier.run(this, scopeId);
             const totalCount = Object.values(results).reduce(function(sum, cands) {
               return sum + (cands ? cands.length : 0);
             }, 0);
@@ -1394,7 +1395,7 @@
           return {};
         }
 
-        getFoldType(node) {
+        getFoldType(node, scopeId = null) {
           if (!node || typeof node.hasClass !== 'function') return null;
 
           if (node.hasClass('place')) {
@@ -1405,14 +1406,17 @@
 
           // SESE structural reductions are gated behind exhaustion of elementary reductions
           // per Lassen & van der Aalst (2008) Def. 21 to prevent premature structural folding.
-          const activeStructural = this.getActiveStructuralCandidates();
+          const activeStructural = this.getActiveStructuralCandidates(scopeId);
           const targetGroup = node.hasClass('place') ? 'place' : 'transition';
           const nodeId = node.id();
 
           for (const [foldType, candidates] of Object.entries(activeStructural)) {
             const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
-            if (meta && meta.targetGroup === targetGroup) {
-              if (candidates.some(function(c) { return c.sourceId === nodeId || c.sinkId === nodeId; })) {
+            if (meta && (meta.targetGroup === targetGroup ||
+                (scopeId && targetGroup === 'place' && foldType === 'marked_graph'))) {
+              if (candidates.some(function(c) {
+                return c.sourceId === nodeId || c.sinkId === nodeId || c.triggerId === nodeId;
+              })) {
                 return foldType;
               }
             }
@@ -1421,7 +1425,7 @@
           return null;
         }
 
-        executeBatchFold(placeIds) {
+        executeBatchFold(placeIds, scopeId = null) {
           const requestedIds = Array.isArray(placeIds) ? placeIds.slice() : [];
           const folded = [];
           const skipped = [];
@@ -1445,14 +1449,17 @@
               return;
             }
 
-            const foldType = this.getFoldType(place);
+            const foldType = this.getFoldType(place, scopeId);
             const foldMeta = foldType && LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
-            if (!foldMeta || foldMeta.targetGroup !== 'place' || typeof foldMeta.execute !== 'function') {
+            const scopedStructuralPlaceTrigger = Boolean(scopeId && foldType &&
+              ['marked_graph', 'state_machine', 'well_structured', 'unstructured'].includes(foldType));
+            if (!foldMeta || (foldMeta.targetGroup !== 'place' && !scopedStructuralPlaceTrigger) ||
+                typeof foldMeta.execute !== 'function') {
               skipped.push({ placeId: id, reason: 'No eligible place-targeted reduction.' });
               return;
             }
 
-            const reduction = foldMeta.execute(this, place);
+            const reduction = foldMeta.execute(this, place, scopeId);
             if (reduction && reduction.success) {
               folded.push({ placeId: id, foldType: foldType, componentId: reduction.step && reduction.step.opaqueId });
             } else {
@@ -1529,7 +1536,7 @@
 
             const passResult = this.executeBatchFold(descendantPlaces.map(function(place) {
               return place.id();
-            }));
+            }), compoundId);
             passes++;
             folded.push.apply(folded, passResult.folded);
             skipped.push.apply(skipped, passResult.skipped);
@@ -1549,7 +1556,7 @@
               ? `Function '${compoundId}' is fully collapsed after ${folded.length} reduction${folded.length === 1 ? '' : 's'}.`
               : success
                 ? `Function '${compoundId}' remains partially folded after ${folded.length} reduction${folded.length === 1 ? '' : 's'}; no further eligible places were found.`
-                : `No progress folding function '${compoundId}'; no eligible descendant places were found.`
+                : `No progress folding function '${compoundId}'; no validated elementary or contained structural candidate is available within this function scope.`
           };
         }
 
@@ -2066,6 +2073,36 @@
           return true;
         }
 
+        _candidateFitsFunctionScope(candidate, scopeId, placeBoundaries) {
+          const scope = this.cy.getElementById(scopeId);
+          if (!scope || scope.length === 0 || !scope.hasClass('compound')) return false;
+          const parentId = scope.data('parent') || null;
+          const boundaryIds = placeBoundaries
+            ? new Set([candidate.sourceId, candidate.sinkId])
+            : new Set();
+          let hasOwnedInteriorPlace = false;
+          for (const nodeId of candidate.nodes) {
+            const node = this.cy.getElementById(nodeId);
+            if (!node || node.length === 0) return false;
+            const owned = this._getNodeAncestors(nodeId).includes(scopeId);
+            if (!owned) {
+              if (!boundaryIds.has(nodeId) || !node.hasClass('place') || (node.data('parent') || null) !== parentId) {
+                return false;
+              }
+              continue;
+            }
+            if (node.hasClass('place') && !boundaryIds.has(nodeId)) hasOwnedInteriorPlace = true;
+          }
+          if (!hasOwnedInteriorPlace) return false;
+          candidate.scopeId = scopeId;
+          candidate.triggerId = Array.from(candidate.nodes).find((nodeId) => {
+            if (boundaryIds.has(nodeId) || !this._getNodeAncestors(nodeId).includes(scopeId)) return false;
+            const node = this.cy.getElementById(nodeId);
+            return node && node.length > 0 && node.hasClass('place');
+          });
+          return Boolean(candidate.triggerId);
+        }
+
         _discoverSESESubnets(options) {
           const boundaryElements = this.cy.nodes(options.boundarySelector);
           const boundaryIds = boundaryElements.map(function(n) { return n.id(); });
@@ -2076,6 +2113,14 @@
           const self = this;
 
           seseCandidates.forEach(function(cand) {
+            const consumedForScope = options.boundarySelector === '.place'
+              ? new Set(Array.from(cand.nodes).filter(function(nodeId) {
+                  return nodeId !== cand.sourceId && nodeId !== cand.sinkId;
+                }))
+              : cand.nodes;
+            if (options.scopeId && !self._candidateFitsFunctionScope(cand, options.scopeId, options.boundarySelector === '.place')) {
+              return;
+            }
             let valid = true;
             for (const nid of cand.nodes) {
               const node = self.cy.getElementById(nid);
@@ -2094,7 +2139,7 @@
               return;
             }
 
-            if (!self._validateSESEFunctionBoundaries(cand.nodes)) {
+            if (!self._validateSESEFunctionBoundaries(options.scopeId ? consumedForScope : cand.nodes)) {
               return;
             }
 
@@ -2130,6 +2175,10 @@
               omega: omega
             }, multData.extraProperties || {});
 
+            if (options.scopeId) {
+              candidateObj.scopeId = options.scopeId;
+              candidateObj.triggerId = cand.triggerId;
+            }
             candidates.push(candidateObj);
           });
 
@@ -2152,11 +2201,12 @@
         // Detects SESE Subnets for structural folding (Marked Graph or State Machine).
         // Internal places must have initial_tokens === 0 to preserve workflow net
         // token conservation during live SESE structural folding.
-        _detectSESESubnetCandidates(isMarkedGraph) {
+        _detectSESESubnetCandidates(isMarkedGraph, scopeId = null) {
           const self = this;
           return this._discoverSESESubnets({
             boundarySelector: isMarkedGraph ? '.transition' : '.place',
             componentType: isMarkedGraph ? 'MarkedGraph' : 'StateMachine',
+            scopeId: scopeId,
             filterMaximal: false,
             validateNode: function(node, cand) {
               if (isMarkedGraph) {
@@ -2197,19 +2247,20 @@
           });
         }
 
-        detectMarkedGraphs() {
-          return this._detectSESESubnetCandidates(true);
+        detectMarkedGraphs(scopeId = null) {
+          return this._detectSESESubnetCandidates(true, scopeId);
         }
 
-        detectStateMachines() {
-          return this._detectSESESubnetCandidates(false);
+        detectStateMachines(scopeId = null) {
+          return this._detectSESESubnetCandidates(false, scopeId);
         }
 
-        detectWellStructured() {
+        detectWellStructured(scopeId = null) {
           const self = this;
           return this._discoverSESESubnets({
             boundarySelector: '.place',
             componentType: 'WellStructured',
+            scopeId: scopeId,
             filterMaximal: true,
             validateNode: function(node, cand) {
               if (node.hasClass('place')) {
@@ -2306,11 +2357,12 @@
           };
         }
 
-        detectUnstructured() {
+        detectUnstructured(scopeId = null) {
           const self = this;
           const knotCandidates = this._discoverSESESubnets({
             boundarySelector: '.place',
             componentType: 'Unstructured',
+            scopeId: scopeId,
             filterMaximal: false,
             sortMinimal: true,
             validateNode: function(node, cand) {
@@ -2342,6 +2394,8 @@
           if (knotCandidates.length > 0) {
             return [knotCandidates[0]];
           }
+
+          if (scopeId) return [];
 
           // Global fallback: if no internal SESE pair exists and more than one transition remains
           const transNodes = this.cy.nodes('.transition');
@@ -2437,7 +2491,7 @@
           }
           if (srcId) {
             return candidates.find(function(c) {
-              return c.sourceId === srcId || c.sinkId === srcId;
+              return c.sourceId === srcId || c.sinkId === srcId || c.triggerId === srcId;
             }) || null;
           }
           return null;
@@ -2548,8 +2602,10 @@
           };
         }
 
-        executeMarkedGraphContraction(nodeOrSrc, snk = null) {
-          const candidates = this.detectMarkedGraphs();
+        executeMarkedGraphContraction(nodeOrSrc, snk = null, scopeId = null) {
+          const candidates = scopeId
+            ? (this.getActiveStructuralCandidates(scopeId).marked_graph || [])
+            : this.detectMarkedGraphs();
           const cand = this._findCandidateForNode(candidates, nodeOrSrc, snk);
           if (!cand) {
             return { success: false, message: "No eligible Marked Graph candidate found for the specified node." };
@@ -2690,6 +2746,7 @@
             if (!parentId && srcParent && snkParent) {
               parentId = self._findLowestCommonAncestor(srcParent, snkParent);
             }
+            if (cand.scopeId) parentId = cand.scopeId;
 
             const boundaryInArcs = [{
               sourceId: cand.sourceId,
@@ -2750,8 +2807,10 @@
           });
         }
 
-        executeStateMachineContraction(nodeOrSrc, snk = null) {
-          const candidates = this.detectStateMachines();
+        executeStateMachineContraction(nodeOrSrc, snk = null, scopeId = null) {
+          const candidates = scopeId
+            ? (this.getActiveStructuralCandidates(scopeId).state_machine || [])
+            : this.detectStateMachines();
           const cand = this._findCandidateForNode(candidates, nodeOrSrc, snk);
           if (!cand) {
             return { success: false, message: "No eligible State Machine candidate found for the specified node." };
@@ -2759,8 +2818,10 @@
           return this._executePlaceSESEReduction(cand);
         }
 
-        executeWellStructuredContraction(nodeOrSrc, snk = null) {
-          const candidates = this.detectWellStructured();
+        executeWellStructuredContraction(nodeOrSrc, snk = null, scopeId = null) {
+          const candidates = scopeId
+            ? (this.getActiveStructuralCandidates(scopeId).well_structured || [])
+            : this.detectWellStructured();
           const cand = this._findCandidateForNode(candidates, nodeOrSrc, snk);
           if (!cand) {
             return { success: false, message: "No eligible Well-Structured candidate found for the specified node." };
@@ -2768,8 +2829,10 @@
           return this._executePlaceSESEReduction(cand);
         }
 
-        executeUnstructuredContraction(nodeOrSrc, snk = null) {
-          const candidates = this.detectUnstructured();
+        executeUnstructuredContraction(nodeOrSrc, snk = null, scopeId = null) {
+          const candidates = scopeId
+            ? (this.getActiveStructuralCandidates(scopeId).unstructured || [])
+            : this.detectUnstructured();
           const cand = this._findCandidateForNode(candidates, nodeOrSrc, snk);
           if (!cand) {
             return { success: false, message: "No eligible Unstructured candidate found for the specified node." };
@@ -2797,22 +2860,22 @@
             state_machine: {
               targetGroup: 'place',
               className: 'contractible-state-machine',
-              execute: function(engine, node) { return engine.executeStateMachineContraction(node); }
+              execute: function(engine, node, scopeId) { return engine.executeStateMachineContraction(node, null, scopeId); }
             },
             marked_graph: {
               targetGroup: 'transition',
               className: 'contractible-marked-graph',
-              execute: function(engine, node) { return engine.executeMarkedGraphContraction(node); }
+              execute: function(engine, node, scopeId) { return engine.executeMarkedGraphContraction(node, null, scopeId); }
             },
             well_structured: {
               targetGroup: 'place',
               className: 'contractible-well-structured',
-              execute: function(engine, node) { return engine.executeWellStructuredContraction(node); }
+              execute: function(engine, node, scopeId) { return engine.executeWellStructuredContraction(node, null, scopeId); }
             },
             unstructured: {
               targetGroup: 'place',
               className: 'contractible-unstructured',
-              execute: function(engine, node) { return engine.executeUnstructuredContraction(node); }
+              execute: function(engine, node, scopeId) { return engine.executeUnstructuredContraction(node, null, scopeId); }
             }
           };
         }

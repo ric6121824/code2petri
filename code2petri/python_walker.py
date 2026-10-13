@@ -1,5 +1,6 @@
 import ast
-from typing import Optional, Union, List, Dict, Any
+import builtins as _python_builtins
+from typing import Optional, Union, List, Dict, Any, Tuple
 
 from code2flow.python import Python
 from code2petri.control_flow_builder import (
@@ -22,9 +23,9 @@ def _get_executable_statements(tree: ast.AST) -> List[ast.stmt]:
     ]
 
 
-def _collect_functions(tree: ast.AST) -> List[tuple[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]]]:
+def _collect_functions(tree: ast.AST) -> List[Tuple[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]]]:
     """Traverses tree to collect (qualified_name, node) pairs ordered by line number."""
-    results: List[tuple[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]]] = []
+    results: List[Tuple[str, Union[ast.FunctionDef, ast.AsyncFunctionDef]]] = []
 
     def visit(node: ast.AST, scope_stack: List[str]) -> None:
         for child in ast.iter_child_nodes(node):
@@ -133,7 +134,8 @@ def _direct_literal_type(expression: ast.AST) -> Optional[str]:
     return None
 
 
-def _python_inferred_type(expression: ast.AST, bindings: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+def _python_inferred_type(expression: ast.AST, bindings: Dict[str, Dict[str, Any]],
+                          call_results: Optional[Dict[Tuple[int, int], Dict[str, Any]]] = None) -> Dict[str, Any]:
     """Infer a deliberately small set of Python expression types and dependencies."""
     if isinstance(expression, ast.Constant):
         value_type = _direct_literal_type(expression)
@@ -147,7 +149,7 @@ def _python_inferred_type(expression: ast.AST, bindings: Dict[str, Dict[str, Any
         dependencies = []
         for part in expression.values:
             if isinstance(part, ast.FormattedValue):
-                part_evidence = _python_inferred_type(part.value, bindings)["evidence"]
+                part_evidence = _python_inferred_type(part.value, bindings, call_results)["evidence"]
                 for item in part_evidence:
                     if item not in dependencies:
                         dependencies.append(item)
@@ -158,7 +160,7 @@ def _python_inferred_type(expression: ast.AST, bindings: Dict[str, Dict[str, Any
             "type": binding["type"], "evidence": list(binding["evidence"]),
         }
     if isinstance(expression, ast.UnaryOp):
-        operand = _python_inferred_type(expression.operand, bindings)
+        operand = _python_inferred_type(expression.operand, bindings, call_results)
         operand_type = operand["type"]
         if isinstance(expression.op, ast.Not) and operand_type in {"bool", "int", "float", "complex", "str", "bytes", "NoneType"}:
             value_type = "bool"
@@ -168,8 +170,8 @@ def _python_inferred_type(expression: ast.AST, bindings: Dict[str, Dict[str, Any
             value_type = "unknown"
         return {"type": value_type, "evidence": operand["evidence"]}
     if isinstance(expression, ast.BinOp) and isinstance(expression.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
-        left = _python_inferred_type(expression.left, bindings)
-        right = _python_inferred_type(expression.right, bindings)
+        left = _python_inferred_type(expression.left, bindings, call_results)
+        right = _python_inferred_type(expression.right, bindings, call_results)
         left_type, right_type = left["type"], right["type"]
         if isinstance(expression.op, ast.Add) and left_type == right_type == "list":
             value_type = "list"
@@ -189,6 +191,19 @@ def _python_inferred_type(expression: ast.AST, bindings: Dict[str, Dict[str, Any
             if item not in dependencies:
                 dependencies.append(item)
         return {"type": value_type, "evidence": dependencies}
+    if isinstance(expression, ast.Call):
+        location = (getattr(expression, "lineno", 0), getattr(expression, "col_offset", 0))
+        record = (call_results or {}).get(location)
+        if record is not None and record.get("state") == "known":
+            return {
+                "type": record["type"],
+                "evidence": [{
+                    "expression": record["expression"],
+                    "type": record["type"],
+                    "provenance": record["provenance"],
+                    "source_location": record["source_location"],
+                }],
+            }
     return {"type": "unknown", "evidence": []}
 
 
@@ -229,6 +244,7 @@ def _python_named_expression_names(expression: Optional[ast.AST]) -> set:
 
 def _python_local_bindings(
     statements: List[ast.stmt], source_text: Optional[str],
+    call_results: Optional[Dict[Tuple[int, int], Dict[str, Any]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Track direct assignments in lexical order, invalidating unsupported writes."""
     bindings: Dict[str, Dict[str, Any]] = {}
@@ -258,7 +274,7 @@ def _python_local_bindings(
         if isinstance(statement, ast.Expr):
             continue
 
-        assigned = _python_inferred_type(value, bindings) if value is not None else {"type": "unknown", "evidence": []}
+        assigned = _python_inferred_type(value, bindings, call_results) if value is not None else {"type": "unknown", "evidence": []}
         if any(not isinstance(target, ast.Name) for target in targets):
             assigned = {"type": "unknown", "evidence": []}
         names = [name for target in targets for name in _python_binding_names(target)]
@@ -285,6 +301,7 @@ def _extract_python_return_metadata(
     qualified_name: str,
     source_file: str,
     source_text: Optional[str],
+    call_results: Optional[Dict[Tuple[int, int], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Extract declared evidence and bounded return-expression evidence."""
     line = getattr(node, "lineno", None)
@@ -327,7 +344,7 @@ def _extract_python_return_metadata(
             "role": "immediate_result",
             "source_location": {"line": line, "column": column},
         }]
-        yielded_evidence = _python_yield_evidence(node, source_text)
+        yielded_evidence = _python_yield_evidence(node, source_text, call_results)
         yielded_role = _python_role_record(yielded_evidence, annotation_roles.get("yielded"))
 
         if async_generator:
@@ -337,7 +354,7 @@ def _extract_python_return_metadata(
                 "inferred": [], "inferred_types": [], "observed": [], "observed_types": [],
             }
         else:
-            outcomes, uncertain = _python_return_outcomes(node, source_text)
+            outcomes, uncertain = _python_return_outcomes(node, source_text, call_results)
             uncertain = uncertain or bool(getattr(node, "decorator_list", []))
             completion_evidence = [
                 evidence for kind, evidence in outcomes
@@ -386,11 +403,11 @@ def _extract_python_return_metadata(
         metadata["declared"] = None
         metadata["roles"] = {
             "immediate": _python_known_wrapper_role("coroutine", "async_function_syntax", line, column),
-            "awaited": _python_result_role(node, source_text, declared, "awaited"),
+            "awaited": _python_result_role(node, source_text, declared, "awaited", call_results),
         }
         return metadata
 
-    outcomes, uncertain_coverage = _python_return_outcomes(node, source_text)
+    outcomes, uncertain_coverage = _python_return_outcomes(node, source_text, call_results)
     uncertain_coverage = uncertain_coverage or bool(getattr(node, "decorator_list", []))
     normal = [outcome for outcome in outcomes if outcome[0] == "normal"]
     returns = [outcome[1] for outcome in outcomes if outcome[0] == "return"]
@@ -437,8 +454,9 @@ def _python_known_wrapper_role(wrapper_type: str, provenance: str, line: Optiona
 
 
 def _python_result_role(node: ast.AST, source_text: Optional[str],
-                        declared: Optional[Dict[str, Any]], role: str) -> Dict[str, Any]:
-    outcomes, uncertain = _python_return_outcomes(node, source_text)
+                        declared: Optional[Dict[str, Any]], role: str,
+                        call_results: Optional[Dict[Tuple[int, int], Dict[str, Any]]] = None) -> Dict[str, Any]:
+    outcomes, uncertain = _python_return_outcomes(node, source_text, call_results)
     uncertain = uncertain or bool(getattr(node, "decorator_list", []))
     evidence = [value for kind, value in outcomes if kind == "return" and value is not None]
     no_normal = (
@@ -468,6 +486,19 @@ def _unique_return_types(evidence: List[Dict[str, Any]]) -> List[str]:
         if isinstance(value, str) and value != "unknown" and value not in result:
             result.append(value)
     return result
+
+
+def _python_return_evidence_by_site(metadata: Dict[str, Any]):
+    records = list(metadata.get("inferred", [])) + list(metadata.get("observed", []))
+    for role in (metadata.get("roles") or {}).values():
+        records.extend(role.get("inferred", []))
+        records.extend(role.get("observed", []))
+    by_site = {}
+    for record in records:
+        location = record.get("source_location") or {}
+        if isinstance(location.get("line"), int) and isinstance(location.get("column"), int):
+            by_site[(location["line"], location["column"])] = dict(record)
+    return by_site
 
 
 def _python_annotation_role_declarations(node: ast.AST, source_text: Optional[str]) -> Dict[str, Dict[str, Any]]:
@@ -510,7 +541,8 @@ def _python_annotation_role_declarations(node: ast.AST, source_text: Optional[st
     return result
 
 
-def _python_yield_evidence(node: ast.AST, source_text: Optional[str]) -> List[Dict[str, Any]]:
+def _python_yield_evidence(node: ast.AST, source_text: Optional[str],
+                           call_results: Optional[Dict[Tuple[int, int], Dict[str, Any]]] = None) -> List[Dict[str, Any]]:
     statements = list(getattr(node, "body", []))
     evidence: List[Dict[str, Any]] = []
 
@@ -541,11 +573,11 @@ def _python_yield_evidence(node: ast.AST, source_text: Optional[str]) -> List[Di
             elif expression_node is None:
                 inferred = {"type": "NoneType", "evidence": []}
             elif _direct_literal_type(expression_node) is not None:
-                inferred = _python_inferred_type(expression_node, {})
+                inferred = _python_inferred_type(expression_node, {}, call_results)
             else:
                 expression_names = _python_expression_names(expression_node)
-                bindings = {} if expression_names & self.blocked_names else _python_local_bindings(self.history, source_text)
-                inferred = _python_inferred_type(expression_node, bindings)
+                bindings = {} if expression_names & self.blocked_names else _python_local_bindings(self.history, source_text, call_results)
+                inferred = _python_inferred_type(expression_node, bindings, call_results)
             provenance = "delegated_yield" if delegated else (
                 "bare_yield" if expression_node is None else (
                     "direct_literal" if _direct_literal_type(expression_node) is not None else (
@@ -643,7 +675,8 @@ def _python_role_record(evidence: List[Dict[str, Any]], declared: Optional[Dict[
     }
 
 
-def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
+def _python_return_outcomes(node: ast.AST, source_text: Optional[str],
+                            call_results: Optional[Dict[Tuple[int, int], Dict[str, Any]]] = None):
     """Summarize supported sequential/if paths without merging branch environments."""
     uncertain = False
 
@@ -656,13 +689,13 @@ def _python_return_outcomes(node: ast.AST, source_text: Optional[str]):
         else:
             expression = _source_text_for(expression_node, source_text) or "unknown expression"
             if _direct_literal_type(expression_node) is not None:
-                inferred = _python_inferred_type(expression_node, {})
+                inferred = _python_inferred_type(expression_node, {}, call_results)
             elif ambiguous or nested:
                 names = _python_expression_names(expression_node)
-                bindings = {} if names & (blocked_names or set()) else _python_local_bindings(history, source_text)
-                inferred = _python_inferred_type(expression_node, bindings)
+                bindings = {} if names & (blocked_names or set()) else _python_local_bindings(history, source_text, call_results)
+                inferred = _python_inferred_type(expression_node, bindings, call_results)
             else:
-                inferred = _python_inferred_type(expression_node, _python_local_bindings(history, source_text))
+                inferred = _python_inferred_type(expression_node, _python_local_bindings(history, source_text, call_results), call_results)
         provenance = "bare_return" if expression_node is None else (
             "direct_literal" if _direct_literal_type(expression_node) is not None else (
                 "local_assignment" if isinstance(expression_node, ast.Name) and inferred["evidence"] else "expression_inference"
@@ -839,6 +872,377 @@ def _find_calls_in_expr(node: Optional[ast.AST]) -> List[ast.Call]:
     return calls
 
 
+_PYTHON_BUILTIN_RESULT_TYPES = {
+    "range": "range", "len": "int", "str": "str", "int": "int", "float": "float",
+    "bool": "bool", "list": "list", "tuple": "tuple", "dict": "dict", "set": "set",
+}
+_PYTHON_BUILTIN_CATALOG_PROVENANCE = "Python 3 built-in callable normal-result contracts (docs.python.org/3/library/functions.html)."
+
+
+def _python_scope_bindings(scope: ast.AST, is_module: bool = False):
+    """Collect names bound in one lexical scope without entering nested scopes."""
+    bound = set()
+    imported = set()
+    global_names = set()
+    nonlocal_names = set()
+
+    class Collector(ast.NodeVisitor):
+        def visit_FunctionDef(self, node):
+            if node is scope:
+                bound.add(node.name) if is_module else None
+                for arg in list(node.args.posonlyargs) + list(node.args.args) + list(node.args.kwonlyargs):
+                    bound.add(arg.arg)
+                if node.args.vararg:
+                    bound.add(node.args.vararg.arg)
+                if node.args.kwarg:
+                    bound.add(node.args.kwarg.arg)
+                for statement in node.body:
+                    self.visit(statement)
+            elif is_module:
+                bound.add(node.name)
+            else:
+                bound.add(node.name)
+
+        def visit_AsyncFunctionDef(self, node):
+            self.visit_FunctionDef(node)
+
+        def visit_ClassDef(self, node):
+            bound.add(node.name)
+            if not is_module and node is scope:
+                for statement in node.body:
+                    self.visit(statement)
+
+        def visit_Lambda(self, node):
+            if node is scope:
+                self.generic_visit(node.body)
+
+        def visit_Import(self, node):
+            for alias in node.names:
+                imported.add(alias.asname or alias.name.split(".")[0])
+
+        def visit_ImportFrom(self, node):
+            for alias in node.names:
+                if alias.name != "*":
+                    imported.add(alias.asname or alias.name)
+
+        def visit_Global(self, node):
+            global_names.update(node.names)
+
+        def visit_Nonlocal(self, node):
+            nonlocal_names.update(node.names)
+
+        def visit_comprehension(self, node, value_nodes):
+            for generator in node.generators:
+                self.visit(generator.iter)
+                for condition in generator.ifs:
+                    self.visit(condition)
+            for value_node in value_nodes:
+                self.visit(value_node)
+
+        def visit_ListComp(self, node):
+            self.visit_comprehension(node, [node.elt])
+
+        def visit_SetComp(self, node):
+            self.visit_comprehension(node, [node.elt])
+
+        def visit_GeneratorExp(self, node):
+            self.visit_comprehension(node, [node.elt])
+
+        def visit_DictComp(self, node):
+            self.visit_comprehension(node, [node.key, node.value])
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, ast.Store) or isinstance(node.ctx, ast.Del):
+                bound.add(node.id)
+
+        def visit_ExceptHandler(self, node):
+            if node.name:
+                bound.add(node.name)
+            self.generic_visit(node)
+
+        def visit_MatchAs(self, node):
+            if node.name:
+                bound.add(node.name)
+            if node.pattern:
+                self.visit(node.pattern)
+
+        def visit_MatchStar(self, node):
+            if node.name:
+                bound.add(node.name)
+
+        def visit_MatchMapping(self, node):
+            if node.rest:
+                bound.add(node.rest)
+            self.generic_visit(node)
+
+    Collector().visit(scope)
+    if not is_module:
+        bound.difference_update(global_names | nonlocal_names)
+    return bound - imported, imported, global_names, nonlocal_names
+
+
+def _python_direct_builtin_imports(statements, before_line):
+    imported_names = {}
+    builtin_modules = set()
+    other_import_names = set()
+    has_wildcard_import = False
+    for statement in statements:
+        if before_line is not None and getattr(statement, "lineno", 0) >= before_line:
+            continue
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                bound_name = alias.asname or alias.name.split(".")[0]
+                if alias.name == "builtins":
+                    builtin_modules.add(bound_name)
+                else:
+                    other_import_names.add(bound_name)
+        elif isinstance(statement, ast.ImportFrom):
+            for alias in statement.names:
+                if alias.name == "*":
+                    has_wildcard_import = True
+                    continue
+                bound_name = alias.asname or alias.name
+                if statement.module == "builtins":
+                    imported_names[bound_name] = alias.name
+                else:
+                    other_import_names.add(bound_name)
+    return imported_names, builtin_modules, other_import_names, has_wildcard_import
+
+
+def _python_function_global_rebindings(function_node):
+    """Return globals rebound by this function, excluding nested lexical scopes."""
+    rebound = set()
+    _, _, global_names, _ = _python_scope_bindings(function_node)
+    if not global_names:
+        return rebound
+
+    class GlobalWrites(ast.NodeVisitor):
+        def visit_FunctionDef(self, node):
+            if node is function_node:
+                for statement in node.body:
+                    self.visit(statement)
+            elif node.name in global_names:
+                rebound.add(node.name)
+
+        def visit_AsyncFunctionDef(self, node):
+            self.visit_FunctionDef(node)
+
+        def visit_ClassDef(self, node):
+            if node.name in global_names:
+                rebound.add(node.name)
+
+        def visit_Lambda(self, node):
+            return
+
+        def visit_comprehension(self, node, value_nodes):
+            for generator in node.generators:
+                self.visit(generator.iter)
+                for condition in generator.ifs:
+                    self.visit(condition)
+            for value_node in value_nodes:
+                self.visit(value_node)
+
+        def visit_ListComp(self, node):
+            self.visit_comprehension(node, [node.elt])
+
+        def visit_SetComp(self, node):
+            self.visit_comprehension(node, [node.elt])
+
+        def visit_GeneratorExp(self, node):
+            self.visit_comprehension(node, [node.elt])
+
+        def visit_DictComp(self, node):
+            self.visit_comprehension(node, [node.key, node.value])
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, (ast.Store, ast.Del)) and node.id in global_names:
+                rebound.add(node.id)
+
+        def visit_Import(self, node):
+            for alias in node.names:
+                name = alias.asname or alias.name.split(".")[0]
+                if name in global_names:
+                    rebound.add(name)
+
+        def visit_ImportFrom(self, node):
+            for alias in node.names:
+                name = alias.asname or alias.name
+                if name in global_names:
+                    rebound.add(name)
+
+    GlobalWrites().visit(function_node)
+    return rebound
+
+
+def _python_module_global_rebindings(module_node):
+    """Return module names any function can rebind through a global declaration."""
+    rebound = set()
+    for _, function_node in _collect_functions(module_node):
+        rebound |= _python_function_global_rebindings(function_node)
+    return rebound
+
+
+def _python_call_result_records(function_node, module_node, source_text, caller_function, caller_file):
+    local_non_imports, local_import_names, global_names, nonlocal_names = _python_scope_bindings(function_node)
+    module_non_imports, module_import_names, _, _ = _python_scope_bindings(module_node, is_module=True)
+    module_non_imports |= _python_module_global_rebindings(module_node)
+    module_imported_names, module_aliases, module_other_imports, module_has_wildcard_import = _python_direct_builtin_imports(
+        getattr(module_node, "body", []), None
+    )
+
+    def has_wildcard_import(root):
+        return any(
+            isinstance(item, ast.ImportFrom) and any(alias.name == "*" for alias in item.names)
+            for item in ast.walk(root)
+        )
+
+    module_has_wildcard_import = module_has_wildcard_import or has_wildcard_import(module_node)
+
+    # Module imports can only establish the binding when no separate module write shadows them.
+    module_imported_names = {
+        local: canonical for local, canonical in module_imported_names.items()
+        if local not in module_non_imports
+    }
+    module_aliases = {name for name in module_aliases if name not in module_non_imports}
+    module_other_imports |= module_import_names - set(module_imported_names) - module_aliases
+    module_imported_names = {
+        local: canonical for local, canonical in module_imported_names.items()
+        if local not in module_other_imports
+    }
+    module_aliases -= module_other_imports
+
+    global_writes = _python_function_global_rebindings(function_node)
+    local_writes = local_non_imports | global_writes
+    dynamic_namespace = False
+    for root in (module_node, function_node):
+        for item in ast.walk(root):
+            if isinstance(item, ast.Call) and isinstance(item.func, ast.Name) and item.func.id in {"exec", "eval", "globals", "locals"}:
+                dynamic_namespace = True
+
+    def attributes_written(module_alias, attribute):
+        if not module_alias:
+            return False
+        for root in (module_node, function_node):
+            for item in ast.walk(root):
+                if isinstance(item, ast.Attribute) and item.attr == attribute and isinstance(item.ctx, (ast.Store, ast.Del)):
+                    if isinstance(item.value, ast.Name) and item.value.id == module_alias:
+                        return True
+                if isinstance(item, ast.Call) and isinstance(item.func, ast.Name) and item.func.id in {"setattr", "delattr"}:
+                    if item.args and isinstance(item.args[0], ast.Name) and item.args[0].id == module_alias:
+                        if len(item.args) < 2 or not isinstance(item.args[1], ast.Constant):
+                            return True
+                        if item.args[1].value == attribute:
+                            return True
+                if isinstance(item, ast.Subscript) and isinstance(item.ctx, (ast.Store, ast.Del)):
+                    module_dict = isinstance(item.value, ast.Attribute) and item.value.attr == "__dict__" and isinstance(item.value.value, ast.Name) and item.value.value.id == module_alias
+                    vars_dict = isinstance(item.value, ast.Call) and isinstance(item.value.func, ast.Name) and item.value.func.id == "vars" and item.value.args and isinstance(item.value.args[0], ast.Name) and item.value.args[0].id == module_alias
+                    if module_dict or vars_dict:
+                        if not isinstance(item.slice, ast.Constant) or item.slice.value == attribute:
+                            return True
+                if isinstance(item, ast.Call) and isinstance(item.func, ast.Attribute) and item.func.attr == "update":
+                    owner = item.func.value
+                    module_dict = isinstance(owner, ast.Attribute) and owner.attr == "__dict__" and isinstance(owner.value, ast.Name) and owner.value.id == module_alias
+                    vars_dict = isinstance(owner, ast.Call) and isinstance(owner.func, ast.Name) and owner.func.id == "vars" and owner.args and isinstance(owner.args[0], ast.Name) and owner.args[0].id == module_alias
+                    if module_dict or vars_dict:
+                        return True
+        return False
+
+    class Calls(ast.NodeVisitor):
+        def __init__(self):
+            self.nodes = []
+        def visit_FunctionDef(self, node):
+            if node is function_node:
+                for statement in node.body:
+                    self.visit(statement)
+        def visit_AsyncFunctionDef(self, node):
+            self.visit_FunctionDef(node)
+        def visit_ClassDef(self, node):
+            return
+        def visit_Lambda(self, node):
+            return
+        def visit_Call(self, node):
+            self.nodes.append(node)
+            self.generic_visit(node)
+
+    collector = Calls()
+    collector.visit(function_node)
+    records = {}
+    for call in collector.nodes:
+        func = call.func
+        original = _source_text_for(call, source_text) or ast.unparse(call)
+        local_imported_names, local_module_aliases, local_other_imports, local_has_wildcard_import = _python_direct_builtin_imports(
+            getattr(function_node, "body", []), getattr(call, "lineno", 0)
+        )
+        local_has_wildcard_import = local_has_wildcard_import or has_wildcard_import(function_node)
+        local_imported_names = {
+            local: canonical for local, canonical in local_imported_names.items()
+            if local not in local_writes and local not in local_other_imports
+        }
+        local_module_aliases = {
+            name for name in local_module_aliases
+            if name not in local_writes and name not in local_other_imports
+        }
+        canonical = None
+        uncertain = dynamic_namespace or local_has_wildcard_import or module_has_wildcard_import
+        unsupported_builtin = False
+        if isinstance(func, ast.Name):
+            name = func.id
+            imported_target = local_imported_names.get(name)
+            if imported_target is None and name not in local_import_names and name not in local_writes and name not in nonlocal_names:
+                if name in module_imported_names:
+                    imported_target = module_imported_names[name]
+                elif name in module_other_imports:
+                    uncertain = True
+                elif name not in module_non_imports and name not in module_other_imports and not module_has_wildcard_import and not local_has_wildcard_import:
+                    imported_target = name if name in _PYTHON_BUILTIN_RESULT_TYPES else None
+                    unsupported_builtin = name in _python_builtins.__dict__
+                else:
+                    uncertain = True
+            elif imported_target is None:
+                uncertain = True
+            if imported_target is not None:
+                canonical = imported_target
+        elif isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+            alias = func.value.id
+            if alias in local_module_aliases and alias not in local_non_imports:
+                canonical = func.attr
+            elif alias in module_aliases and alias not in local_non_imports:
+                canonical = func.attr
+            elif alias in local_writes or alias in local_import_names or alias in local_other_imports or alias in module_non_imports or alias in module_other_imports:
+                uncertain = True
+
+        known = canonical in _PYTHON_BUILTIN_RESULT_TYPES and not uncertain
+        if canonical is not None and not known:
+            unsupported_builtin = True
+        if known:
+            recognized_module_aliases = set(module_aliases) | set(local_module_aliases)
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
+                recognized_module_aliases.add(func.value.id)
+            if any(attributes_written(alias, canonical) for alias in recognized_module_aliases):
+                known = False
+                uncertain = True
+        line = getattr(call, "lineno", 0)
+        column = getattr(call, "col_offset", 0)
+        record = {
+            "expression": original,
+            "source_location": {"line": line, "column": column},
+            "transition_id": None,
+            "call_site_id": f"{caller_file}::{caller_function}@{line}:{column}",
+            "caller_function": caller_function,
+            "caller_file": caller_file,
+            "state": "known" if known else "unknown",
+            "type": _PYTHON_BUILTIN_RESULT_TYPES[canonical] if known else "unknown",
+            "canonical_builtin": "builtins." + canonical if known else None,
+            "provenance": "python_builtin_static_contract" if known else None,
+            "unknown_reason": None if known else (
+                "shadowed_or_uncertain_binding" if uncertain else
+                "unsupported_builtin" if unsupported_builtin else "no_available_contract"
+            ),
+        }
+        records[(line, column)] = record
+    return records
+
+
 def _extract_call_site_from_ast_call(
     call_node: ast.Call,
     caller_function: str,
@@ -880,10 +1284,14 @@ class _PythonControlFlowWalker:
         builder: ControlFlowBuilder,
         func_name: str = "",
         filepath: str = "",
+        call_results: Optional[Dict[Tuple[int, int], Dict[str, Any]]] = None,
+        return_evidence: Optional[Dict[Tuple[int, int], Dict[str, Any]]] = None,
     ) -> None:
         self.builder = builder
         self.func_name = func_name
         self.filepath = filepath
+        self.call_results = call_results or {}
+        self.return_evidence = return_evidence or {}
         self.call_sites: List[CallSite] = []
         self._statement_handlers = {
             ast.Return: self._walk_return,
@@ -914,10 +1322,24 @@ class _PythonControlFlowWalker:
                 transition_id=transition_id,
                 default_lineno=default_lineno,
             )
+            call_result = self.call_results.get((getattr(call, "lineno", 0), getattr(call, "col_offset", 0)))
+            if call_result is not None:
+                call_result = dict(call_result)
+                call_result["transition_id"] = transition_id
+                transition = next((item for item in self.builder.net.transitions if item.id == transition_id), None)
+                if transition is not None:
+                    if transition.metadata is None:
+                        transition.metadata = {}
+                    transition.metadata.setdefault("call_results", []).append(call_result)
             self.call_sites.append(cs)
 
     def _walk_return(self, stmt: ast.Return, ctx: StatementContext) -> Optional[Place]:
         trans = self.builder.wire_return(ctx.current_place, _format_statement_label(stmt), stmt.lineno)
+        evidence = self.return_evidence.get((stmt.lineno, stmt.col_offset))
+        if evidence is not None:
+            if trans.metadata is None:
+                trans.metadata = {}
+            trans.metadata["function_return_evidence"] = evidence
         self._record_calls_in_expr(stmt.value, trans.id, stmt.lineno)
         return None
 
@@ -1195,12 +1617,20 @@ class PythonWalker(WalkerProtocol):
                 (name for name, candidate in _collect_functions(self.parsed_tree) if candidate is ast_node),
                 active_func_name,
             )
+        call_results = _python_call_result_records(
+            ast_node,
+            self.parsed_tree if isinstance(self.parsed_tree, ast.Module) else ast.Module(body=[]),
+            source_text,
+            qualified_name,
+            active_filepath,
+        )
         return_metadata = _extract_python_return_metadata(
             ast_node,
             function_name=active_func_name,
             qualified_name=qualified_name,
             source_file=active_filepath,
             source_text=source_text,
+            call_results=call_results,
         )
 
         net = PetriNet()
@@ -1223,6 +1653,8 @@ class PythonWalker(WalkerProtocol):
             builder=builder,
             func_name=active_func_name,
             filepath=active_filepath,
+            call_results=call_results,
+            return_evidence=_python_return_evidence_by_site(return_metadata),
         )
         walker.walk_block(ast_node.body, current_place=start_place, target_exit=end_place)
         net.return_metadata = return_metadata

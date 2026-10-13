@@ -621,7 +621,7 @@ class PetriNet:
             )
 
         for t in self.transitions:
-            new_meta = dict(t.metadata) if t.metadata else None
+            new_meta = json.loads(json.dumps(t.metadata)) if t.metadata else None
             new_res = None
             if t.resolution is not None:
                 new_res = CallResolution(

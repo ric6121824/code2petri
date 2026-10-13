@@ -132,6 +132,46 @@
     }
   }
 
+  function _validateCallResultRecords(records, description, expectedTransitionId) {
+    if (!Array.isArray(records)) _invalidSnapshot(description + ' must be an array');
+    const resultTypes = {
+      range: 'range', len: 'int', str: 'str', int: 'int', float: 'float',
+      bool: 'bool', list: 'list', tuple: 'tuple', dict: 'dict', set: 'set'
+    };
+    records.forEach(function(record, index) {
+      const path = description + '[' + index + ']';
+      if (!_isObject(record)) _invalidSnapshot(path + ' must be an object');
+      ['expression', 'transition_id', 'call_site_id', 'caller_function', 'caller_file'].forEach(function(key) {
+        _requireString(record[key], path + '.' + key);
+      });
+      if (expectedTransitionId !== undefined && record.transition_id !== expectedTransitionId) {
+        _invalidSnapshot(path + '.transition_id does not match its owning transition');
+      }
+      if (!record.source_location || !_isObject(record.source_location) ||
+          !Number.isInteger(record.source_location.line) || record.source_location.line < 1 ||
+          !Number.isInteger(record.source_location.column) || record.source_location.column < 0) {
+        _invalidSnapshot(path + '.source_location is invalid');
+      }
+      if (record.state === 'known') {
+        const canonical = typeof record.canonical_builtin === 'string'
+          ? record.canonical_builtin.replace(/^builtins\./, '') : '';
+        if (!Object.prototype.hasOwnProperty.call(resultTypes, canonical) ||
+            record.canonical_builtin !== 'builtins.' + canonical || record.type !== resultTypes[canonical] ||
+            record.provenance !== 'python_builtin_static_contract' || record.unknown_reason !== null) {
+          _invalidSnapshot(path + ' has invalid known built-in evidence');
+        }
+      } else if (record.state === 'unknown') {
+        if (record.type !== 'unknown' || record.canonical_builtin !== null || record.provenance !== null ||
+            !['no_available_contract', 'unsupported_builtin', 'unsupported_alias_form',
+              'shadowed_or_uncertain_binding'].includes(record.unknown_reason)) {
+          _invalidSnapshot(path + ' has invalid unknown call evidence');
+        }
+      } else {
+        _invalidSnapshot(path + '.state is invalid');
+      }
+    });
+  }
+
   function _validateElementRecord(record, expectedGroup, description) {
     if (!_isObject(record) || (record.group !== 'nodes' && record.group !== 'edges')) {
       _invalidSnapshot(description + ' must be a Cytoscape node or edge record');
@@ -141,6 +181,16 @@
     }
     if (!_isObject(record.data)) _invalidSnapshot(description + ' has no data object');
     _requireString(record.data.id, description + ' ID');
+    if (record.data.call_results !== undefined) {
+      _validateCallResultRecords(record.data.call_results, description + '.call_results', record.data.id);
+    }
+    if (record.data.function_return_evidence !== undefined) {
+      const evidence = record.data.function_return_evidence;
+      if (!_isObject(evidence) || typeof evidence.expression !== 'string' || typeof evidence.type !== 'string' ||
+          typeof evidence.provenance !== 'string') {
+        _invalidSnapshot(description + '.function_return_evidence is invalid');
+      }
+    }
     if (record.group === 'edges') {
       _requireString(record.data.source, description + ' source');
       _requireString(record.data.target, description + ' target');
@@ -391,6 +441,16 @@
         }
         if (group === 'transitions') {
           const metadata = record.metadata || {};
+          if (metadata.call_results !== undefined) {
+            _validateCallResultRecords(metadata.call_results, recordDescription + '.metadata.call_results', record.id);
+          }
+          if (metadata.function_return_evidence !== undefined) {
+            const evidence = metadata.function_return_evidence;
+            if (!_isObject(evidence) || typeof evidence.expression !== 'string' || typeof evidence.type !== 'string' ||
+                typeof evidence.provenance !== 'string') {
+              _invalidSnapshot(recordDescription + '.metadata.function_return_evidence is invalid');
+            }
+          }
           ['tau', 'omega'].forEach(function(key) {
             [record[key], metadata[key]].forEach(function(value) {
               if (value !== undefined && value !== null && !Number.isFinite(Number(value))) {

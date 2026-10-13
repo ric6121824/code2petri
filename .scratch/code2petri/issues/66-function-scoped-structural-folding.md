@@ -4,14 +4,14 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
-- [ ] Apply elementary-before-structural priority within the selected Function Fold Scope, including eligible descendants. Unrelated elementary reductions elsewhere do not block a valid scoped structural fold; whole-net priority remains unchanged.
+- [x] Apply elementary-before-structural priority within the selected Function Fold Scope, including eligible descendants. Unrelated elementary reductions elsewhere do not block a valid scoped structural fold; whole-net priority remains unchanged.
 - [ ] Discover and select structural candidates within that scope so a larger candidate crossing caller/sibling ownership cannot hide an eligible contained component. Retain existing class precedence, maximal/minimal selection rules, SESE reachability, validators, penalties, and transition-weight calculations within the scope.
-- [ ] Allow caller-owned entrance and exit places as retained anchors. Validate containment using the actually consumed interior; do not consume the anchors or unrelated caller/sibling nodes, or partially consume a protected nested container.
-- [ ] Expose a function-owned internal place trigger identifying the actual reduction type, using existing type-specific fold styling. Structural eligibility must not be mislabeled as green Sequence eligibility.
-- [ ] Make that trigger and Fold Entire Function expose the same safe candidate and revalidate immediately before mutation. Preserve containment and stale-target safety in individual/batch interactions involving the trigger.
-- [ ] Continue valid scoped reductions until completion or a fixed point. A completed function uses the existing brown/gold tile and function/component label; an unsupported or unsafe region reports a specific partial/no-progress reason.
+- [x] Allow caller-owned entrance and exit places as retained anchors. Validate containment using the actually consumed interior; do not consume the anchors or unrelated caller/sibling nodes, or partially consume a protected nested container.
+- [x] Expose a function-owned internal place trigger identifying the actual reduction type, using existing type-specific fold styling. Structural eligibility must not be mislabeled as green Sequence eligibility.
+- [x] Make that trigger and Fold Entire Function expose the same safe candidate and revalidate immediately before mutation. Preserve containment and stale-target safety in individual/batch interactions involving the trigger.
+- [x] Continue valid scoped reductions until completion or a fixed point. A completed function uses the existing brown/gold tile and function/component label; an unsupported or unsafe region reports a specific partial/no-progress reason.
 - [ ] Never force completion through whole-net fallback, arbitrary component classification/weights, or disabled boundary checks. Preserve source call resolution and unresolved-call metadata.
 - [ ] Cover both GameState._coerce_direction() occurrences in the Dots & Boxes reproduction, inside _edge_for_move() and _adjacent_boxes(), using self-contained fixtures with conditional returns and nested exception routing. Assess actual structural eligibility independently in both caller contexts rather than hard-coding a component type.
 - [ ] Exercise the actual generated viewer's internal trigger and function button with a positively validated structural fixture; verify unrelated elementary folds do not veto it, eligible local elementary folds run first, retained anchors work in both directions, and larger surrounding candidates do not obscure it.
@@ -29,3 +29,9 @@ See the [Phase 2.8 specification](../specs/phase-2.8-viewer-interactive-enhancem
 ## Comments
 
 - 2026-10-13: User approved scope-local elementary priority, an internal marker and sidebar action sharing validated eligibility, retained caller anchors, existing mathematical rules, and partial outcomes for unsupported regions. Published locally with to-spec and to-tickets.
+
+### 2026-10-13 — Implementation
+
+Implemented scope-aware elementary gating, structural discovery and containment, retained caller anchors, internal place triggers, stale-trigger revalidation, and the existing Fold Entire Function action. Focused headless tests cover unrelated sibling elementary work, retained anchors, a validated state-machine fold, and a stale trigger. Full Dots & Boxes caller-context, nested-container, weights/SM, session/unfold, and generated-browser interaction verification remain pending; keep this ticket ready for human verification.
+
+The final full suite ran 576 tests with 1 failure and 4 errors: the prototype runner could not bind its test port; optional `pygraphviz` and `pytest` dependencies are unavailable; and two pre-existing integration expectations disagree with current return shapes (`PetriNet.initial_net` and two-value `WalkerProtocol` unpacking). Focused regression suites and `compileall` passed.

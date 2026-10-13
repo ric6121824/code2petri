@@ -1095,64 +1095,37 @@ console.log('PASS');
         node_script = f"""
 {net_to_elements_js}
 
-// Compounds provided in reverse order with depth 4 and cycle test
-const net = {{
-  compounds: [
-    {{ id: 'c_deep', function_name: 'deep', parent: 'c_leaf', file: 'a.py' }},
-    {{ id: 'c_leaf', function_name: 'leaf', parent: 'c_middle', file: 'a.py' }},
-    {{ id: 'c_middle', function_name: 'middle', parent: 'c_outer', file: 'a.py' }},
-    {{ id: 'c_outer', function_name: 'outer', parent: null, file: 'a.py' }}
-  ],
-  places: [
-    {{ id: 'p_outer', label: 'p_out', parent: 'c_outer' }},
-    {{ id: 'p_mid', label: 'p_mid', parent: 'c_middle' }},
-    {{ id: 'p_leaf', label: 'p_leaf', parent: 'c_leaf' }},
-    {{ id: 'p_deep', label: 'p_deep', parent: 'c_deep' }}
-  ],
-  transitions: [
-    {{ id: 't_outer', label: 't_out', parent: 'c_outer' }},
-    {{ id: 't_mid', label: 't_mid', parent: 'c_middle' }},
-    {{ id: 't_leaf', label: 't_leaf', parent: 'c_leaf' }},
-    {{ id: 't_deep', label: 't_deep', parent: 'c_deep' }}
-  ],
-  arcs: []
-}};
+// Compounds provided out of order across depth 0..8, including equal-depth siblings.
+const compounds = [];
+for (let depth = 8; depth >= 0; depth--) {{
+  compounds.push({{ id: 'c_' + depth, function_name: 'level' + depth,
+    parent: depth ? 'c_' + (depth - 1) : null, file: 'a.py' }});
+}}
+compounds.push({{ id: 'c_4_sibling', function_name: 'sibling', parent: 'c_3', file: 'a.py' }});
+const net = {{ compounds, places: [], transitions: [], arcs: [] }};
 
 const elements = netToElements(net);
 
-const cOuter = elements.find(e => e.data && e.data.id === 'c_outer');
-const cMid = elements.find(e => e.data && e.data.id === 'c_middle');
-const cLeaf = elements.find(e => e.data && e.data.id === 'c_leaf');
-const cDeep = elements.find(e => e.data && e.data.id === 'c_deep');
-
-if (!cOuter || !cMid || !cLeaf || !cDeep) throw new Error('Missing compounds');
-
-// Check depth and depth classes (depth 4 clamped to depth-3)
-if (cOuter.data.depth !== 0 || !cOuter.classes.includes('depth-0')) {{
-  throw new Error('c_outer depth failed: ' + JSON.stringify(cOuter));
+const byId = id => elements.find(e => e.data && e.data.id === id);
+const palette = ['depth-0', 'depth-1', 'depth-2'];
+for (let depth = 0; depth <= 8; depth++) {{
+  const compound = byId('c_' + depth);
+  if (!compound || compound.data.depth !== depth || !compound.classes.split(/\\s+/).includes(palette[depth % 3])) {{
+    throw new Error('semantic depth/palette failed at ' + depth + ': ' + JSON.stringify(compound));
+  }}
+  if (depth && compound.data.parent !== 'c_' + (depth - 1)) throw new Error('parent changed at ' + depth);
+  if (depth) {{
+    const parent = byId('c_' + (depth - 1));
+    if (compound.classes.includes('collapsed-compound')) throw new Error('expanded compound was collapsed');
+    if (parent && compound.classes.split(/\\s+/).includes(parent.classes.split(/\\s+/).find(name => palette.includes(name)))) {{
+      throw new Error('adjacent parent and child share a palette color at ' + depth);
+    }}
+  }}
 }}
-if (cMid.data.depth !== 1 || !cMid.classes.includes('depth-1') || cMid.data.parent !== 'c_outer') {{
-  throw new Error('c_middle depth failed: ' + JSON.stringify(cMid));
-}}
-if (cLeaf.data.depth !== 2 || !cLeaf.classes.includes('depth-2') || cLeaf.data.parent !== 'c_middle') {{
-  throw new Error('c_leaf depth failed: ' + JSON.stringify(cLeaf));
-}}
-if (cDeep.data.depth !== 3 || !cDeep.classes.includes('depth-3') || cDeep.data.parent !== 'c_leaf') {{
-  throw new Error('c_deep depth failed: ' + JSON.stringify(cDeep));
-}}
-
-// Check readable labels
-if (cOuter.data.label !== 'outer()' || cMid.data.label !== 'middle()' || cLeaf.data.label !== 'leaf()') {{
-  throw new Error('Labels failed: ' + cOuter.data.label + ', ' + cMid.data.label + ', ' + cLeaf.data.label);
-}}
-
-// Check topological ordering in elements: outer must precede middle, middle must precede leaf
-const idxOuter = elements.indexOf(cOuter);
-const idxMid = elements.indexOf(cMid);
-const idxLeaf = elements.indexOf(cLeaf);
-const idxDeep = elements.indexOf(cDeep);
-if (idxOuter > idxMid || idxMid > idxLeaf || idxLeaf > idxDeep) {{
-  throw new Error('Topological ordering failed: outer=' + idxOuter + ', mid=' + idxMid + ', leaf=' + idxLeaf + ', deep=' + idxDeep);
+if (byId('c_4').classes !== byId('c_4_sibling').classes) throw new Error('same-depth siblings differ');
+if (byId('c_0').data.label !== 'level0()' || byId('c_8').data.label !== 'level8()') throw new Error('Readable labels failed');
+for (let depth = 0; depth < 8; depth++) {{
+  if (elements.indexOf(byId('c_' + depth)) > elements.indexOf(byId('c_' + (depth + 1)))) throw new Error('Topological ordering failed');
 }}
 
 // Resilience test: circular parent references must not crash recursion
@@ -1183,6 +1156,7 @@ console.log('PASS');
         self.assertIn("node.compound.depth-0", html)
         self.assertIn("node.compound.depth-1", html)
         self.assertIn("node.compound.depth-2", html)
+        self.assertNotIn("node.compound.depth-3", html)
 
     def test_cli_end_to_end_3_level_nested_calls_html(self):
         """Validates that CLI generates 3 levels of nested compound containers on load."""
@@ -6448,10 +6422,11 @@ console.log('PASS');
 
     def test_fold_entire_function_reaches_structural_place_reduction(self):
         net = self._STATE_MACHINE_NET.replace(
-            "places: [", "compounds: [{ id: 'fn', label: 'fn()', function_name: 'fn' }],\n  places: ["
-        ).replace("label: 'src',", "label: 'src', parent: 'fn',")
-        for node_id in ['p_mid1', 'p_mid2', 'p_snk']:
+            "places: [", "compounds: [{ id: 'caller' }, { id: 'fn', parent: 'caller', label: 'fn()', function_name: 'fn' }],\n  places: ["
+        ).replace("label: 'src',", "label: 'src', parent: 'caller',")
+        for node_id in ['p_mid1', 'p_mid2']:
             net = net.replace("id: '" + node_id + "', label:", "id: '" + node_id + "', parent: 'fn', label:")
+        net = net.replace("id: 'p_snk', label:", "id: 'p_snk', parent: 'caller', label:")
         for transition_id in ['t1', 't2', 't3', 't4', 't5']:
             net = net.replace("id: '" + transition_id + "',", "id: '" + transition_id + "', parent: 'fn',")
         test_logic = """
@@ -6464,6 +6439,132 @@ console.log('PASS');
         proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
+
+    def test_scoped_structural_function_fold_ignores_unrelated_elementary_reduction(self):
+        net = self._STATE_MACHINE_NET.replace(
+            "places: [",
+            "compounds: [{ id: 'caller' }, { id: 'fn', parent: 'caller' }, { id: 'sibling' }],\n  places: ["
+        )
+        for node_id in ['p_mid1', 'p_mid2']:
+            net = net.replace("id: '" + node_id + "', label:", "id: '" + node_id + "', parent: 'fn', label:")
+        for transition_id in ['t1', 't2', 't3', 't4', 't5']:
+            net = net.replace("id: '" + transition_id + "',", "id: '" + transition_id + "', parent: 'fn',")
+        net = net.replace("id: 'p_src', label:", "id: 'p_src', parent: 'caller', label:")
+        net = net.replace("id: 'p_snk', label:", "id: 'p_snk', parent: 'caller', label:")
+        net = net.replace(
+            "    { id: 'p_snk', parent: 'caller', label: 'snk', initial_tokens: 0 }\n  ],",
+            "    { id: 'p_snk', parent: 'caller', label: 'snk', initial_tokens: 0 },\n"
+            "    { id: 'q0', parent: 'sibling' }, { id: 'q1', parent: 'sibling' }, { id: 'q2', parent: 'sibling' }\n  ],"
+        )
+        net = net.replace(
+            "    { id: 't4', parent: 'fn', tau: 2.0 }, { id: 't5', parent: 'fn', tau: 3.0 }\n  ],",
+            "    { id: 't4', parent: 'fn', tau: 2.0 }, { id: 't5', parent: 'fn', tau: 3.0 },\n"
+            "    { id: 'q_before', parent: 'sibling' }, { id: 'q_after', parent: 'sibling' }\n  ],"
+        )
+        net = net.replace(
+            "  arcs: [",
+            "  arcs: [\n"
+            "    { source: 'q0', target: 'q_before' }, { source: 'q_before', target: 'q1' },\n"
+            "    { source: 'q1', target: 'q_after' }, { source: 'q_after', target: 'q2' },"
+        )
+        test_logic = r"""
+if (!foldEngine.hasElementaryReductions()) throw new Error('Fixture must retain an unrelated elementary reduction');
+const result = foldEngine.executeFoldEntireFunction('fn');
+if (!result.complete || !result.folded.some(item => item.foldType === 'state_machine') ||
+    !cy.getElementById('fn').hasClass('collapsed-compound')) {
+  throw new Error('Function button did not complete the scoped structural reduction: ' + JSON.stringify(result));
+}
+if (!cy.getElementById('p_src').length || !cy.getElementById('p_snk').length) throw new Error('Caller-owned anchors were consumed');
+if (!cy.getElementById('q1').length || !foldEngine.canSinglePlaceContract(cy.getElementById('q1')).ok) throw new Error('The unrelated sibling fold changed');
+
+const triggerGraph = cytoscape({ elements: netToElements(net) });
+const triggerEngine = new LiveFoldReductionEngine(triggerGraph);
+const trigger = triggerGraph.getElementById('p_mid1');
+if (triggerEngine.getFoldType(trigger, 'fn') !== 'state_machine') throw new Error('Function-local structural trigger was blocked by the sibling');
+const scoped = triggerEngine.executeBatchFold(['p_mid1'], 'fn');
+if (!scoped.success || scoped.folded[0].foldType !== 'state_machine') throw new Error('The scoped place trigger did not execute its validated candidate');
+triggerGraph.destroy();
+
+const staleGraph = cytoscape({ elements: netToElements(net) });
+const staleEngine = new LiveFoldReductionEngine(staleGraph);
+staleGraph.getElementById('p_mid1').move({ parent: 'sibling' });
+const stale = staleEngine.executeBatchFold(['p_mid1'], 'fn');
+if (stale.success || stale.folded.length || staleGraph.getElementById('p_mid1').length === 0) {
+  throw new Error('A stale function trigger escaped containment revalidation: ' + JSON.stringify(stale));
+}
+staleGraph.destroy();
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Scoped structural folding failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_scoped_fold_trigger_does_not_fall_back_to_a_global_candidate(self):
+        html = _read_template_html()
+        match = re.search(
+            r"function handleFoldReduction\(node, fallbackType\) \{.*?(?=      // Cursor feedback on hover)",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "Could not find the generated viewer's fold trigger handler")
+        script = f"""
+let lookups = [];
+const foldEngine = {{ getFoldType: function(node, scopeId) {{
+  lookups.push(scopeId || null);
+  return scopeId ? null : 'unstructured';
+}} }};
+{match.group(0)}
+const node = {{ data: function(name) {{ return name === 'function_fold_scope' ? 'fn' : null; }} }};
+if (handleFoldReduction(node, 'sequence') !== false) throw new Error('Invalid scoped trigger unexpectedly executed');
+if (lookups.length !== 1 || lookups[0] !== 'fn') throw new Error('Scoped trigger retried an unscoped candidate: ' + JSON.stringify(lookups));
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Scoped trigger fell back globally: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_scoped_marked_graph_place_trigger_gets_visible_type_styling(self):
+        html = _read_template_html()
+        match = re.search(
+            r"function updateFoldableHighlights\(\) \{.*?(?=      const foldEngine =)",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match, "Could not find generated-viewer foldable highlighting")
+        script = f"""
+const place = {{
+  classes: new Set(['place']), values: {{ id: 'p1' }},
+  id: function() {{ return 'p1'; }},
+  hasClass: function(name) {{ return this.classes.has(name); }},
+  addClass: function(name) {{ name.split(/\\s+/).forEach(value => this.classes.add(value)); }},
+  removeClass: function(name) {{ name.split(/\\s+/).forEach(value => this.classes.delete(value)); }},
+  data: function(name, value) {{ if (arguments.length > 1) this.values[name] = value; return this.values[name]; }},
+  removeData: function(name) {{ delete this.values[name]; }}
+}};
+const fn = {{ length: 1, hasClass: function(name) {{ return name === 'compound'; }} }};
+const cy = {{ nodes: function(selector) {{ return {{ forEach: function(callback) {{ if (selector === '.place') callback(place); }} }}; }}, getElementById: function(id) {{ return id === 'fn' ? fn : null; }} }};
+const foldEngine = {{
+  _updateCollapsedCompoundStates: function() {{}},
+  getActiveStructuralCandidates: function() {{ return {{}}; }},
+  _getNodeAncestors: function() {{ return ['p1', 'fn']; }},
+  getFoldType: function(node, scopeId) {{ return scopeId === 'fn' ? 'marked_graph' : null; }}
+}};
+const LiveFoldReductionEngine = {{
+  FOLD_TYPE_REGISTRY: {{ marked_graph: {{ targetGroup: 'transition', className: 'contractible-marked-graph' }} }},
+  ALL_PLACE_CONTRACTIBLE_CLASSES: ['contractible-sequence', 'contractible-choice', 'contractible-while', 'contractible-state-machine', 'contractible-well-structured', 'contractible-unstructured']
+}};
+{match.group(0)}
+updateFoldableHighlights();
+if (!place.hasClass('contractible') || !place.hasClass('contractible-marked-graph') || place.data('function_fold_scope') !== 'fn') {{
+  throw new Error('Scoped Marked Graph place trigger has no visible type affordance');
+}}
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Scoped Marked Graph trigger styling failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+        self.assertIn("node.place.contractible-marked-graph", html)
+        self.assertIn("node.place.contractible-marked-graph:selected", html)
 
 
 class TestFoldEntireFunction(unittest.TestCase):

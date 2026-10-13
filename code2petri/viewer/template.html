@@ -532,6 +532,14 @@
             <div class="inspector-label">Function return evidence</div>
             <pre id="inspector-function-return-content" class="inspector-val" style="white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; font-family: inherit;"></pre>
           </section>
+          <section id="inspector-call-results" aria-label="Contained call result evidence" style="display: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid #30363d;">
+            <div class="inspector-label">Contained call results</div>
+            <pre id="inspector-call-results-content" class="inspector-val" style="white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; font-family: inherit;"></pre>
+          </section>
+          <section id="inspector-return-expression" aria-label="Enclosing return expression" style="display: none; margin-top: 12px; padding-top: 10px; border-top: 1px solid #30363d;">
+            <div class="inspector-label">Enclosing return expression</div>
+            <pre id="inspector-return-expression-content" class="inspector-val" style="white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 0; font-family: inherit;"></pre>
+          </section>
           <div class="inspector-actions" style="margin-top: 8px;">
             <button id="hud-btn-contract-mg" class="btn btn-primary" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px;">Contract Marked Graph</button>
             <button id="hud-btn-fold-entire-function" class="btn btn-primary" style="display: none; width: 100%; font-size: 11px; padding: 4px 8px; margin-top: 6px;">Fold Entire Function</button>
@@ -844,7 +852,8 @@
         // Add compound parent containers
         sortedCompounds.forEach(function(compound) {
           const depth = computeCompoundDepth(compound.id);
-          const depthClass = 'depth-' + Math.min(depth, 3);
+          const depthClass = 'depth-' + (depth % 3);
+          const paddingDepthClass = 'padding-depth-' + Math.min(depth, 3);
           const readableLabel = compound.label || (compound.function_name ? compound.function_name + '()' : compound.id);
           elements.push({
             group: 'nodes',
@@ -860,7 +869,7 @@
               parent: compound.parent || undefined,
               type: 'Compound Function Container'
             },
-            classes: 'compound ' + depthClass
+            classes: 'compound ' + depthClass + ' ' + paddingDepthClass
           });
         });
 
@@ -944,6 +953,12 @@
             omega: meta.omega !== undefined ? meta.omega : t.omega,
             source_line: meta.source_line !== undefined ? meta.source_line : t.source_line
           };
+          if (Array.isArray(meta.call_results)) {
+            nodeData.call_results = meta.call_results;
+          }
+          if (meta.function_return_evidence && typeof meta.function_return_evidence === 'object') {
+            nodeData.function_return_evidence = meta.function_return_evidence;
+          }
           if (typeof meta.function_ref === 'string') {
             nodeData.function_ref = meta.function_ref;
           }
@@ -1106,7 +1121,50 @@
           });
         }
 
+        const elementById = new Map(elements.filter(function(element) {
+          return element.group === 'nodes';
+        }).map(function(element) { return [element.data.id, element]; }));
+        elements.forEach(function(element) {
+          if (element.group !== 'nodes' || !(element.classes || '').split(/\s+/).includes('compound')) return;
+          const ancestry = new Set([element.data.id]);
+          let parentId = element.data.parent;
+          let depth = 0;
+          while (parentId && !ancestry.has(parentId)) {
+            ancestry.add(parentId);
+            depth++;
+            const parent = elementById.get(parentId);
+            parentId = parent && parent.data.parent;
+          }
+          element.data.depth = depth;
+          const classes = (element.classes || '').split(/\s+/).filter(function(name) {
+            return !/^depth-[0-3]$/.test(name) && !/^padding-depth-[0-3]$/.test(name);
+          });
+          classes.push('depth-' + (depth % 3));
+          classes.push('padding-depth-' + Math.min(depth, 3));
+          element.classes = classes.join(' ');
+        });
+
         return elements;
+      }
+
+      function refreshCompoundDepthPresentation(graph) {
+        if (!graph || typeof graph.nodes !== 'function') return;
+        const compounds = graph.nodes('.compound');
+        compounds.forEach(function(node) {
+          const ancestry = new Set([node.id()]);
+          let parentId = node.data('parent') || null;
+          let depth = 0;
+          while (parentId && !ancestry.has(parentId)) {
+            ancestry.add(parentId);
+            depth++;
+            const parent = graph.getElementById(parentId);
+            parentId = parent && parent.length > 0 ? parent.data('parent') || null : null;
+          }
+          node.data('depth', depth);
+          node.removeClass('depth-0 depth-1 depth-2 depth-3 padding-depth-0 padding-depth-1 padding-depth-2 padding-depth-3');
+          node.addClass('depth-' + (depth % 3));
+          node.addClass('padding-depth-' + Math.min(depth, 3));
+        });
       }
 
       // Layout configuration for Dagre hierarchy
@@ -1226,6 +1284,28 @@
           },
           {
             selector: 'node.transition.contractible-marked-graph:selected',
+            style: {
+              'border-color': '#58a6ff',
+              'border-width': 4,
+              'shadow-blur': 16,
+              'shadow-color': 'rgba(88, 166, 255, 1.0)',
+              'shadow-opacity': 1.0
+            }
+          },
+          {
+            selector: 'node.place.contractible-marked-graph',
+            style: {
+              'border-color': '#58a6ff',
+              'border-width': 3,
+              'border-style': 'solid',
+              'background-color': 'rgba(88, 166, 255, 0.25)',
+              'shadow-blur': 12,
+              'shadow-color': 'rgba(88, 166, 255, 0.75)',
+              'shadow-opacity': 0.9
+            }
+          },
+          {
+            selector: 'node.place.contractible-marked-graph:selected',
             style: {
               'border-color': '#58a6ff',
               'border-width': 4,
@@ -1385,8 +1465,7 @@
               'background-color': 'rgba(46, 125, 50, 0.04)',
               'border-color': '#2e7d32',
               'color': '#1b5e20',
-              'text-background-color': '#e8f5e9',
-              'padding': '28px'
+              'text-background-color': '#e8f5e9'
             }
           },
           {
@@ -1395,8 +1474,7 @@
               'background-color': 'rgba(21, 101, 192, 0.04)',
               'border-color': '#1565c0',
               'color': '#0d47a1',
-              'text-background-color': '#e3f2fd',
-              'padding': '24px'
+              'text-background-color': '#e3f2fd'
             }
           },
           {
@@ -1405,17 +1483,30 @@
               'background-color': 'rgba(123, 31, 162, 0.04)',
               'border-color': '#7b1fa2',
               'color': '#4a148c',
-              'text-background-color': '#f3e5f5',
+              'text-background-color': '#f3e5f5'
+            }
+          },
+          {
+            selector: 'node.compound.padding-depth-0',
+            style: {
+              'padding': '28px'
+            }
+          },
+          {
+            selector: 'node.compound.padding-depth-1',
+            style: {
+              'padding': '24px'
+            }
+          },
+          {
+            selector: 'node.compound.padding-depth-2',
+            style: {
               'padding': '20px'
             }
           },
           {
-            selector: 'node.compound.depth-3',
+            selector: 'node.compound.padding-depth-3',
             style: {
-              'background-color': 'rgba(230, 81, 0, 0.04)',
-              'border-color': '#e65100',
-              'color': '#bf360c',
-              'text-background-color': '#fff3e0',
               'padding': '18px'
             }
           },
@@ -1632,6 +1723,10 @@
       const inspectorActionResult = document.getElementById('inspector-action-result');
       const inspectorFunctionReturn = document.getElementById('inspector-function-return');
       const inspectorFunctionReturnContent = document.getElementById('inspector-function-return-content');
+      const inspectorCallResults = document.getElementById('inspector-call-results');
+      const inspectorCallResultsContent = document.getElementById('inspector-call-results-content');
+      const inspectorReturnExpression = document.getElementById('inspector-return-expression');
+      const inspectorReturnExpressionContent = document.getElementById('inspector-return-expression-content');
 
       function updateDockedSidebarToggle() {
         if (!sidebarVisibilityToggle) return;
@@ -1703,6 +1798,34 @@
         lines.push('Analysis status: ' + (metadata.analysis_status || 'unknown'));
         lines.push(formatReturnMetadataDetails(metadata));
         return lines.join('\n');
+      }
+
+      function formatCallResultInspection(records) {
+        if (!Array.isArray(records) || records.length === 0) return '';
+        return records.map(function(record) {
+          const location = record.source_location || {};
+          const where = location.line == null ? 'Unknown location' : 'line ' + location.line +
+            (location.column == null ? '' : ':' + location.column);
+          if (record.state === 'known') {
+            return 'Call: ' + record.expression + ' (' + where + ')\n' +
+              'Result: ' + record.type + ' (Python built-in contract: ' + record.canonical_builtin + ')';
+          }
+          return 'Call: ' + record.expression + ' (' + where + ')\n' +
+            'Result: Unknown — ' + (record.unknown_reason || 'no_available_contract');
+        }).join('\n\n');
+      }
+
+      function formatEnclosingReturnEvidence(record) {
+        if (!record || typeof record !== 'object') return '';
+        const location = record.expression_location || record.source_location || {};
+        const where = location.line == null ? 'Unknown location' : 'line ' + location.line +
+          (location.column == null ? '' : ':' + location.column);
+        const result = record.type === 'unknown'
+          ? 'Unknown — return expression inference unavailable'
+          : record.type;
+        return 'Expression: ' + (record.expression || 'Unknown expression') + ' (' + where + ')\n' +
+          'Enclosing function result: ' + result +
+          (record.provenance ? '\nEvidence: ' + record.provenance : '');
       }
 
       function getInspectorData(node) {
@@ -1828,6 +1951,14 @@
               : 'Return metadata: Unknown — no resolved function record is available.')
             : 'Return metadata: Unknown — this call is unresolved.';
         }
+        const callResultText = typeof formatCallResultInspection === 'function'
+          ? formatCallResultInspection(node.data('call_results')) : '';
+        if (typeof inspectorCallResults !== 'undefined' && inspectorCallResults) inspectorCallResults.style.display = callResultText ? 'block' : 'none';
+        if (typeof inspectorCallResultsContent !== 'undefined' && inspectorCallResultsContent) inspectorCallResultsContent.textContent = callResultText;
+        const returnExpressionText = typeof formatEnclosingReturnEvidence === 'function'
+          ? formatEnclosingReturnEvidence(node.data('function_return_evidence')) : '';
+        if (typeof inspectorReturnExpression !== 'undefined' && inspectorReturnExpression) inspectorReturnExpression.style.display = returnExpressionText ? 'block' : 'none';
+        if (typeof inspectorReturnExpressionContent !== 'undefined' && inspectorReturnExpressionContent) inspectorReturnExpressionContent.textContent = returnExpressionText;
 
         if (els.labelEl) els.labelEl.textContent = data.label;
         if (els.inputEl) els.inputEl.value = data.label;
@@ -1876,6 +2007,10 @@
         if (els.idEl) els.idEl.textContent = '—';
         if (typeof inspectorFunctionReturn !== 'undefined' && inspectorFunctionReturn) inspectorFunctionReturn.style.display = 'none';
         if (typeof inspectorFunctionReturnContent !== 'undefined' && inspectorFunctionReturnContent) inspectorFunctionReturnContent.textContent = '';
+        if (typeof inspectorCallResults !== 'undefined' && inspectorCallResults) inspectorCallResults.style.display = 'none';
+        if (typeof inspectorCallResultsContent !== 'undefined' && inspectorCallResultsContent) inspectorCallResultsContent.textContent = '';
+        if (typeof inspectorReturnExpression !== 'undefined' && inspectorReturnExpression) inspectorReturnExpression.style.display = 'none';
+        if (typeof inspectorReturnExpressionContent !== 'undefined' && inspectorReturnExpressionContent) inspectorReturnExpressionContent.textContent = '';
         if (els.tauEl) els.tauEl.textContent = '—';
         if (els.omegaEl) els.omegaEl.textContent = '—';
         if (els.typeEl) els.typeEl.textContent = '—';
@@ -1987,9 +2122,19 @@
         }
 
         cy.nodes('.place').forEach(function(p) {
-          const foldType = foldEngine.getFoldType(p) || boundaryTypeMap.get(p.id()) || null;
+          let functionFoldScope = null;
+          if (typeof foldEngine._getNodeAncestors === 'function') {
+            functionFoldScope = foldEngine._getNodeAncestors(p.id()).find(function(ancestorId) {
+              const ancestor = cy.getElementById(ancestorId);
+              return ancestor && ancestor.length > 0 && ancestor.hasClass('compound');
+            }) || null;
+          }
+          let foldType = functionFoldScope ? foldEngine.getFoldType(p, functionFoldScope) : null;
+          if (foldType && functionFoldScope) p.data('function_fold_scope', functionFoldScope);
+          if (!foldType && !functionFoldScope) foldType = foldEngine.getFoldType(p) || boundaryTypeMap.get(p.id()) || null;
           const meta = foldType ? LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType] : null;
           const targetClass = (meta && meta.targetGroup === 'place') ? meta.className : null;
+          const markedGraphPlaceTrigger = Boolean(functionFoldScope && foldType === 'marked_graph');
 
           LiveFoldReductionEngine.ALL_PLACE_CONTRACTIBLE_CLASSES.forEach(function(cls) {
             if (cls === targetClass) {
@@ -2003,6 +2148,12 @@
           } else {
             p.removeClass('contractible');
           }
+          if (markedGraphPlaceTrigger) {
+            p.addClass('contractible contractible-marked-graph');
+          } else {
+            p.removeClass('contractible-marked-graph');
+          }
+          if (!functionFoldScope || !foldType) p.removeData('function_fold_scope');
         });
 
         cy.nodes('.transition').forEach(function(t) {
@@ -2027,7 +2178,10 @@
 
       function handleFoldReduction(node, fallbackType) {
         if (typeof foldEngine === 'undefined' || !foldEngine) return false;
-        const foldType = foldEngine.getFoldType(node) || fallbackType;
+        const scopeId = node.data('function_fold_scope') || null;
+        const foldType = scopeId
+          ? foldEngine.getFoldType(node, scopeId)
+          : foldEngine.getFoldType(node) || fallbackType;
         if (!foldType) return false;
         const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
         if (!meta || typeof meta.execute !== 'function') return false;
@@ -2035,7 +2189,7 @@
         const viewportBefore = captureViewport(cy);
         const preFoldPlacePos = (node && typeof node.position === 'function' && node.position()) ? Object.assign({}, node.position()) : null;
 
-        const res = meta.execute(foldEngine, node);
+        const res = meta.execute(foldEngine, node, scopeId);
         if (res && res.success) {
           if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
             cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
@@ -2138,6 +2292,7 @@
 
         const res = foldEngine.executeComponentLocalUnfold(node);
         if (res && res.success) {
+          if (typeof refreshCompoundDepthPresentation === 'function') refreshCompoundDepthPresentation(cy);
           if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
             cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
           }
@@ -2414,6 +2569,7 @@
         cy.elements().remove();
         try {
           cy.add(nextElements);
+          if (typeof refreshCompoundDepthPresentation === 'function') refreshCompoundDepthPresentation(cy);
         } catch (error) {
           cy.elements().remove();
           cy.add(previousElements);

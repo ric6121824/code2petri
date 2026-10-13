@@ -370,7 +370,7 @@ Phase 2.7 fundamentally rearchitected the viewer around **Live Fold Reduction**,
 - Shared viewport helpers preserve zoom and pan during Live Fold Reduction and Component-Local Unfold, placing the new component at the selected place's screen position without a `cy.fit()` reset.
 - The viewer lowers the minimum zoom to 0.1%, allowing the initial fit and scroll wheel to show very large composite nets.
 
-### Expanded Compound Color Follow-up (Ticket 67 — ready-for-agent)
+### Expanded Compound Color Follow-up (Ticket 67 — ready-for-human)
 
 - [Ticket 67 — Cycle Nested Compound Colors](./issues/67-cycle-nested-compound-colors.md) replaces the orange clamp at deep nesting with green → blue → purple → green cycling. Depth zero starts green; siblings share their depth's color and adjacent levels differ.
 - Orange remains reserved for unresolved call transitions; collapsed compounds retain their existing brown/gold styling. Presentation uses active hierarchy without changing semantic depth, parent relationships, or nested padding.
@@ -410,7 +410,7 @@ Phase 2.8 extends the self-contained HTML viewer with persistent controls for in
 
 - [Ticket 63](./issues/63-info-panel-project-title.md) is ready-for-human and adds explicit Project Title generation metadata, Project/File/Function presentation, and incoming-session identity ownership.
 - [Ticket 64](./issues/64-hide-recall-docked-sidebar.md) is ready-for-human and adds the near-top sidebar edge tab, instant hide/recall, reclaimed canvas width, preserved camera/drafts, and session visibility continuity.
-- [Ticket 66 — Function-Scoped Structural Folding](./issues/66-function-scoped-structural-folding.md) is ready-for-agent and extends Fold-Entire-Function after elementary exhaustion within the selected function, allowing its existing validated structural reductions while unrelated elementary folds remain elsewhere. An internal reduction-type marker and the sidebar button share safe eligibility; caller-owned entrance/exit places remain retained anchors.
+- [Ticket 66 — Function-Scoped Structural Folding](./issues/66-function-scoped-structural-folding.md) is ready-for-human verification and extends Fold-Entire-Function after elementary exhaustion within the selected function, allowing its existing validated structural reductions while unrelated elementary folds remain elsewhere. An internal reduction-type marker and the sidebar button share safe eligibility; caller-owned entrance/exit places remain retained anchors.
 - Unsupported regions still stop with a specific partial/no-progress reason; no new mathematical rule, forced class/penalty, or whole-net completion fallback is introduced. Completed functions retain brown/gold tiles, reversible local unfolding, session continuity, and unchanged unrelated graph/camera state. The [ADR 0003 scope amendment](../../docs/adr/0003-adopt-prom-local-reduction-algorithm.md) and [Phase 2.8 specification](./specs/phase-2.8-viewer-interactive-enhancements.md) record the agreed priority and consumption checks.
 - Each follow-up can start immediately. Tickets 47 and 53 retain their completed elementary-folding contracts; Ticket 66 and Phase 2.7's Ticket 67 are independent.
 
@@ -450,7 +450,7 @@ Tickets 54–60 and the [Ticket 62 list-inference extension](./issues/62-python-
 
 ### Call Result Metadata follow-ups
 
-- **Ready-for-agent — Python built-ins first:** [Ticket 65](./issues/65-python-builtin-call-result-metadata.md) covers range, len, str, int, float, bool, list, tuple, dict, and set, including statically identified explicit builtins imports and import aliases. Show each call's result separately from the enclosing function's returned-expression type, reuse trusted evidence through existing local inference, and preserve it offline. Unsupported or uncertain calls remain Unknown with a specific reason. Keep project-source resolution and folding behavior independent; do not execute game code to infer types.
+- **Ready-for-human — Python built-ins first:** [Ticket 65](./issues/65-python-builtin-call-result-metadata.md) covers range, len, str, int, float, bool, list, tuple, dict, and set, including statically identified explicit builtins imports and import aliases. Show each call's result separately from the enclosing function's returned-expression type, reuse trusted evidence through existing local inference, and preserve it offline. Unsupported or uncertain calls remain Unknown with a specific reason. Keep project-source resolution and folding behavior independent; do not execute game code to infer types. Generated-viewer session continuation and local-unfold checks remain to exercise.
 - **To-do — Other libraries:** Add reliable result evidence for Python standard-library and third-party-library calls whose definitions are outside the indexed project. Select supported contracts and identity/version rules in a later design; do not guess from function names.
 - **To-do — Other languages:** Extend unavailable-source call-result inspection to JavaScript and later supported languages using their own trusted contracts and binding rules. Existing source-based Function Return Metadata support is unchanged.
 - **To-do — Broader aliases and programmer-defined types:** Design evidence for assignment-created callable aliases/alias chains, project-defined constructor results, and type-alias expansion as a separate follow-up. Existing written custom annotations remain declared evidence. Do not infer a custom return contract from an arbitrary alias or callable name alone.
@@ -893,10 +893,10 @@ graph TD
 | Phase 2 — Cross-file tracing | 5 tickets (Tickets 11–15) | 6 review rounds | ✅ Complete |
 | Phase 2.5 — Structural folding & viewer | 6 tickets (Tickets 16–21) | 3 review rounds | ✅ Complete |
 | Phase 2.6 — ProM port & compound expansion | 6 tickets (Tickets 22–27) | 4 review rounds | ✅ Complete |
-| Phase 2.7 — Live Fold Reduction & Viewer | 17 tickets (Tickets 29–44, 67) | 12 baseline review rounds; follow-up TBD | Baseline complete; Ticket 67 ready |
-| Phase 2.8 — Viewer Interactive Enhancements | 10 tickets (Tickets 45–50, 53, 63–64, 66) | 5 baseline review rounds; follow-ups TBD | Baseline complete; 63–64 ready for human, 66 ready for agent |
+| Phase 2.7 — Live Fold Reduction & Viewer | 17 tickets (Tickets 29–44, 67) | 12 baseline review rounds; follow-up TBD | Baseline complete; Ticket 67 ready for human |
+| Phase 2.8 — Viewer Interactive Enhancements | 10 tickets (Tickets 45–50, 53, 63–64, 66) | 5 baseline review rounds; follow-ups TBD | Baseline complete; 63–64 and 66 ready for human |
 | Phase 2.9 — Compact and Reliable Fold State Snapshots | 2 tickets (Tickets 51–52) | TBD | Planned Next |
-| Phase 2.10 — Function Return Metadata | 9 tickets (Tickets 54–60, 62, 65) | 1 baseline review round; follow-up TBD | Baseline implemented; Ticket 65 ready |
+| Phase 2.10 — Function Return Metadata | 9 tickets (Tickets 54–60, 62, 65) | 1 baseline review round; follow-up TBD | Baseline implemented; Ticket 65 ready for human |
 | Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned |
 | Phase 4 — C++ + Unreal | 5–6 tickets | 3–4 sessions | Planned |
 | Phase 5 — Project-scale | 4–5 tickets | 2–3 sessions | Planned |
