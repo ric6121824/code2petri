@@ -1027,17 +1027,7 @@ class TestCLIEngineHTMLIntegration(unittest.TestCase):
     def test_net_to_elements_preserves_hierarchy_and_enclosing_function(self):
         """Validates that netToElements in template.html maps parent and enclosing_function to Cytoscape data."""
         import subprocess
-        import re
-
-        template_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "template.html")
-        )
-        with open(template_path, "r", encoding="utf-8") as f:
-            html = f.read()
-
-        m = re.search(r"(function netToElements\(net\) \{[\s\S]*?\n      \})", html)
-        self.assertIsNotNone(m)
-        net_to_elements_fn = m.group(1)
+        net_to_elements_fn = _extract_template_net_to_elements()
 
         node_script = f"""
 {net_to_elements_fn}

@@ -146,10 +146,11 @@ def _get_viewer_functions() -> str:
         html = f.read()
 
     m1 = re.search(r"(function findBoundaryPlaces\(calleeNet\) \{[\s\S]*?\n      \})", html)
-    m2 = re.search(r"(function netToElements\(net\) \{[\s\S]*?\n      \})", html)
-    if not m1 or not m2:
+    m2 = re.search(r"(function getCompoundDepthPresentation\(compoundId, getParentId\) \{[\s\S]*?\n      \})", html)
+    m3 = re.search(r"(function netToElements\(net\) \{[\s\S]*?\n      \})", html)
+    if not m1 or not m2 or not m3:
         raise ValueError("Could not extract findBoundaryPlaces or netToElements from template.html")
-    return f"{m1.group(1)}\n{m2.group(1)}\n"
+    return f"{m1.group(1)}\n{m2.group(1)}\n{m3.group(1)}\n"
 
 
 class TestCytoscapeClientSideExpansion(unittest.TestCase):
