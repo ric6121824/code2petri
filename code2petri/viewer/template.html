@@ -109,6 +109,7 @@
       color: #98c379;
     }
     #main-container {
+      --inspector-sidebar-width: 320px;
       flex: 1;
       display: flex;
       min-height: 0;
@@ -137,7 +138,7 @@
       backdrop-filter: blur(4px);
     }
     #inspector-panel {
-      flex: 0 0 320px;
+      flex: 0 0 var(--inspector-sidebar-width);
       height: 100%;
       background: #ffffff;
       border-left: 1px solid #d0d7de;
@@ -146,6 +147,33 @@
       overflow-y: auto;
       font-size: 12px;
       color: #24292e;
+    }
+    #sidebar-visibility-toggle {
+      position: absolute;
+      z-index: 8;
+      top: 12px;
+      right: max(0px, min(calc(var(--inspector-sidebar-width) - 16px), calc(100% - 32px)));
+      width: 32px;
+      height: 36px;
+      border: 1px solid #c8d0d8;
+      border-right: 0;
+      border-radius: 6px 0 0 6px;
+      background: #ffffff;
+      color: #343a40;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.16);
+      font-size: 22px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    #main-container.sidebar-hidden #sidebar-visibility-toggle {
+      right: 0;
+      border-right: 1px solid #c8d0d8;
+      border-left: 0;
+      border-radius: 0 6px 6px 0;
+    }
+    #sidebar-visibility-toggle:focus-visible {
+      outline: 3px solid #0366d6;
+      outline-offset: -3px;
     }
     .inspector-header {
       padding: 10px 14px;
@@ -424,6 +452,8 @@
   </header>
 
   <div id="main-container">
+    <button id="sidebar-visibility-toggle" type="button" title="Hide Sidebar"
+      aria-label="Hide Sidebar" aria-controls="inspector-panel" aria-expanded="true">›</button>
     <div id="cy"></div>
 
     <div id="info-panel">
@@ -452,7 +482,7 @@
       </div>
     </div>
 
-    <aside id="inspector-panel" class="inspector-panel" aria-label="Node inspector">
+    <aside id="inspector-panel" class="inspector-panel" aria-label="Node inspector" aria-hidden="false">
       <div class="inspector-header">
         <span class="inspector-title" id="hud-title">Node Inspector</span>
         <button id="inspector-close" class="inspector-close-btn" title="Clear inspection">✕</button>
@@ -1583,6 +1613,9 @@
 
       // Inspector panel DOM elements and functions
       const inspectorPanel = document.getElementById('inspector-panel');
+      const sidebarVisibilityToggle = document.getElementById('sidebar-visibility-toggle');
+      const mainContainer = document.getElementById('main-container');
+      let dockedSidebarVisible = true;
       const inspectorEmpty = document.getElementById('inspector-empty');
       const inspectorContent = document.getElementById('inspector-content');
       const inspectorLabel = document.getElementById('inspector-label');
@@ -1599,6 +1632,50 @@
       const inspectorActionResult = document.getElementById('inspector-action-result');
       const inspectorFunctionReturn = document.getElementById('inspector-function-return');
       const inspectorFunctionReturnContent = document.getElementById('inspector-function-return-content');
+
+      function updateDockedSidebarToggle() {
+        if (!sidebarVisibilityToggle) return;
+        const label = dockedSidebarVisible ? 'Hide Sidebar' : 'Show Sidebar';
+        sidebarVisibilityToggle.textContent = dockedSidebarVisible ? '›' : '‹';
+        sidebarVisibilityToggle.title = label;
+        sidebarVisibilityToggle.setAttribute('aria-label', label);
+        sidebarVisibilityToggle.setAttribute('aria-expanded', String(dockedSidebarVisible));
+      }
+
+      function setDockedSidebarVisible(visible, options) {
+        if (typeof visible !== 'boolean') {
+          throw new TypeError('Docked Sidebar visibility must be a boolean');
+        }
+        const opts = options || {};
+        const viewportBefore = opts.preserveViewport === false ? null : captureViewport(cy);
+        const focusWasInsideSidebar = !visible && inspectorPanel &&
+          typeof inspectorPanel.contains === 'function' &&
+          inspectorPanel.contains(document.activeElement);
+
+        dockedSidebarVisible = visible;
+        if (inspectorPanel) {
+          inspectorPanel.style.display = visible ? 'flex' : 'none';
+          inspectorPanel.setAttribute('aria-hidden', String(!visible));
+          inspectorPanel.inert = !visible;
+        }
+        if (mainContainer) mainContainer.classList.toggle('sidebar-hidden', !visible);
+        updateDockedSidebarToggle();
+
+        if (focusWasInsideSidebar && sidebarVisibilityToggle) sidebarVisibilityToggle.focus();
+        if (cy && typeof cy.resize === 'function') cy.resize();
+        if (viewportBefore) restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
+
+        if (visible && selectedInspectorNode && !selectedInspectorNode.inside()) {
+          closeInspector();
+        }
+      }
+
+      if (sidebarVisibilityToggle) {
+        sidebarVisibilityToggle.addEventListener('click', function(event) {
+          if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+          setDockedSidebarVisible(!dockedSidebarVisible);
+        });
+      }
 
       function getFunctionReturnRecord(functionRef) {
         if (typeof functionRef !== 'string' || !functionRef) return null;
@@ -1782,7 +1859,7 @@
           els.unfoldBtnEl.style.display = canUnfold ? 'block' : 'none';
         }
 
-        els.panelEl.style.display = 'flex';
+        els.panelEl.style.display = dockedSidebarVisible ? 'flex' : 'none';
         if (els.emptyEl) els.emptyEl.style.display = 'none';
         if (els.contentEl) els.contentEl.style.display = 'block';
       }
@@ -1790,7 +1867,7 @@
       function closeInspector() {
         const els = _resolveHudElements();
         if (els.panelEl) {
-          els.panelEl.style.display = 'flex';
+          els.panelEl.style.display = dockedSidebarVisible ? 'flex' : 'none';
         }
         if (els.emptyEl) els.emptyEl.style.display = 'block';
         if (els.contentEl) els.contentEl.style.display = 'none';
@@ -2282,6 +2359,7 @@
         return {
           title: payload.title || {{TITLE_JSON}},
           projectTitle: typeof activeDocument.project_title === 'string' ? activeDocument.project_title : '',
+          sidebarVisible: dockedSidebarVisible,
           sourceFile: payload.source_file || '',
           filename: payload.filename || '',
           functionName: activeDocument.function_name ||
@@ -2382,6 +2460,10 @@
           function_name: doc.functionName,
           return_metadata: doc.returnMetadata || null
         });
+        setDockedSidebarVisible(
+          typeof doc.sidebarVisible === 'boolean' ? doc.sidebarVisible : true,
+          { preserveViewport: false }
+        );
         isFoldMode = doc.mode === 'fold' && totalSteps > 0;
         if (foldControls) foldControls.style.display = isFoldMode ? 'flex' : 'none';
         if (badgeSm) badgeSm.style.display = (isFoldMode || doc.mode === 'composite') ? 'flex' : 'none';

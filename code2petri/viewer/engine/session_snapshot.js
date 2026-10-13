@@ -213,6 +213,10 @@
     if (Object.prototype.hasOwnProperty.call(documentContext, 'projectTitle')) {
       _requireString(documentContext.projectTitle, 'document.projectTitle');
     }
+    if (Object.prototype.hasOwnProperty.call(documentContext, 'sidebarVisible') &&
+        typeof documentContext.sidebarVisible !== 'boolean') {
+      _invalidSnapshot('document.sidebarVisible must be a boolean');
+    }
     if (documentContext.returnMetadata !== undefined && documentContext.returnMetadata !== null) {
       const metadata = documentContext.returnMetadata;
       if (!_isObject(metadata)) _invalidSnapshot('document.returnMetadata must be an object');

@@ -220,6 +220,7 @@ const hudBtnUnfold = {{
     }}
   }}
 }};
+let dockedSidebarVisible = true;
 
 const document = {{
   getElementById: function(id) {{
@@ -1361,13 +1362,18 @@ console.log('PASS');
         self.assertIn('id="inspector-line"', html)
         self.assertIn('id="inspector-close"', html)
 
-    def test_docked_sidebar_is_permanent_and_pushes_the_canvas(self):
-        """The generated viewer exposes a fixed-width light sidebar beside, not over, the canvas."""
+    def test_docked_sidebar_can_be_hidden_and_recalled_at_the_canvas_edge(self):
+        """The generated viewer exposes an accessible edge control for its docked sidebar."""
         html = _read_template_html()
 
-        self.assertIn('#main-container {\n      flex: 1;\n      display: flex;', html)
+        self.assertIn('#main-container {\n      --inspector-sidebar-width: 320px;\n      flex: 1;', html)
         self.assertIn('#cy {\n      flex: 1;', html)
-        self.assertIn('#inspector-panel {\n      flex: 0 0 320px;', html)
+        self.assertIn('#inspector-panel {\n      flex: 0 0 var(--inspector-sidebar-width);', html)
+        self.assertIn('#main-container.sidebar-hidden #sidebar-visibility-toggle', html)
+        self.assertIn('id="sidebar-visibility-toggle" type="button" title="Hide Sidebar"', html)
+        self.assertIn('aria-controls="inspector-panel" aria-expanded="true"', html)
+        self.assertIn('function setDockedSidebarVisible(visible, options)', html)
+        self.assertIn('inspectorPanel.inert = !visible;', html)
         self.assertIn('<aside id="inspector-panel"', html)
         self.assertIn('id="inspector-empty"', html)
         self.assertIn('Select a transition or component to inspect it.', html)
@@ -1484,6 +1490,7 @@ const inspectorTau = {{ textContent: '' }};
 const inspectorOmega = {{ textContent: '' }};
 const inspectorLine = {{ textContent: '' }};
 const inspectorSm = {{ textContent: '' }};
+let dockedSidebarVisible = true;
 
 {inspector_js}
 
@@ -4730,7 +4737,7 @@ console.log('PASS');
         self.assertIn('Name:', html)
 
     def test_docked_inspector_replaces_empty_state_on_left_click_headless(self):
-        """Validates that left-clicking a transition fills the permanently visible sidebar."""
+        """Validates that left-clicking a transition fills the shown docked sidebar."""
         net_literal = """{
   places: [{ id: 'p0', label: 'p0' }],
   transitions: [{ id: 't0', label: 'ComputeStep', tau: 2.0 }],
@@ -7015,6 +7022,13 @@ shownError = '';
 inputOpenSession.listeners.change();
 if (restoreCalls !== 0 || activeGraph !== 'previous-session') throw new Error('Invalid net entry replaced the active graph');
 if (!shownError.includes('Invalid Fold State Snapshot')) throw new Error('Invalid net entry error was not shown');
+invalidNetSnapshot.document.originalNet.transitions = [];
+invalidNetSnapshot.document.sidebarVisible = 'hidden';
+invalidSnapshot = JSON.stringify(invalidNetSnapshot);
+shownError = '';
+inputOpenSession.listeners.change();
+if (restoreCalls !== 0 || activeGraph !== 'previous-session') throw new Error('Invalid sidebar state replaced the active graph');
+if (!shownError.includes('document.sidebarVisible')) throw new Error('Invalid sidebar state error was not shown');
 console.log('PASS');
 """.replace('__OPEN_HANDLER__', open_handler.group(0))
         proc = _run_node_script(script)
@@ -7031,6 +7045,7 @@ console.log('PASS');
         script = """
 const activeDocument = { function_name: 'module.Processor.run', filename: 'processor.py', source_file: '/src/processor.py' };
 const payload = { title: 'Processor', document: activeDocument, compounds: [] };
+const dockedSidebarVisible = true;
 const initialNet = { places: [], transitions: [], arcs: [] };
 const foldSteps = [];
 const totalSteps = 0;
@@ -7073,13 +7088,14 @@ let graph = [{ data: { id: 'old' } }];
 let viewport = { zoom: 2, pan: { x: 0, y: 0 } };
 let layoutCount = 0;
 let closedInspector = 0;
+const restoreSequence = [];
 const cy = {
   elements: () => ({ jsons: () => graph.slice(), remove: () => { graph = []; } }),
   add: (items) => { graph = graph.concat(items); },
   nodes: () => ({ unselect: () => {} })
 };
 const captureViewport = () => viewport;
-const restoreViewport = (_, zoom, pan) => { viewport = { zoom, pan: { ...pan } }; };
+const restoreViewport = (_, zoom, pan) => { restoreSequence.push('viewport'); viewport = { zoom, pan: { ...pan } }; };
 let payload = {};
 let initialNet = { places: [], transitions: [], arcs: [] };
 let foldSteps = [];
@@ -7088,6 +7104,8 @@ let currentStep = 0;
 let stepNets = [];
 let initialSm = 0;
 let isFoldMode = false;
+let restoredSidebarVisible = null;
+const setDockedSidebarVisible = (visible) => { restoreSequence.push('sidebar'); restoredSidebarVisible = visible; };
 const calleeNetsMap = {};
 const expandedNodes = new Map();
 const foldEngine = { cfg: {}, stepCounter: 0, rememberedCustomNames: new Map(), calculateSMScore: () => 3.6 };
@@ -7103,6 +7121,7 @@ restoreFoldStateSnapshot(snapshot);
 if (graph.length !== 1 || graph[0].data.id !== 'restored') throw new Error('Graph was not replaced');
 if (layoutCount !== 0) throw new Error('Restore unexpectedly ran a layout');
 if (viewport.zoom !== 1.5 || viewport.pan.x !== 20 || viewport.pan.y !== -8) throw new Error('Viewport was not restored');
+if (restoredSidebarVisible !== true || restoreSequence.join(',') !== 'sidebar,viewport') throw new Error('Old snapshot did not default to shown layout before restoring camera');
 if (payload.title !== 'Restored Doc' || global.document.title !== 'Restored Doc - code2petri Viewer') throw new Error('Document identity was not restored');
 if (foldEngine.stepCounter !== 5 || foldEngine.cfg.choice !== 2 || !foldEngine.rememberedCustomNames.has('c_05')) throw new Error('Engine state was not restored');
 if (initialNet.places[0].id !== 'start' || !calleeNetsMap.helper || closedInspector !== 1) throw new Error('Document context or inspector state was not restored');
