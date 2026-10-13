@@ -123,7 +123,8 @@ def process_game(game_name: str):
             source_path=entry_file,
             target_function="(global)",
             context=context_files if context_files else None,
-            output_file=out_html
+            output_file=out_html,
+            project_title=game_name,
         )
         p_cnt, t_cnt, a_cnt, sm = inspect_net(res_html)
         global_meta["places"] = p_cnt
@@ -187,7 +188,8 @@ def process_game(game_name: str):
                     source_path=pyf,
                     target_function=fn,
                     context=ctx if ctx else None,
-                    output_file=out_html
+                    output_file=out_html,
+                    project_title=game_name,
                 )
                 p_cnt, t_cnt, a_cnt, sm = inspect_net(res)
                 f_meta["places"] = p_cnt

@@ -1,3 +1,4 @@
+import importlib.util
 import json
 import os
 import re
@@ -75,6 +76,39 @@ class TestProjectTitleWorkflow(unittest.TestCase):
                         data["document"]["function_name"],
                         "Global Scope" if function_name == "(global)" else "play",
                     )
+
+    def test_all_games_batch_uses_original_names_for_global_and_function_views(self):
+        script_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            ".scratch", "code2petri", "batch_generate_all_games.py",
+        )
+        spec = importlib.util.spec_from_file_location("code2petri_batch_generate", script_path)
+        batch_generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(batch_generator)
+
+        with tempfile.TemporaryDirectory(prefix="project-title-batch-") as temp_dir:
+            games_dir = os.path.join(temp_dir, "games")
+            graphs_dir = os.path.join(temp_dir, "graphs")
+            os.makedirs(games_dir)
+            batch_generator.GAMES_DIR = games_dir
+            batch_generator.GRAPHS_BASE = graphs_dir
+
+            for game_name in ("Tic Tac Toe", "Dots & Boxes"):
+                with self.subTest(game_name=game_name):
+                    source_dir = os.path.join(games_dir, game_name)
+                    os.makedirs(source_dir)
+                    with open(os.path.join(source_dir, "main.py"), "w", encoding="utf-8") as source_file:
+                        source_file.write("def play():\n    return 1\n\nready = True\n")
+
+                    for suffix in ("dated-run", "fixed-run"):
+                        batch_generator.DATE_SUFFIX = suffix
+                        result = batch_generator.process_game(game_name)
+                        prefix = batch_generator.normalize_game_name(game_name).lower()
+                        for html_name in (f"{prefix}_global_foldable.html", "play_foldable.html"):
+                            output_path = os.path.join(result["out_dir"], html_name)
+                            with open(output_path, encoding="utf-8") as html_file:
+                                data = _extract_embedded_data(html_file.read())
+                            self.assertEqual(data["document"]["project_title"], game_name)
 
     def test_missing_and_blank_titles_are_unavailable_without_path_guessing(self):
         for project_title in (None, "", " \t\n"):
