@@ -60,12 +60,13 @@ def _run_node_script(script: str):
 
 
 def _extract_template_net_to_elements() -> str:
-    """Helper to extract netToElements JavaScript function from template.html."""
+    """Helper to extract the depth presentation helper and element builder from template.html."""
     html = _read_template_html()
+    depth_match = re.search(r'function getCompoundDepthPresentation\(compoundId, getParentId\) \{.*?\n      \}', html, re.DOTALL)
     match = re.search(r'function netToElements\(net\) \{(.*?)\n      \}', html, re.DOTALL)
-    if not match:
+    if not depth_match or not match:
         raise ValueError("Could not extract netToElements from template.html")
-    return match.group(0)
+    return depth_match.group(0) + "\n" + match.group(0)
 
 
 def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> str:
@@ -6499,6 +6500,40 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Scoped structural folding failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+    def test_scoped_structural_candidate_allows_unconsumed_function_children(self):
+        net = self._STATE_MACHINE_NET.replace(
+            "places: [",
+            "compounds: [{ id: 'caller' }, { id: 'fn', parent: 'caller' }],\n  places: ["
+        )
+        for node_id in ['p_mid1', 'p_mid2']:
+            net = net.replace("id: '" + node_id + "', label:", "id: '" + node_id + "', parent: 'fn', label:")
+        for transition_id in ['t1', 't2', 't3', 't4', 't5']:
+            net = net.replace("id: '" + transition_id + "',", "id: '" + transition_id + "', parent: 'fn',")
+        net = net.replace("id: 'p_src', label:", "id: 'p_src', parent: 'caller', label:")
+        net = net.replace("id: 'p_snk', label:", "id: 'p_snk', parent: 'caller', label:")
+        net = net.replace(
+            "    { id: 'p_snk', parent: 'caller', label: 'snk', initial_tokens: 0 }\n  ],",
+            "    { id: 'p_snk', parent: 'caller', label: 'snk', initial_tokens: 0 },\n"
+            "    { id: 'p_unused', parent: 'fn', label: 'unrelated' }\n  ],"
+        )
+        test_logic = r"""
+const trigger = cy.getElementById('p_mid1');
+if (foldEngine.getFoldType(trigger, 'fn') !== 'state_machine') {
+  throw new Error('Unconsumed function children blocked a contained structural candidate');
+}
+const result = foldEngine.executeBatchFold(['p_mid1'], 'fn');
+if (!result.success || result.folded[0].foldType !== 'state_machine') {
+  throw new Error('Scoped candidate was not executable: ' + JSON.stringify(result));
+}
+if (!cy.getElementById('p_unused').length || !cy.getElementById('fn').length) {
+  throw new Error('Scoped reduction consumed unrelated function content');
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Contained structural candidate was rejected: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_scoped_fold_trigger_does_not_fall_back_to_a_global_candidate(self):
         html = _read_template_html()
         match = re.search(
@@ -7650,6 +7685,21 @@ try {
   restorationRejected = /restoration record references/i.test(error.message);
 }
 if (!restorationRejected) throw new Error('Restoration record with a dangling edge was accepted');
+const invalidGraphEvidence = JSON.parse(JSON.stringify(snapshot));
+invalidGraphEvidence.elements[0].data.function_return_evidence = {
+  expression: 42, type: 'list', provenance: 'test'
+};
+const invalidNetEvidence = JSON.parse(JSON.stringify(snapshot));
+invalidNetEvidence.document.originalNet.transitions[0].metadata = {
+  function_return_evidence: { expression: 'items', type: null, provenance: 'test' }
+};
+for (const invalidEvidenceSnapshot of [invalidGraphEvidence, invalidNetEvidence]) {
+  let evidenceRejected = false;
+  try { parseFoldStateSnapshot(invalidEvidenceSnapshot); } catch (error) {
+    evidenceRejected = /function_return_evidence is invalid/.test(error.message);
+  }
+  if (!evidenceRejected) throw new Error('Malformed function return evidence was accepted');
+}
 console.log('PASS');
 """
         proc = _run_node_script(script)

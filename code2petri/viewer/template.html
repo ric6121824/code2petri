@@ -815,6 +815,22 @@
       }
 
       // Convert PetriNet dict to Cytoscape elements (incorporating active expansions)
+      function getCompoundDepthPresentation(compoundId, getParentId) {
+        const ancestry = new Set([compoundId]);
+        let parentId = getParentId(compoundId);
+        let depth = 0;
+        while (parentId && !ancestry.has(parentId)) {
+          ancestry.add(parentId);
+          depth++;
+          parentId = getParentId(parentId);
+        }
+        return {
+          depth: depth,
+          colorClass: 'depth-' + (depth % 3),
+          paddingClass: 'padding-depth-' + Math.min(depth, 3)
+        };
+      }
+
       function netToElements(net) {
         const elements = [];
         const places = net.places || [];
@@ -824,20 +840,14 @@
 
         // Sort compounds topologically by hierarchy depth
         const compoundDepthMap = new Map();
-        function computeCompoundDepth(compoundId, visited) {
-          visited = visited || new Set();
+        const compoundsById = new Map(compounds.map(function(compound) { return [compound.id, compound]; }));
+        function computeCompoundDepth(compoundId) {
           if (compoundDepthMap.has(compoundId)) return compoundDepthMap.get(compoundId);
-          if (visited.has(compoundId)) {
-            // Guard against cyclic parent references
-            return 0;
-          }
-          visited.add(compoundId);
-          const compound = compounds.find(function(candidate) { return candidate.id === compoundId; });
-          if (!compound || !compound.parent) {
-            compoundDepthMap.set(compoundId, 0);
-            return 0;
-          }
-          const depth = 1 + computeCompoundDepth(compound.parent, visited);
+          const presentation = getCompoundDepthPresentation(compoundId, function(id) {
+            const compound = compoundsById.get(id);
+            return compound ? compound.parent || null : null;
+          });
+          const depth = presentation.depth;
           compoundDepthMap.set(compoundId, depth);
           return depth;
         }
@@ -1126,21 +1136,16 @@
         }).map(function(element) { return [element.data.id, element]; }));
         elements.forEach(function(element) {
           if (element.group !== 'nodes' || !(element.classes || '').split(/\s+/).includes('compound')) return;
-          const ancestry = new Set([element.data.id]);
-          let parentId = element.data.parent;
-          let depth = 0;
-          while (parentId && !ancestry.has(parentId)) {
-            ancestry.add(parentId);
-            depth++;
-            const parent = elementById.get(parentId);
-            parentId = parent && parent.data.parent;
-          }
-          element.data.depth = depth;
+          const presentation = getCompoundDepthPresentation(element.data.id, function(id) {
+            const parent = elementById.get(id);
+            return parent ? parent.data.parent || null : null;
+          });
+          element.data.depth = presentation.depth;
           const classes = (element.classes || '').split(/\s+/).filter(function(name) {
             return !/^depth-[0-3]$/.test(name) && !/^padding-depth-[0-3]$/.test(name);
           });
-          classes.push('depth-' + (depth % 3));
-          classes.push('padding-depth-' + Math.min(depth, 3));
+          classes.push(presentation.colorClass);
+          classes.push(presentation.paddingClass);
           element.classes = classes.join(' ');
         });
 
@@ -1151,19 +1156,14 @@
         if (!graph || typeof graph.nodes !== 'function') return;
         const compounds = graph.nodes('.compound');
         compounds.forEach(function(node) {
-          const ancestry = new Set([node.id()]);
-          let parentId = node.data('parent') || null;
-          let depth = 0;
-          while (parentId && !ancestry.has(parentId)) {
-            ancestry.add(parentId);
-            depth++;
-            const parent = graph.getElementById(parentId);
-            parentId = parent && parent.length > 0 ? parent.data('parent') || null : null;
-          }
-          node.data('depth', depth);
+          const presentation = getCompoundDepthPresentation(node.id(), function(id) {
+            const parent = graph.getElementById(id);
+            return parent && parent.length > 0 ? parent.data('parent') || null : null;
+          });
+          node.data('depth', presentation.depth);
           node.removeClass('depth-0 depth-1 depth-2 depth-3 padding-depth-0 padding-depth-1 padding-depth-2 padding-depth-3');
-          node.addClass('depth-' + (depth % 3));
-          node.addClass('padding-depth-' + Math.min(depth, 3));
+          node.addClass(presentation.colorClass);
+          node.addClass(presentation.paddingClass);
         });
       }
 

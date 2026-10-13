@@ -2041,8 +2041,9 @@
           return consumedCompounds;
         }
 
-        _validateSESEFunctionBoundaries(nodesSet) {
+        _validateSESEFunctionBoundaries(nodesSet, allowedPartialParentIds) {
           const self = this;
+          const allowedPartials = allowedPartialParentIds instanceof Set ? allowedPartialParentIds : new Set();
           const compoundChildrenCount = new Map();
           const compoundInternalCount = new Map();
 
@@ -2065,7 +2066,7 @@
           for (const [parentId, internalCount] of compoundInternalCount.entries()) {
             const totalCount = compoundChildrenCount.get(parentId);
             if (internalCount < totalCount) {
-              if (!self.isFunctionFoldedIntoSingleComponent(parentId)) {
+              if (!allowedPartials.has(parentId) && !self.isFunctionFoldedIntoSingleComponent(parentId)) {
                 return false;
               }
             }
@@ -2139,7 +2140,11 @@
               return;
             }
 
-            if (!self._validateSESEFunctionBoundaries(options.scopeId ? consumedForScope : cand.nodes)) {
+            const allowedPartialParents = options.scopeId ? new Set([options.scopeId]) : null;
+            if (!self._validateSESEFunctionBoundaries(
+              options.scopeId ? consumedForScope : cand.nodes,
+              allowedPartialParents
+            )) {
               return;
             }
 

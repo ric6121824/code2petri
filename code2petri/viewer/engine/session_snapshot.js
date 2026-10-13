@@ -126,6 +126,13 @@
     if (typeof value !== 'string') _invalidSnapshot(description + ' must be a string');
   }
 
+  function _validateFunctionReturnEvidence(evidence, description) {
+    if (!_isObject(evidence) || typeof evidence.expression !== 'string' || typeof evidence.type !== 'string' ||
+        typeof evidence.provenance !== 'string') {
+      _invalidSnapshot(description + ' is invalid');
+    }
+  }
+
   function _requireFiniteNumber(value, description, positive) {
     if (typeof value !== 'number' || !Number.isFinite(value) || (positive && value <= 0)) {
       _invalidSnapshot(description + ' must be a finite ' + (positive ? 'positive ' : '') + 'number');
@@ -185,11 +192,7 @@
       _validateCallResultRecords(record.data.call_results, description + '.call_results', record.data.id);
     }
     if (record.data.function_return_evidence !== undefined) {
-      const evidence = record.data.function_return_evidence;
-      if (!_isObject(evidence) || typeof evidence.expression !== 'string' || typeof evidence.type !== 'string' ||
-          typeof evidence.provenance !== 'string') {
-        _invalidSnapshot(description + '.function_return_evidence is invalid');
-      }
+      _validateFunctionReturnEvidence(record.data.function_return_evidence, description + '.function_return_evidence');
     }
     if (record.group === 'edges') {
       _requireString(record.data.source, description + ' source');
@@ -445,11 +448,10 @@
             _validateCallResultRecords(metadata.call_results, recordDescription + '.metadata.call_results', record.id);
           }
           if (metadata.function_return_evidence !== undefined) {
-            const evidence = metadata.function_return_evidence;
-            if (!_isObject(evidence) || typeof evidence.expression !== 'string' || typeof evidence.type !== 'string' ||
-                typeof evidence.provenance !== 'string') {
-              _invalidSnapshot(recordDescription + '.metadata.function_return_evidence is invalid');
-            }
+            _validateFunctionReturnEvidence(
+              metadata.function_return_evidence,
+              recordDescription + '.metadata.function_return_evidence'
+            );
           }
           ['tau', 'omega'].forEach(function(key) {
             [record[key], metadata[key]].forEach(function(value) {
