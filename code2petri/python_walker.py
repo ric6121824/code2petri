@@ -140,6 +140,9 @@ def _python_inferred_type(expression: ast.AST, bindings: Dict[str, Dict[str, Any
         return {"type": value_type or "unknown", "evidence": []}
     if isinstance(expression, (ast.List, ast.Dict, ast.Tuple, ast.Set)):
         return {"type": {ast.List: "list", ast.Dict: "dict", ast.Tuple: "tuple", ast.Set: "set"}[type(expression)], "evidence": []}
+    if isinstance(expression, ast.ListComp):
+        value_type = "unknown" if any(generator.is_async for generator in expression.generators) else "list"
+        return {"type": value_type, "evidence": []}
     if isinstance(expression, ast.JoinedStr):
         dependencies = []
         for part in expression.values:
@@ -168,7 +171,9 @@ def _python_inferred_type(expression: ast.AST, bindings: Dict[str, Dict[str, Any
         left = _python_inferred_type(expression.left, bindings)
         right = _python_inferred_type(expression.right, bindings)
         left_type, right_type = left["type"], right["type"]
-        if isinstance(expression.op, ast.Add) and left_type == right_type == "str":
+        if isinstance(expression.op, ast.Add) and left_type == right_type == "list":
+            value_type = "list"
+        elif isinstance(expression.op, ast.Add) and left_type == right_type == "str":
             value_type = "str"
         elif left_type in {"int", "float", "complex"} and right_type in {"int", "float", "complex"}:
             if isinstance(expression.op, ast.Div):
@@ -195,6 +200,33 @@ def _python_binding_names(target: ast.AST) -> List[str]:
     return []
 
 
+def _python_named_expression_names(expression: Optional[ast.AST]) -> set:
+    """Find walrus targets that can escape an expression's nested comprehension."""
+    names = set()
+
+    class NamedExpressionCollector(ast.NodeVisitor):
+        def visit_NamedExpr(self, item: ast.NamedExpr) -> None:
+            if isinstance(item.target, ast.Name):
+                names.add(item.target.id)
+            self.visit(item.value)
+
+        def visit_FunctionDef(self, nested: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, nested: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_ClassDef(self, nested: ast.ClassDef) -> None:
+            return
+
+        def visit_Lambda(self, nested: ast.Lambda) -> None:
+            return
+
+    if expression is not None:
+        NamedExpressionCollector().visit(expression)
+    return names
+
+
 def _python_local_bindings(
     statements: List[ast.stmt], source_text: Optional[str],
 ) -> Dict[str, Dict[str, Any]]:
@@ -215,7 +247,15 @@ def _python_local_bindings(
             targets, value = [statement.target], statement.value
         elif isinstance(statement, ast.AugAssign):
             targets = [statement.target]
+        elif isinstance(statement, ast.Expr):
+            value = statement.value
         else:
+            continue
+
+        for name in _python_named_expression_names(value):
+            if name not in excluded:
+                bindings[name] = {"type": "unknown", "evidence": []}
+        if isinstance(statement, ast.Expr):
             continue
 
         assigned = _python_inferred_type(value, bindings) if value is not None else {"type": "unknown", "evidence": []}
