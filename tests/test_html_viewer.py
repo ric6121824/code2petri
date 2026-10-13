@@ -6460,6 +6460,108 @@ console.log('PASS');
 
 
 class TestFoldEntireFunction(unittest.TestCase):
+    def test_saved_create_board_call_occurrences_fold_independently(self):
+        net = """{
+  compounds: [
+    { id: 'compound_create_board', label: 'create_board()', function_name: 'create_board' },
+    { id: 'compound_inline_create_board_t123', label: 'create_board()', function_name: 'create_board' }
+  ],
+  places: [{ id: 'p28' }, { id: 'p29' }, { id: 'p101' }, { id: 'p102' }],
+  transitions: [
+    { id: 'c_01', label: 'existing component', metadata: { opaque: true, tau: 1 } },
+    { id: 'before_1' }, { id: 'inline_create_board__t1', label: \"return ['#']\", parent: 'compound_create_board' }, { id: 'after_1' },
+    { id: 'before_2' }, { id: 'inline_create_board_t123__t1', label: \"return ['#']\", parent: 'compound_inline_create_board_t123' }, { id: 'after_2' }
+  ],
+  arcs: [
+    { source: 'before_1', target: 'p28' }, { source: 'p28', target: 'inline_create_board__t1' }, { source: 'inline_create_board__t1', target: 'p29' }, { source: 'p29', target: 'after_1' },
+    { source: 'before_2', target: 'p101' }, { source: 'p101', target: 'inline_create_board_t123__t1' }, { source: 'inline_create_board_t123__t1', target: 'p102' }, { source: 'p102', target: 'after_2' }
+  ]
+}"""
+        test_logic = r"""
+const first = cy.getElementById('compound_create_board');
+const second = cy.getElementById('compound_inline_create_board_t123');
+if (foldEngine.stepCounter !== 0 || first.hasClass('collapsed-compound') || second.hasClass('collapsed-compound')) throw new Error('Initial load created an implicit component');
+for (const id of ['p28', 'p29', 'p101', 'p102']) {
+  if (!cy.getElementById(id).hasClass('contractible')) throw new Error('Saved call boundary was not highlighted: ' + id);
+}
+const firstResult = foldEngine.executeFoldEntireFunction(first);
+if (!firstResult.success || !firstResult.complete || !first.hasClass('collapsed-compound')) throw new Error('First saved call occurrence did not fold');
+const firstComponent = cy.nodes().filter(n => n.data('parent') === 'compound_create_board')[0];
+if (!firstComponent || firstComponent.id() === 'c_01' || !cy.getElementById('c_01').length) throw new Error('Component allocation collided with an existing saved ID');
+if (second.hasClass('collapsed-compound') || !cy.getElementById('inline_create_board_t123__t1').length) throw new Error('Folding the first occurrence changed the second');
+const secondResult = foldEngine.executeFoldEntireFunction(second);
+if (!secondResult.success || !secondResult.complete || !second.hasClass('collapsed-compound')) throw new Error('Second saved call occurrence did not fold independently');
+const secondComponent = cy.nodes().filter(n => n.data('parent') === 'compound_inline_create_board_t123')[0];
+if (!secondComponent || secondComponent.id() === firstComponent.id() || secondComponent.id() === 'c_01') throw new Error('Call occurrences did not receive distinct component IDs');
+if (!cy.getElementById('p28').length || !cy.getElementById('p29').length || !cy.getElementById('p101').length || !cy.getElementById('p102').length) throw new Error('Caller boundary places were consumed');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Saved call occurrence folding failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_boundary_places_fold_before_and_after_explicit_function_completion(self):
+        net = """{
+  compounds: [{ id: 'caller' }, { id: 'fn', function_name: 'create_board', parent: 'caller' }],
+  places: [{ id: 'entry', parent: 'caller' }, { id: 'exit', parent: 'caller' }],
+  transitions: [{ id: 'before', parent: 'caller' }, { id: 'body', parent: 'fn' }, { id: 'after', parent: 'caller' }],
+  arcs: [{ source: 'before', target: 'entry' }, { source: 'entry', target: 'body' }, { source: 'body', target: 'exit' }, { source: 'exit', target: 'after' }]
+}"""
+        test_logic = r"""
+for (const isExplicitlyFolded of [false, true]) {
+  for (const boundaryId of ['entry', 'exit']) {
+    const copy = cytoscape({ elements: netToElements(net) });
+    const engine = new LiveFoldReductionEngine(copy);
+    const fn = copy.getElementById('fn');
+    if (isExplicitlyFolded) {
+      const functionResult = engine.executeFoldEntireFunction(fn);
+      if (!functionResult.success || !functionResult.complete) throw new Error('Could not prepare collapsed-function graph copy: ' + JSON.stringify(functionResult));
+    }
+    const boundary = copy.getElementById(boundaryId);
+    if (engine.getFoldType(boundary) !== 'sequence') throw new Error('Boundary should be sequence-eligible: ' + isExplicitlyFolded + '/' + boundaryId);
+    const result = engine.executeSinglePlaceContraction(boundary);
+    if (!result.success) throw new Error('Boundary fold failed: ' + result.message);
+    const unfolded = engine.executeComponentLocalUnfold(result.node);
+    if (!unfolded.success) throw new Error('Boundary local unfold failed');
+    const restoredFn = copy.getElementById('fn');
+    const restoredBody = copy.getElementById(isExplicitlyFolded ? 'c_01' : 'body');
+    if (isExplicitlyFolded) {
+      if (!restoredFn.hasClass('collapsed-compound') || !restoredBody.length || !restoredBody.data('is_opaque')) throw new Error('Boundary unfold did not restore the collapsed prior state');
+    } else if (restoredFn.hasClass('collapsed-compound') || !copy.getElementById('body').length || copy.getElementById('body').data('is_opaque')) {
+      throw new Error('Boundary unfold did not restore the expanded prior state');
+    }
+    copy.destroy();
+  }
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Boundary folding state round-trips failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_non_atomic_singleton_shapes_do_not_pass_the_atomic_guard(self):
+        net = """{
+  compounds: [{ id: 'caller' }, { id: 'multi', parent: 'caller' }, { id: 'nested', parent: 'caller' }],
+  places: [{ id: 'entry', parent: 'caller' }, { id: 'exit', parent: 'caller' }, { id: 'nested_entry', parent: 'caller' }, { id: 'nested_exit', parent: 'caller' }, { id: 'single_place', parent: 'place_only' }],
+  compounds: [{ id: 'caller' }, { id: 'multi', parent: 'caller' }, { id: 'nested', parent: 'caller' }, { id: 'place_only', parent: 'caller' }],
+  transitions: [{ id: 'before_multi', parent: 'caller' }, { id: 'multi_body', parent: 'multi' }, { id: 'multi_extra', parent: 'multi' }, { id: 'after_multi', parent: 'caller' }, { id: 'nested_body', parent: 'nested' }, { id: 'before_nested', parent: 'caller' }, { id: 'after_nested', parent: 'caller' }],
+  arcs: [
+    { source: 'before_multi', target: 'entry' }, { source: 'entry', target: 'multi_body' }, { source: 'multi_body', target: 'exit' }, { source: 'exit', target: 'after_multi' },
+    { source: 'nested_entry', target: 'nested_body' }, { source: 'nested_body', target: 'nested_exit' },
+    { source: 'before_nested', target: 'nested_entry' }, { source: 'nested_exit', target: 'after_nested' }
+  ]
+}"""
+        test_logic = r"""
+if (foldEngine._ordinarySingletonTransition('multi')) throw new Error('Multi-transition function passed singleton guard');
+if (foldEngine._ordinarySingletonTransition('place_only')) throw new Error('Singleton place passed transition guard');
+if (foldEngine._ordinarySingletonTransition('caller')) throw new Error('Container with unresolved nested function passed singleton guard');
+if (foldEngine.getFoldType(cy.getElementById('entry')) === 'sequence') throw new Error('Multi-transition function boundary was incorrectly enabled');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Non-atomic singleton guard failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_ordinary_singleton_nested_function_is_completed_by_outer_action(self):
         net = """{
   compounds: [
@@ -6513,6 +6615,23 @@ console.log('PASS');
 const fn = cy.getElementById('fn');
 const entry = cy.getElementById('p_entry');
 const exit = cy.getElementById('p_exit');
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+net.function_metadata_registry = {
+  'objects.py::create_board@28:0': {
+    function_name: 'create_board', source_file: '/src/objects.py', qualified_name: 'create_board',
+    definition_location: { line: 28, column: 0 }, analysis_status: 'complete', declared: null,
+    inferred: [], inferred_types: ['list'], observed: [], observed_types: []
+  }
+};
+const documentContext = {
+  title: 'create_board', sourceFile: '/src/objects.py', filename: 'objects.py', functionName: 'caller', mode: 'fold',
+  originalNet: net, compounds: net.compounds, foldSteps: [], calleeNets: {}, expandedNodes: [],
+  playback: { currentStep: 0, totalSteps: 0 }
+};
+const expandedSnapshot = parseFoldStateSnapshot(serializeFoldStateSnapshot({ cy, engine: foldEngine, document: documentContext }));
+const expandedResume = cytoscape({ elements: expandedSnapshot.elements });
+if (!expandedResume.getElementById('t_return').length || expandedResume.getElementById('fn').hasClass('collapsed-compound')) throw new Error('Expanded singleton save/open changed its state');
+expandedResume.destroy();
 cy.getElementById('a1').data({ weight: 3, custom: 'return-in' });
 cy.getElementById('a2').data({ weight: 4, custom: 'return-out' });
 const originalSm = foldEngine.calculateSMScore();
@@ -6531,6 +6650,17 @@ if (!component.data('is_opaque') || component.data('tau') !== 2.5 || component.d
 if (!component.data('consumedSubnet') || !component.data('consumedSubnet').atomicFunctionCompletion) throw new Error('Missing atomic singleton restoration record');
 if (!entry.inside() || !exit.inside() || !cy.getElementById('t_before').length || !cy.getElementById('t_after').length) throw new Error('Function completion changed caller graph elements');
 if (foldEngine.calculateSMScore() !== originalSm) throw new Error('Singleton completion changed Structuredness Metric');
+const completedSnapshot = parseFoldStateSnapshot(serializeFoldStateSnapshot({ cy, engine: foldEngine, document: documentContext }));
+const resumedCy = cytoscape({ elements: completedSnapshot.elements });
+const resumedEngine = new LiveFoldReductionEngine(resumedCy);
+resumedEngine.cfg = completedSnapshot.engine.cfg;
+resumedEngine.stepCounter = completedSnapshot.engine.stepCounter;
+resumedEngine.rememberedCustomNames = new Map(completedSnapshot.engine.rememberedCustomNames);
+const resumedFunction = resumedCy.getElementById('fn');
+if (!resumedFunction.hasClass('collapsed-compound') || !resumedCy.getElementById(componentId).length) throw new Error('Completed singleton save/open changed its state');
+const resumedUnfold = resumedEngine.executeComponentLocalUnfold(resumedFunction);
+if (!resumedUnfold.success || resumedCy.getElementById('fn').hasClass('collapsed-compound') || !resumedCy.getElementById('t_return').length) throw new Error('Completed snapshot could not be locally unfolded');
+resumedCy.destroy();
 const stepAfterFold = foldEngine.stepCounter;
 const repeated = foldEngine.executeFoldEntireFunction(fn);
 if (repeated.success || !repeated.complete || foldEngine.stepCounter !== stepAfterFold || cy.getElementById(componentId).length !== 1) throw new Error('Repeated function action was not a safe no-op');
