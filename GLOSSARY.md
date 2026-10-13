@@ -12,6 +12,10 @@ _Avoid_: Parser interface, walker base class
 The top-level code in a file that executes outside of any function definition, addressable in the CLI as `(global)`.
 _Avoid_: Main body, script scope
 
+**Project Title**:
+The human-readable name of the source project represented by a Petri net, shared across views of that project's files and functions. For example, Tic Tac Toe is the Project Title for its Global Scope and individual function views across analysis runs.
+_Avoid_: Net title, output folder name, root function name (when referring to project identity)
+
 **Synthetic Wrapper**:
 A fabricated AST node created by a walker to encapsulate global-scope statements or anonymous callbacks so they can be processed like standard function bodies.
 _Avoid_: Fake node, mock AST
@@ -39,6 +43,10 @@ _Avoid_: Call transition info, call point
 **Function Return Metadata**:
 Information attached to a function's identity that describes its call result and, where applicable, awaited, yielded, or completion values for inspection without affecting Petri net control flow or Structural Folding.
 _Avoid_: Return-place type, typed control-flow token
+
+**Call Result Metadata**:
+Type evidence for the normal result of a particular Call Site, with its evidence source or a reason that the result is unknown. It describes the individual call independently of the enclosing function's returned expression and the availability of the callee's source definition.
+_Avoid_: Enclosing return type, guessed callee type
 
 **Resolution Context**:
 The set of source files provided via `--context` parsed to build a symbol table for cross-file call resolution, without being analysis targets.
@@ -95,6 +103,10 @@ _Avoid_: Local undo, node expansion
 **Component Node Renaming**:
 The ability for a user to assign a semantic, domain-specific label to an opaque transition (created via Live Fold Reduction) via a dedicated UI panel or modal, overriding the default generated `c_XX` identifier.
 _Avoid_: Node relabeling, text edit
+
+**Docked Sidebar**:
+The inspector beside the graph that presents node metadata and available actions without covering the graph. Its shown or hidden state is separate from node selection and inspection.
+_Avoid_: Floating popover, cleared inspection (when referring to sidebar visibility)
 
 **Client-Side Export**:
 The process of serializing the current interactive graph state (including any Live Fold Reductions) directly from the browser's in-memory model to a downloadable format (like PNML or DOT) without requiring a backend server.

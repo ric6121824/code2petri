@@ -434,6 +434,14 @@ Show function return-contract information for both Python and JavaScript while p
 
 Tickets 54–60 are implemented, with their dependencies and acceptance criteria recorded in the linked issue files. The completed scope was reviewed against the Phase 2.10 specification.
 
+### Call Result Metadata follow-ups
+
+- **In design — Python built-ins first:** Inspect supported Python built-in call results even when no project-source callee definition is available. Show each call's result separately from the enclosing function's returned-expression type; unsupported or uncertain calls remain Unknown with a specific reason. This is a new Phase 2.10 follow-up, independent of the list-expression inference and function-folding work. The exact initial catalog and propagation scope are being settled through grill-with-docs.
+- **To-do — Other libraries:** Add reliable result evidence for Python standard-library and third-party-library calls whose definitions are outside the indexed project. Select supported contracts and identity/version rules in a later design; do not guess from function names.
+- **To-do — Other languages:** Extend unavailable-source call-result inspection to JavaScript and later supported languages using their own trusted contracts and binding rules. Existing source-based Function Return Metadata support is unchanged.
+
+Recorded 2026-10-13 after the user selected Python built-ins as the first slice and requested the remaining library/language work be retained in the grand plan.
+
 The separately reported called-function boundary-folding problem is tracked under Phase 2.8 in [Ticket 53](./issues/53-called-function-fold-boundary-trigger.md).
 
 ## Phase 3 — C# Support & Unity Lifecycle Modeling
