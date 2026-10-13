@@ -36,4 +36,8 @@ The user approved separate enclosing/per-call results, Python built-ins first wi
 
 Implemented the static catalog, supported import forms, per-call records, separate inspector sections, local return inference, clone support, and snapshot validation. Focused tests and `compileall` pass. The remaining acceptance items require end-to-end generated-viewer save/open/fold/unfold and active-session preservation checks; keep this ticket ready for human verification until those flows are exercised.
 
-The final full suite ran 576 tests with one environment failure and four pre-existing errors: prototype test port binding, missing `pygraphviz`, missing `pytest`, a legacy JavaScript return-shape expectation, and a legacy walker tuple-unpacking expectation. The Ticket 65 focused suite passes.
+The first full suite at implementation time ran 576 tests with one environment failure and four pre-existing errors: prototype test port binding, missing `pygraphviz`, missing `pytest`, a legacy JavaScript return-shape expectation, and a legacy walker tuple-unpacking expectation. The Ticket 65 focused suite passes.
+
+### 2026-10-13 — Round 02 review fix
+
+Scope binding analysis now tracks non-import writes separately so rebinding imported built-in callable aliases or imported `builtins` module aliases invalidates static contract evidence. Regression coverage includes local aliases and module-level imported aliases followed by assignment. Focused metadata tests pass. The final full suite ran 577 tests with 1 port-binding failure and 4 existing errors: missing `pygraphviz`, missing `pytest`, and legacy JavaScript and walker return-shape expectations.

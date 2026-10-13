@@ -313,6 +313,39 @@ def use_rebound_global_module_alias():
         self.assertEqual(rebound_module_call["state"], "unknown")
         self.assertEqual(rebound_module_call["unknown_reason"], "shadowed_or_uncertain_binding")
 
+    def test_rebinding_imported_builtin_aliases_invalidates_the_import_contract(self):
+        source = '''
+def rebind_imported_callable():
+    from builtins import len as size
+    size = custom
+    return size([])
+
+def rebind_imported_module():
+    import builtins as b
+    b = custom
+    return b.len([])
+
+from builtins import range as sequence
+sequence = custom
+def use_rebound_module_callable():
+    return sequence(2)
+'''
+        expectations = {
+            "rebind_imported_callable": "size([])",
+            "rebind_imported_module": "b.len([])",
+            "use_rebound_module_callable": "sequence(2)",
+        }
+        for function_name, expression in expectations.items():
+            with self.subTest(function_name=function_name):
+                net = self._net_for(source, function_name)
+                record = next(
+                    record for transition in net["transitions"]
+                    for record in (transition.get("metadata") or {}).get("call_results", [])
+                    if record["expression"] == expression
+                )
+                self.assertEqual(record["state"], "unknown")
+                self.assertEqual(record["unknown_reason"], "shadowed_or_uncertain_binding")
+
     def test_comprehension_and_nested_function_bindings_stay_in_their_own_scope(self):
         source = '''
 def comprehension_target(values):

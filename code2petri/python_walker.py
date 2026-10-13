@@ -883,31 +883,40 @@ def _python_scope_bindings(scope: ast.AST, is_module: bool = False):
     """Collect names bound in one lexical scope without entering nested scopes."""
     bound = set()
     imported = set()
+    written = set()
     global_names = set()
     nonlocal_names = set()
 
     class Collector(ast.NodeVisitor):
         def visit_FunctionDef(self, node):
             if node is scope:
-                bound.add(node.name) if is_module else None
+                if is_module:
+                    bound.add(node.name)
+                    written.add(node.name)
                 for arg in list(node.args.posonlyargs) + list(node.args.args) + list(node.args.kwonlyargs):
                     bound.add(arg.arg)
+                    written.add(arg.arg)
                 if node.args.vararg:
                     bound.add(node.args.vararg.arg)
+                    written.add(node.args.vararg.arg)
                 if node.args.kwarg:
                     bound.add(node.args.kwarg.arg)
+                    written.add(node.args.kwarg.arg)
                 for statement in node.body:
                     self.visit(statement)
             elif is_module:
                 bound.add(node.name)
+                written.add(node.name)
             else:
                 bound.add(node.name)
+                written.add(node.name)
 
         def visit_AsyncFunctionDef(self, node):
             self.visit_FunctionDef(node)
 
         def visit_ClassDef(self, node):
             bound.add(node.name)
+            written.add(node.name)
             if not is_module and node is scope:
                 for statement in node.body:
                     self.visit(statement)
@@ -954,31 +963,36 @@ def _python_scope_bindings(scope: ast.AST, is_module: bool = False):
         def visit_Name(self, node):
             if isinstance(node.ctx, ast.Store) or isinstance(node.ctx, ast.Del):
                 bound.add(node.id)
+                written.add(node.id)
 
         def visit_ExceptHandler(self, node):
             if node.name:
                 bound.add(node.name)
+                written.add(node.name)
             self.generic_visit(node)
 
         def visit_MatchAs(self, node):
             if node.name:
                 bound.add(node.name)
+                written.add(node.name)
             if node.pattern:
                 self.visit(node.pattern)
 
         def visit_MatchStar(self, node):
             if node.name:
                 bound.add(node.name)
+                written.add(node.name)
 
         def visit_MatchMapping(self, node):
             if node.rest:
                 bound.add(node.rest)
+                written.add(node.rest)
             self.generic_visit(node)
 
     Collector().visit(scope)
     if not is_module:
         bound.difference_update(global_names | nonlocal_names)
-    return bound - imported, imported, global_names, nonlocal_names
+    return (bound - imported) | written, imported, global_names, nonlocal_names
 
 
 def _python_direct_builtin_imports(statements, before_line):

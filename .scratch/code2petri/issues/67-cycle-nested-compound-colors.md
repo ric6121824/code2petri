@@ -25,12 +25,12 @@ This belongs to Phase 2.7's Nested Compound Nodes presentation, extending delive
 
 See the [Phase 2.7 specification](../specs/phase-2.7-live-fold-reduction.md).
 
+## Comments
+
+- 2026-10-13: User approved green/blue/purple cycling by depth, equal colors for siblings, no orange expanded compound slot, and retention of brown/gold collapsed compounds. Published locally with to-spec and to-tickets.
+
 ### 2026-10-13 — Implementation
 
 Implemented cyclic expanded compound classes and separate depth-padding classes. Initial element generation is covered headlessly for depths zero through eight, sibling consistency, hierarchy, and exact semantic depth. CSS keeps the collapsed brown/gold override and removes the expanded orange depth class. Actual browser colors, labels, legacy-session restoration, runtime expansion/reset/playback, and session-history preservation remain pending; keep this ticket ready for human verification.
 
 The final full suite ran 576 tests with 1 failure and 4 errors: the prototype runner could not bind its test port; optional `pygraphviz` and `pytest` dependencies are unavailable; and two pre-existing integration expectations disagree with current return shapes (`PetriNet.initial_net` and two-value `WalkerProtocol` unpacking). Focused regression suites and `compileall` passed.
-
-## Comments
-
-- 2026-10-13: User approved green/blue/purple cycling by depth, equal colors for siblings, no orange expanded compound slot, and retention of brown/gold collapsed compounds. Published locally with to-spec and to-tickets.
