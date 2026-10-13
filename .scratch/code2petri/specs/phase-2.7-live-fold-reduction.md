@@ -1,8 +1,16 @@
+# Phase 2.7: Live Fold Reduction and Interactive Viewer Architecture
+
+Status: ready-for-agent
+
+The original Tickets 29–44 are delivered. Ticket 67 adds the approved expanded-compound color follow-up; its publication does not claim implementation.
+
 ## Problem Statement
 
 The current `code2petri` workflow strictly segregates reduction logic from the visualization layer. The Python backend fully pre-computes a linear sequence of fold steps using the Structuredness Metric (SM) rules, and the HTML Cytoscape viewer acts merely as a playback mechanism (the fold slider). Furthermore, inline function expansion is completely orthogonal to the fold process: clicking an opaque transition splices the raw callee sub-net into a compound node, but the user cannot interactively "fold" specific parts of that newly expanded logic, nor can they view the entire composite program structure in full detail upon first opening the HTML artifact. 
 
 This leads to a rigid, top-down exploration experience. Users cannot selectively simplify messy knots, rename abstracted transitions for clarity, or export the resulting "half-folded" architecture to external tools like ProM. They are trapped on a linear undo slider that doesn't understand the localized, non-linear nature of program comprehension.
+
+The delivered viewer clamps deeper expanded compound colors to orange. GameState._coerce_direction() and its parent GameState._edge_for_move() therefore share that color despite different nesting depths. Orange also identifies unresolved call transitions, so expanded function boundaries can suggest unresolved status. Users need repeating depth colors that remain distinct between parent and child without changing graph hierarchy.
 
 ## Solution
 
@@ -11,6 +19,8 @@ The viewer will be fundamentally rearchitected to support **Live Fold Reduction*
 Instead of opening a collapsed graph, the viewer will boot into a fully-expanded composite view, showing all inlined functions nested within visual compound nodes right from the start. The ProM local reduction algorithms (Sequence, Choice, Loop) will be ported from Python to JavaScript. This allows the user to left-click any intermediate routing place on the canvas to trigger a "Place-Centric Fold Trigger," dynamically contracting that place and updating transition weights in real-time. 
 
 When an entire inline expansion (a compound node) is fully folded from the inside out, it transitions into a "Collapsed Compound State" visually resembling a closed folder labeled with the function's name and component ID. Folds are fully reversible via "Component-Local Unfold" (clicking the collapsed element restores its internal nodes without affecting folds made elsewhere). Finally, the user can rename any generated component node via a sidebar and trigger a "Client-Side Export" to download the current interactive graph state as a PNML file.
+
+Cycle expanded function compounds by nesting depth: green, blue, purple, then green again. Depth zero is green; siblings at the same depth share a color and each parent/child pair differs. Reserve orange for unresolved call transitions. Keep the existing brown/gold Collapsed Compound State distinct. Recompute presentation from the active hierarchy when loading older sessions or restoring compounds, so saved legacy color classes do not preserve the orange clamp.
 
 ## User Stories
 
@@ -24,6 +34,13 @@ When an entire inline expansion (a compound node) is fully folded from the insid
 8. As a developer, I want to left-click a transition/component node to open a sidebar or modal, so I can view its metadata ($\tau$ weight, SM score, line number).
 9. As a developer, I want to use that sidebar/modal to rename a generated component (e.g., changing `c_04` to `calculate_tax`), so the folded graph better reflects domain semantics.
 10. As an analyst, I want to click an "Export PNML" button in the viewer that triggers a client-side export, so I can save my manually half-folded graph state and open it in ProM without needing a Python backend server.
+11. As a user, I want expanded compounds to repeat green, blue, and purple by nesting depth, so that adjacent levels remain distinguishable in deep call trees.
+12. As a user, I want siblings at the same depth to share a color, so that equal-depth functions follow a predictable convention.
+13. As a user, I want orange reserved for unresolved call transitions, so that an expanded resolved function does not imply an unresolved call.
+14. As a user, I want collapsed compounds to retain their brown/gold appearance, so that reduction state remains distinct from expanded nesting depth.
+15. As a user, I want older saved sessions to adopt the current palette when opened, so that legacy orange classes do not retain the misleading presentation.
+16. As a user, I want expansion, local unfolding, Reset, and playback to apply the same depth colors, so that graph interactions do not change the convention.
+17. As a user, I want palette changes to preserve hierarchy, padding, folding behavior, and weights, so that visual clarity does not change the analysis.
 
 ## Implementation Decisions
 
@@ -45,6 +62,8 @@ When an entire inline expansion (a compound node) is fully folded from the insid
   - **Visual Affordances:** Foldability state is indicated directly via place colors (Green for Sequence, Amber for Choice, Purple for While loop) and transition styling.
   - **Choice Reduction:** Implements "Idea B" (whole-node style), fusing parallel transitions into a single component while preserving the split and join places.
   - **Focus Retention:** Folding a place successfully retains selection focus on the relevant target node, so subsequent fold states (e.g. from Choice to Sequence) are instantly displayed without re-selecting.
+- **Expanded compound palette:** Ticket 67 replaces the depth-three orange clamp with the existing green, blue, and purple colors repeating at arbitrary depth. Choose the palette slot using actual nesting depth modulo three: depths zero/three/six are green, one/four/seven blue, and two/five/eight purple. Derive depth from the active compound parent hierarchy. Apply coherent background, border, and label/text-background treatment using the production light theme. This is compound presentation, distinct from type-specific foldability marks.
+- **Hierarchy and state preservation:** Palette indexing must not replace or truncate semantic nesting depth, alter parent relationships, or restart depth-dependent padding. Preserve the existing brown/gold collapsed-compound override and ordinary orange unresolved-call styling. Refresh presentation during fresh viewer boot, runtime expansion, Component-Local Unfold, Reset, playback, and Open Session. Normalize active restored presentation rather than trusting saved legacy color classes; do not mutate detached snapshots, unopened input data, or stored restoration history just to recolor them. Existing session formats remain readable without source access or a schema migration.
 - **Undo Architecture:** Graph mutations in JS will not use a global state array. Instead, when a fold occurs, the newly created node's `data` dictionary will store a serialized copy of the nodes and edges it consumed. Component-Local Unfolding simply reads this data, removes the component node, and injects the stored elements back into the Cytoscape instance.
 - **Client-Side Export:** A new JS function will traverse the current Cytoscape elements array, convert the places, transitions, arcs, and initial tokens into standard PNML XML syntax, and construct a `Blob` URL attached to a hidden `<a download>` tag to trigger a client-side export.
 - **Prototyping Strategy:** Development will begin on the `feature/live-fold-reduction-js-prototype` branch to validate the Live Fold Reduction math and the Cytoscape UI/UX feel before replacing the main Phase 2.6 infrastructure.
@@ -56,11 +75,13 @@ When an entire inline expansion (a compound node) is fully folded from the insid
   1. The Python composite assembly logic (ensuring parent hierarchy metadata survives the splice).
   2. The JavaScript fold engine (via a headless JS test runner like Jest, or robust DOM tests using Playwright/Selenium).
 - **Prior Art:** Since JS testing is new to this project, we will establish a pattern: we will dump a known AST-generated composite graph to JSON, run the JS fold functions on it, and assert the resulting graph topology and SM scores match the output of `pytest tests/test_fold_detection.py`.
+- **Ticket 67 primary seam — generated viewer rendering and session round trip:** Reuse existing generated-viewer/browser and production snapshot/open workflows with self-contained nested-call fixtures. Assert actual rendered compound backgrounds, borders, and label readability at depths zero through at least eight, same-depth siblings, distinct adjacent levels, and no expanded orange compound. Verify the observed depth-four _coerce_direction() reproduction against its depth-three parent. Include an older snapshot carrying a legacy depth-three orange class on a deeper compound; opening it must derive current color from the active hierarchy. Cover runtime expansion, local unfold restoring legacy classes, Reset, playback, and save/open continuation. Check the brown/gold collapsed override and unchanged orange unresolved transitions. Compare topology, parent/depth metadata, nested padding, tokens, fold eligibility, names, weights/SM, viewport, and detached snapshot/history contents before and after styling. CSS string matching alone is insufficient evidence of correct rendered state; no new test seam is required.
 
 ## Out of Scope
 
 - **Freeform Lasso Folding:** Freeform lasso selection remains out of scope. Phase 2.8 later added box selection and Batch Place Fold; component inspection and actions moved from the floating HUD to the docked sidebar.
 - **Round-trip execution:** The exported PNML is one-way. We are not building a feature to re-import a half-folded PNML file back into the `code2petri` CLI.
+- **Palette follow-up exclusions:** No orange slot for expanded compounds, random/per-call colors, user-customizable palettes, animation, broad theme redesign, semantic depth/parent changes, reduction-rule changes, or modification of existing exported files in place. Regenerated viewers provide the updated rendering for compatible saved sessions.
 
 ## Further Notes
 
@@ -70,3 +91,9 @@ When an entire inline expansion (a compound node) is fully folded from the insid
 
 - Phase 2.8's final sidebar and selection decisions are recorded in [ADR 0004](../../../docs/adr/0004-docked-sidebar-instead-of-floating-popover.md) and the [Phase 2.8 spec](./phase-2.8-viewer-interactive-enhancements.md).
 - Viewer viewport preservation and extended zoom-out were delivered in [Tickets 43](../issues/43-viewer-camera-viewport-preservation.md) and [44](../issues/44-viewer-extended-zoom-out-range.md).
+- [Ticket 67 — Cycle Nested Compound Colors](../issues/67-cycle-nested-compound-colors.md) is an independent ready-for-agent follow-up to Ticket 30's delivered compound presentation. It repeats green/blue/purple by depth and reserves orange for unresolved transitions while retaining brown/gold collapsed compounds.
+- [Ticket 66](../issues/66-function-scoped-structural-folding.md) and the [Phase 2.8 spec](./phase-2.8-viewer-interactive-enhancements.md) separately extend scoped function folding under the [ADR 0003 amendment](../../../docs/adr/0003-adopt-prom-local-reduction-algorithm.md). That action exhausts elementary reductions within the selected function before structural reductions, even if unrelated elementary folds remain elsewhere; whole-net priority is unchanged. Neither follow-up blocks the other.
+
+## Comments
+
+- 2026-10-13: The user approved depth-based green/blue/purple cycling, exclusion of orange to avoid unresolved-call ambiguity, equal colors for siblings, and retention of existing brown/gold collapsed-compound styling. Published with to-spec and to-tickets as Ticket 67, independently of function-fold eligibility.

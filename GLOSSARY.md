@@ -117,8 +117,12 @@ A single user gesture that sequentially evaluates and folds all contractible pla
 _Avoid_: Multi-fold, mass collapse
 
 **Fold-Entire-Function**:
-A specific interaction variant of Batch Place Fold scoped to all places inside a single compound node, repeating until no further progress is possible or the compound fully collapses.
+A repeated reduction action within one Function Fold Scope, applying eligible elementary reductions before validated structural reductions until no further progress is possible or the compound fully collapses.
 _Avoid_: Function collapse, auto-fold all
+
+**Function Fold Scope**:
+The selected function call occurrence and its contained eligible subgraphs within which function folding chooses and consumes reductions. Caller-owned entrance and exit places may anchor a reduction while remaining outside its consumed interior.
+_Avoid_: Whole-net selection, lexical scope
 
 **Fold State Snapshot**:
 A saved record of a net's current fold state and viewing state, sufficient to resume Live Fold Reduction and Component-Local Unfold with its component names, weights, layout, and viewport preserved.

@@ -317,7 +317,7 @@ While Phase 2.5 established baseline folding, maximal pattern matching failed on
 
 ---
 
-## Phase 2.7 — Live Fold Reduction & Interactive Viewer Architecture (Completed — Tickets 29–44)
+## Phase 2.7 — Live Fold Reduction & Interactive Viewer Architecture (Baseline Completed; Ticket 67 Ready)
 
 ### Motivation & Problem Statement
 
@@ -370,6 +370,12 @@ Phase 2.7 fundamentally rearchitected the viewer around **Live Fold Reduction**,
 - Shared viewport helpers preserve zoom and pan during Live Fold Reduction and Component-Local Unfold, placing the new component at the selected place's screen position without a `cy.fit()` reset.
 - The viewer lowers the minimum zoom to 0.1%, allowing the initial fit and scroll wheel to show very large composite nets.
 
+### Expanded Compound Color Follow-up (Ticket 67 — ready-for-agent)
+
+- [Ticket 67 — Cycle Nested Compound Colors](./issues/67-cycle-nested-compound-colors.md) replaces the orange clamp at deep nesting with green → blue → purple → green cycling. Depth zero starts green; siblings share their depth's color and adjacent levels differ.
+- Orange remains reserved for unresolved call transitions; collapsed compounds retain their existing brown/gold styling. Presentation uses active hierarchy without changing semantic depth, parent relationships, or nested padding.
+- Fresh exports, expansion, local unfolding, Reset/playback, and older session restoration use the same palette. The [Phase 2.7 specification](./specs/phase-2.7-live-fold-reduction.md) records rendering/session verification and preservation requirements. Ticket 30 remains completed; this follow-up has no blockers and is independent of Ticket 66.
+
 ### Deliverables Summary
 
 - [`code2petri/viewer/engine/reduction_engine.js`](file:///Volumes/SharedDrive/Documents/GitHub/code2flow/code2petri/viewer/engine/reduction_engine.js) — Full JavaScript live fold reduction engine
@@ -381,7 +387,7 @@ Phase 2.7 fundamentally rearchitected the viewer around **Live Fold Reduction**,
 
 ---
 
-## Phase 2.8 — Viewer Interactive Enhancements (Completed — Tickets 45–50 and Ticket 53 follow-up)
+## Phase 2.8 — Viewer Interactive Enhancements (Baseline Completed; Follow-ups Ready)
 
 Phase 2.8 extends the self-contained HTML viewer with persistent controls for inspection, bulk reduction, and session continuity. It keeps the generated offline viewer architecture and does not add PNML import or a separate application.
 
@@ -399,6 +405,14 @@ Phase 2.8 extends the self-contained HTML viewer with persistent controls for in
 
 ### 4. Root Function Identity (Ticket 50)
 - The info panel displays the root function name with the source path, including qualified methods and Global Scope. Inspecting an inlined callee does not change the root identity.
+
+### Approved Follow-ups (Tickets 63, 64, 66)
+
+- [Ticket 63](./issues/63-info-panel-project-title.md) is ready-for-human and adds explicit Project Title generation metadata, Project/File/Function presentation, and incoming-session identity ownership.
+- [Ticket 64](./issues/64-hide-recall-docked-sidebar.md) is ready-for-human and adds the near-top sidebar edge tab, instant hide/recall, reclaimed canvas width, preserved camera/drafts, and session visibility continuity.
+- [Ticket 66 — Function-Scoped Structural Folding](./issues/66-function-scoped-structural-folding.md) is ready-for-agent and extends Fold-Entire-Function after elementary exhaustion within the selected function, allowing its existing validated structural reductions while unrelated elementary folds remain elsewhere. An internal reduction-type marker and the sidebar button share safe eligibility; caller-owned entrance/exit places remain retained anchors.
+- Unsupported regions still stop with a specific partial/no-progress reason; no new mathematical rule, forced class/penalty, or whole-net completion fallback is introduced. Completed functions retain brown/gold tiles, reversible local unfolding, session continuity, and unchanged unrelated graph/camera state. The [ADR 0003 scope amendment](../../docs/adr/0003-adopt-prom-local-reduction-algorithm.md) and [Phase 2.8 specification](./specs/phase-2.8-viewer-interactive-enhancements.md) record the agreed priority and consumption checks.
+- Each follow-up can start immediately. Tickets 47 and 53 retain their completed elementary-folding contracts; Ticket 66 and Phase 2.7's Ticket 67 are independent.
 
 ### Delivery and Review
 - All six implementation issues are resolved: [45](./issues/45-viewer-docked-sidebar.md), [46](./issues/46-batch-place-fold-selection.md), [47](./issues/47-fold-entire-function-compound.md), [48](./issues/48-save-session.md), [49](./issues/49-smart-open-session-pnml.md), and [50](./issues/50-info-panel-function-name.md).
@@ -418,7 +432,7 @@ Optimize Save Session while retaining the self-contained offline HTML viewer and
 
 Implementation tickets: [51 — Compact, lossless Fold State Snapshot saves](./issues/51-safari-large-session-download.md) and [52 — Reliable large Save Session downloads across browsers](./issues/52-reliable-save-session-downloads.md). Ticket 52 is blocked by Ticket 51 for end-to-end acceptance with the optimized snapshot.
 
-## Phase 2.10 — Function Return Metadata (Implemented)
+## Phase 2.10 — Function Return Metadata (Baseline Implemented; Follow-up Ready)
 
 Show function return-contract information for both Python and JavaScript while preserving the control-flow net's reduction and metric semantics. The scope combines declarations/documentation with bounded inference, including simple returned local variables and contextual display evidence such as `x: int (inferred)`. It infers container outer types, displays branch-dependent locals as `x: unknown (inference unavailable)`, and distinguishes clearly non-returning bodies from unknown results. Expression, type, analysis state, and provenance are stored separately; notation does not rename variables or define identifiers. Inference describes the expression at its return site, and a written source type named `unknown` remains separate from the analysis status. Declared/inferred evidence appears separately in root info, selected-function compounds, and resolved call transitions; incomplete evidence retains known observations. Async/generator metadata separates the call result, awaited/yielded values, and generator completion. HTML, net JSON, and saved sessions preserve the metadata. The [Phase 2.10 specification](./specs/phase-2.10-function-return-metadata.md) and seven approved implementation tickets are resolved, with acceptance through source generation, viewer inspection, folding, and session restoration.
 
@@ -432,15 +446,16 @@ Show function return-contract information for both Python and JavaScript while p
 | [59 — Separate generator objects, yields, and completion](./issues/59-generator-yield-and-completion-results.md) | Generator/async-generator roles and language-specific completion behavior | 57 |
 | [60 — Inspect called functions through folding and restoration](./issues/60-called-function-return-inspection.md) | Resolved Call Site/compound inspection, stable identity, and compact nested restoration | 55 |
 
-Tickets 54–60 are implemented, with their dependencies and acceptance criteria recorded in the linked issue files. The completed scope was reviewed against the Phase 2.10 specification.
+Tickets 54–60 and the [Ticket 62 list-inference extension](./issues/62-python-list-return-inference.md) are implemented. Their dependencies and acceptance criteria are recorded in the linked issue files. The initial completed scope was reviewed against the Phase 2.10 specification; the specification now also records the open Ticket 65 follow-up.
 
 ### Call Result Metadata follow-ups
 
-- **In design — Python built-ins first:** Inspect supported Python built-in call results even when no project-source callee definition is available. Show each call's result separately from the enclosing function's returned-expression type; unsupported or uncertain calls remain Unknown with a specific reason. This is a new Phase 2.10 follow-up, independent of the list-expression inference and function-folding work. The exact initial catalog and propagation scope are being settled through grill-with-docs.
+- **Ready-for-agent — Python built-ins first:** [Ticket 65](./issues/65-python-builtin-call-result-metadata.md) covers range, len, str, int, float, bool, list, tuple, dict, and set, including statically identified explicit builtins imports and import aliases. Show each call's result separately from the enclosing function's returned-expression type, reuse trusted evidence through existing local inference, and preserve it offline. Unsupported or uncertain calls remain Unknown with a specific reason. Keep project-source resolution and folding behavior independent; do not execute game code to infer types.
 - **To-do — Other libraries:** Add reliable result evidence for Python standard-library and third-party-library calls whose definitions are outside the indexed project. Select supported contracts and identity/version rules in a later design; do not guess from function names.
 - **To-do — Other languages:** Extend unavailable-source call-result inspection to JavaScript and later supported languages using their own trusted contracts and binding rules. Existing source-based Function Return Metadata support is unchanged.
+- **To-do — Broader aliases and programmer-defined types:** Design evidence for assignment-created callable aliases/alias chains, project-defined constructor results, and type-alias expansion as a separate follow-up. Existing written custom annotations remain declared evidence. Do not infer a custom return contract from an arbitrary alias or callable name alone.
 
-Recorded 2026-10-13 after the user selected Python built-ins as the first slice and requested the remaining library/language work be retained in the grand plan.
+Recorded 2026-10-13 after the user selected Python built-ins as the first slice, approved simple import aliases and local inference propagation, and requested remaining library/language work be retained in the grand plan. Ticket 65 is published as one complete unblocked slice; the To-do items above remain deferred.
 
 The separately reported called-function boundary-folding problem is tracked under Phase 2.8 in [Ticket 53](./issues/53-called-function-fold-boundary-trigger.md).
 
@@ -878,10 +893,10 @@ graph TD
 | Phase 2 — Cross-file tracing | 5 tickets (Tickets 11–15) | 6 review rounds | ✅ Complete |
 | Phase 2.5 — Structural folding & viewer | 6 tickets (Tickets 16–21) | 3 review rounds | ✅ Complete |
 | Phase 2.6 — ProM port & compound expansion | 6 tickets (Tickets 22–27) | 4 review rounds | ✅ Complete |
-| Phase 2.7 — Live Fold Reduction & Viewer | 16 tickets (Tickets 29–44) | 12 review rounds | ✅ Complete |
-| Phase 2.8 — Viewer Interactive Enhancements | 7 tickets (Tickets 45–50, 53) | 5 review rounds | ✅ Complete |
+| Phase 2.7 — Live Fold Reduction & Viewer | 17 tickets (Tickets 29–44, 67) | 12 baseline review rounds; follow-up TBD | Baseline complete; Ticket 67 ready |
+| Phase 2.8 — Viewer Interactive Enhancements | 10 tickets (Tickets 45–50, 53, 63–64, 66) | 5 baseline review rounds; follow-ups TBD | Baseline complete; 63–64 ready for human, 66 ready for agent |
 | Phase 2.9 — Compact and Reliable Fold State Snapshots | 2 tickets (Tickets 51–52) | TBD | Planned Next |
-| Phase 2.10 — Function Return Metadata | 7 tickets (Tickets 54–60) | 1 review round | ✅ Implemented |
+| Phase 2.10 — Function Return Metadata | 9 tickets (Tickets 54–60, 62, 65) | 1 baseline review round; follow-up TBD | Baseline implemented; Ticket 65 ready |
 | Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned |
 | Phase 4 — C++ + Unreal | 5–6 tickets | 3–4 sessions | Planned |
 | Phase 5 — Project-scale | 4–5 tickets | 2–3 sessions | Planned |
@@ -889,4 +904,4 @@ graph TD
 | Phase 6 — CPN (future) | 4–6 tickets | 3–5 sessions | Future |
 | **Grand Total (incl. future)** | **~54–62 tickets** | **~30–38 sessions** | |
 
-The existing total estimates exclude Phases 2.9 and 2.10 pending effort updates.
+The existing total estimates exclude Phases 2.9 and 2.10 and the newly approved Phase 2.7/2.8 follow-ups pending effort updates.

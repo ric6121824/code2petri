@@ -38,6 +38,19 @@ We replace our maximal pattern matchers in `code2petri/fold.py` with direct Pyth
 ### Architectural Note: Generalized Murata Choice Reduction
 While ProM's `foldChoice()` requires strict isolation (where $p_{source}$ and $p_{sink}$ have no other incident transitions), code2petri generalizes Murata parallel transition reduction by grouping parallel transitions by destination place. This allows atomic parallel folds even when boundary places have other branches, which is essential for ASTs with fallthroughs or multi-branch splits.
 
+### Interactive Function Fold Scope — amendment, 2026-10-13
+
+Phase 2.8's original Fold-Entire-Function contract applied elementary reductions only. The approved follow-up extends that interaction to existing validated structural reductions; it does not introduce another mathematical component class.
+
+- Exhaust eligible elementary reductions within the selected Function Fold Scope before considering its structural reductions. An elementary reduction elsewhere in the Composite Net does not veto an otherwise valid structural reduction inside the selected function. Whole-net reduction queries retain their existing priority policy.
+- Discover and select candidates within that scope, so a larger candidate crossing the caller or a sibling cannot eclipse a valid contained candidate. Preserve the existing component-class precedence, SESE reachability invariants, structural validators, penalty formulas, and transition-weight calculations.
+- Caller-owned entrance and exit places may be retained anchors. Validate containment against the nodes actually consumed: retained anchors do not constitute partial consumption of the caller, while any consumption of unrelated caller or sibling nodes remains forbidden. A nested function may be consumed only as allowed by the existing complete-container checks.
+- An owned internal trigger and the Fold Entire Function action expose the same currently validated candidate and actual reduction type. Revalidate eligibility immediately before mutation; the trigger does not make the anchor an owned or consumable node.
+- The global fallback described above belongs to whole-net reduction. It is never a completion shortcut for a selected function. Unsupported or unsafe function regions retain a partial/no-progress outcome with a specific explanation.
+- Reversible restoration records, caller interfaces, unrelated folds, weights/SM, and viewport preservation remain required.
+
+See [Phase 2.8](../../.scratch/code2petri/specs/phase-2.8-viewer-interactive-enhancements.md) and [Ticket 66](../../.scratch/code2petri/issues/66-function-scoped-structural-folding.md). Tickets 47 and 53 retain their completed elementary-folding scope.
+
 ## Consequences
 
 - **Positive:** Mathematically aligns our tool with the reference academic implementation (`PNAnalysis.jar` / Lassen & van der Aalst 2008).
