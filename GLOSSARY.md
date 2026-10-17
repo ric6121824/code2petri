@@ -96,9 +96,17 @@ _Avoid_: Node clicking, manual reduction
 The visual state of an inlined function where its internal Petri net structure has been entirely reduced to a single transition, represented in the UI as a closed container (displaying the function name and component ID) rather than a naked opaque transition.
 _Avoid_: Folder node, closed sub-graph
 
+**Folded Component**:
+An opaque transition created by Live Fold Reduction that represents a reduced subnet and retains its nodes and arcs for Component-Local Unfold. Its retained subnet may contain other Folded Components.
+_Avoid_: Deleted subnet, unexpanded call (when referring to a reduced subnet)
+
 **Component-Local Unfold**:
-The non-linear undo mechanism where a user directly interacts with a specific opaque transition or collapsed compound to restore the exact sub-graph it consumed, without affecting folds made elsewhere on the canvas.
+The restoration of the exact subnet consumed by a chosen folded component, independently of folds elsewhere. It is distinct from chronologically undoing or redoing a viewer action.
 _Avoid_: Local undo, node expansion
+
+**Viewer Action History**:
+The chronological record of committed changes to the active graph's structure, component names, or node positions during one open viewer session. Each entry represents one user gesture, which may include multiple folds or unfolds.
+_Avoid_: Fold playback, component restoration history
 
 **Component Node Renaming**:
 The ability for a user to assign a semantic, domain-specific label to an opaque transition (created via Live Fold Reduction) via a dedicated UI panel or modal, overriding the default generated `c_XX` identifier.
