@@ -6427,8 +6427,13 @@ if (selectionFoldControls.style.display !== 'block') {{
 if (!btnFoldSelectedPlaces.textContent.includes('2')) {{
   throw new Error('Batch action did not report selected place count');
 }}
+performViewerAction = function(label, operation, shouldCommit) {{
+  return viewerActionHistory.perform(label, operation, shouldCommit);
+}};
 btnFoldSelectedPlaces.listeners.click({{ stopPropagation: function() {{}} }});
 if (cy.getElementById('p1').length !== 0) throw new Error('Selected contractible place did not fold');
+if (viewerActionHistory.undoStack.length !== 1) throw new Error('A successful batch should commit one history entry');
+if (!batchFoldResult.textContent.includes('Folded 1 place')) throw new Error('Success should be shown after the batch history commit');
 if (layoutCount !== 1) throw new Error('Expected one final layout, got ' + layoutCount);
 if (cy.zoom() !== 1.75 || cy.pan().x !== 23 || cy.pan().y !== -17) {{
   throw new Error('Batch fold changed zoom or pan');
@@ -6439,6 +6444,130 @@ console.log('PASS');
         node_script = _setup_live_fold_test_harness(net_literal, test_logic)
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_history_capture_failure_does_not_leave_a_success_result_visible(self):
+        net_literal = """{
+  places: [
+    { id: 'p0', label: 'start' },
+    { id: 'p1', label: 'middle' },
+    { id: 'p2', label: 'end' }
+  ],
+  transitions: [ { id: 't0' }, { id: 't1' } ],
+  arcs: [
+    { source: 'p0', target: 't0' }, { source: 't0', target: 'p1' },
+    { source: 'p1', target: 't1' }, { source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = r"""
+const selectionFoldControls = { style: { display: 'none' } };
+const batchFoldResult = { textContent: '' };
+const btnFoldSelectedPlaces = { textContent: '', style: {}, addEventListener() {} };
+const DAGRE_LAYOUT_OPTIONS = { name: 'dagre' };
+cy.layout = function() { return { run() {} }; };
+const selected = cy.getElementById('p0');
+const foldable = cy.getElementById('p1');
+selected.select();
+foldable.select();
+if (JSON.stringify(getSelectedPlaceIds()) !== JSON.stringify(['p0', 'p1'])) {
+  throw new Error('test selection did not reach the generated handler: ' + JSON.stringify(getSelectedPlaceIds()));
+}
+performViewerAction = function(label, operation, shouldCommit) {
+  return viewerActionHistory.perform(label, operation, shouldCommit);
+};
+const capture = viewerActionHistory._capture.bind(viewerActionHistory);
+let captureCalls = 0;
+viewerActionHistory._capture = function() {
+  captureCalls++;
+  if (captureCalls === 2) throw new Error('injected post-fold snapshot failure');
+  return capture();
+};
+let escapedFailure = false;
+try {
+  handleBatchPlaceFold();
+} catch (_) {
+  escapedFailure = true;
+}
+if (escapedFailure || captureCalls !== 2) throw new Error('the post-fold history failure was not handled by the sidebar: ' + captureCalls);
+if (cy.getElementById('p1').length !== 1 || cy.nodes('.component').length !== 0) {
+  throw new Error('the graph should roll back when the history snapshot fails');
+}
+if (!/failed/i.test(batchFoldResult.textContent) || /Folded \d+ places?/.test(batchFoldResult.textContent)) {
+  throw new Error('the sidebar should replace provisional success with a failure message: ' + batchFoldResult.textContent);
+}
+if (viewerActionHistory.undoStack.length !== 0) throw new Error('a failed fold must not be added to history');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net_literal, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Batch fold rollback status failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_batch_history_snapshot_skips_duplicate_legacy_restoration_alias(self):
+        script = r"""
+const { ViewerActionHistory } = require('./code2petri/viewer/engine/action_history.js');
+let payloadReads = 0;
+const restoration = { nodes: [] };
+Object.defineProperty(restoration, 'payload', {
+  enumerable: true,
+  get() { payloadReads++; return { size: 128 }; }
+});
+const element = {
+  group: 'nodes',
+  data: { id: 'owner', consumedSubnet: restoration, consumedSubgraph: restoration },
+  classes: 'transition component'
+};
+const cy = { elements: () => ({ jsons: () => [element] }) };
+const history = new ViewerActionHistory({ cy });
+const captured = history._capture().elements[0];
+if (payloadReads !== 1) throw new Error('a duplicate restoration alias was traversed more than once: ' + payloadReads);
+if (Object.prototype.hasOwnProperty.call(captured.data, 'consumedSubgraph')) throw new Error('legacy alias remained in history');
+if (captured.data.consumedSubnet.payload.size !== 128) throw new Error('canonical restoration data was lost');
+if (element.data.consumedSubgraph !== restoration) throw new Error('history capture mutated the live graph');
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"History alias canonicalization failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_large_44_place_batch_reports_and_restores_one_history_action(self):
+        net_literal = """(() => {
+  const places = [], transitions = [], arcs = [];
+  for (let i = 0; i < 46; i++) places.push({ id: 'p' + i });
+  for (let i = 0; i < 45; i++) {
+    transitions.push({ id: 't' + i });
+    arcs.push({ source: 'p' + i, target: 't' + i }, { source: 't' + i, target: 'p' + (i + 1) });
+  }
+  return { places, transitions, arcs };
+})()"""
+        test_logic = r"""
+const selectionFoldControls = { style: { display: 'none' } };
+const batchFoldResult = { textContent: '' };
+const btnFoldSelectedPlaces = { textContent: '', style: {}, addEventListener() {} };
+const DAGRE_LAYOUT_OPTIONS = { name: 'dagre' };
+cy.layout = function() { return { run() {} }; };
+const selectedIds = Array.from({ length: 44 }, (_, index) => 'p' + (index + 1));
+selectedIds.forEach(id => cy.getElementById(id).select());
+if (getSelectedPlaceIds().length !== 44) throw new Error('the 44 selected places were not captured');
+performViewerAction = function(label, operation, shouldCommit) {
+  return viewerActionHistory.perform(label, operation, shouldCommit);
+};
+const before = viewerActionHistory._capture().elements;
+const result = handleBatchPlaceFold();
+const after = viewerActionHistory._capture().elements;
+if (!result || result.folded.length !== 44 || result.skipped.length !== 0) {
+  throw new Error('the large batch did not fold all selected places: ' + JSON.stringify(result));
+}
+if (!batchFoldResult.textContent.includes('Folded 44 places')) throw new Error('the committed batch result was not shown');
+if (JSON.stringify(before) === JSON.stringify(after)) throw new Error('the successful batch did not change the graph');
+if (viewerActionHistory.undoStack.length !== 1) throw new Error('the large batch should use one history entry');
+if (!viewerActionHistory.undo()) throw new Error('the complete batch could not be undone');
+if (JSON.stringify(viewerActionHistory._capture().elements) !== JSON.stringify(before)) {
+  throw new Error('Undo did not restore the original 44-place selection graph');
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net_literal, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Large batch history acceptance failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
     def test_batch_fold_evaluates_original_place_ids_once_and_skips_invalid_ids(self):
@@ -6674,6 +6803,46 @@ console.log('PASS');
 
 
 class TestFoldEntireFunction(unittest.TestCase):
+    def test_sese_candidate_scan_uses_a_fresh_adjacency_index(self):
+        net = """{
+  places: [{ id: 'p0' }, { id: 'p1' }, { id: 'p2' }],
+  transitions: [{ id: 't0' }, { id: 't1' }],
+  arcs: [
+    { id: 'a0', source: 'p0', target: 't0' },
+    { id: 'a1', source: 't0', target: 'p1' },
+    { id: 'a2', source: 'p1', target: 't1' },
+    { id: 'a3', source: 't1', target: 'p2' }
+  ]
+}"""
+        test_logic = r"""
+let neighborCollectionReads = 0;
+cy.nodes().forEach(function(node) {
+  const outgoers = node.outgoers;
+  const incomers = node.incomers;
+  node.outgoers = function() { neighborCollectionReads++; return outgoers.apply(this, arguments); };
+  node.incomers = function() { neighborCollectionReads++; return incomers.apply(this, arguments); };
+});
+const firstScan = foldEngine.sese.findAllSESECandidates(['p0', 'p2'], 2);
+if (!firstScan.some(function(candidate) { return candidate.sourceId === 'p0' && candidate.sinkId === 'p2'; })) {
+  throw new Error('Adjacency-indexed discovery lost the known p0-to-p2 SESE candidate');
+}
+if (neighborCollectionReads !== 0) {
+  throw new Error('Candidate enumeration repeatedly allocated Cytoscape neighbor collections: ' + neighborCollectionReads);
+}
+cy.getElementById('a3').remove();
+const secondScan = foldEngine.sese.findAllSESECandidates(['p0', 'p2'], 2);
+if (secondScan.some(function(candidate) { return candidate.sourceId === 'p0' && candidate.sinkId === 'p2'; })) {
+  throw new Error('A later candidate scan reused stale adjacency after the graph changed');
+}
+if (neighborCollectionReads !== 0) {
+  throw new Error('A fresh candidate scan fell back to Cytoscape neighbor collections');
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"SESE adjacency-index acceptance failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_saved_create_board_call_occurrences_fold_independently(self):
         net = """{
   compounds: [

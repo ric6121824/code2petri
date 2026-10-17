@@ -18,24 +18,64 @@
     return JSON.parse(JSON.stringify(value));
   }
 
-  function normalizeRestorationAliases(value) {
-    if (!value || typeof value !== 'object') return;
+  function cloneCanonicalValue(value, ancestors) {
+    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') return undefined;
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'bigint') throw new TypeError('Do not know how to serialize a BigInt');
+    if (typeof value !== 'object') return value;
+
+    if (typeof value.toJSON === 'function') {
+      const jsonValue = value.toJSON();
+      if (jsonValue !== value) return cloneCanonicalValue(jsonValue, ancestors);
+    }
+    if (ancestors.has(value)) throw new TypeError('Converting circular structure to JSON');
+    ancestors.add(value);
+    let copy;
     if (Array.isArray(value)) {
-      value.forEach(normalizeRestorationAliases);
-      return;
+      copy = value.map(function(item) {
+        const cloned = cloneCanonicalValue(item, ancestors);
+        return cloned === undefined ? null : cloned;
+      });
+    } else {
+      copy = {};
+      const elementData = value.data && typeof value.data === 'object' && !Array.isArray(value.data)
+        ? value.data : null;
+      Object.keys(value).forEach(function(key) {
+        if (key === 'data' && elementData) {
+          copy.data = cloneCanonicalData(elementData, ancestors);
+          return;
+        }
+        const cloned = cloneCanonicalValue(value[key], ancestors);
+        if (cloned !== undefined) copy[key] = cloned;
+      });
     }
-    if (value.data && typeof value.data === 'object' && !Array.isArray(value.data)) {
-      if (value.data.consumedSubnet === undefined && value.data.consumedSubgraph !== undefined) {
-        value.data.consumedSubnet = value.data.consumedSubgraph;
-      }
-      delete value.data.consumedSubgraph;
+    ancestors.delete(value);
+    return copy;
+  }
+
+  function cloneCanonicalData(data, ancestors) {
+    const copy = {};
+    const keys = Object.keys(data);
+    const hasCanonical = keys.indexOf('consumedSubnet') !== -1;
+    const canonical = hasCanonical ? data.consumedSubnet : undefined;
+    const hasLegacy = keys.indexOf('consumedSubgraph') !== -1;
+    const legacy = canonical === undefined && hasLegacy ? data.consumedSubgraph : undefined;
+    keys.forEach(function(key) {
+      if (key === 'consumedSubgraph') return;
+      const source = key === 'consumedSubnet' ? canonical : data[key];
+      const cloned = cloneCanonicalValue(source, ancestors);
+      if (cloned !== undefined) copy[key] = cloned;
+    });
+    if (canonical === undefined && legacy !== undefined) {
+      const clonedLegacy = cloneCanonicalValue(legacy, ancestors);
+      if (clonedLegacy !== undefined) copy.consumedSubnet = clonedLegacy;
     }
-    Object.keys(value).forEach(function(key) { normalizeRestorationAliases(value[key]); });
+    return copy;
   }
 
   function canonicalElement(element) {
-    const copy = cloneJson(element);
-    normalizeRestorationAliases(copy);
+    const copy = cloneCanonicalValue(element, new WeakSet());
     if (copy && Object.prototype.hasOwnProperty.call(copy, 'selected')) delete copy.selected;
     if (copy && copy.group === 'nodes' && typeof copy.classes === 'string') {
       copy.classes = stripTransientSearchClasses(copy.classes);
@@ -155,7 +195,7 @@
       }
     }
 
-    _makeEntry(label, before, after) {
+    _makeChanges(before, after) {
       const beforeById = elementMap(before.elements);
       const afterById = elementMap(after.elements);
       const ids = new Set([...beforeById.keys(), ...afterById.keys()]);
@@ -168,13 +208,17 @@
         }
       });
       changes.sort(function(a, b) { return String(a.id).localeCompare(String(b.id)); });
+      return changes;
+    }
+
+    _makeEntry(label, before, after, sequence, changes) {
       const record = {
         label: String(label || 'Edit'),
         changes: changes,
         contextBefore: before.context,
         contextAfter: after.context
       };
-      return this._entryWithBytes(this.nextSequence++, record);
+      return this._entryWithBytes(sequence, record);
     }
 
     _entryWithBytes(sequence, record) {
@@ -253,11 +297,6 @@
       }
     }
 
-    _changed(before, after) {
-      return stableString(before.elements) !== stableString(after.elements) ||
-        stableString(before.context) !== stableString(after.context);
-    }
-
     _restoreFailedAction(before, ui, viewport) {
       this._rebuild(before.elements, ui && Array.isArray(ui.selectionIds) ? ui.selectionIds : []);
       this.restoreContext(cloneJson(before.context));
@@ -298,7 +337,9 @@
         try { this._restoreFailedAction(gesture.before, gesture.ui, gesture.viewport); } catch (_) { /* Keep capture error. */ }
         throw error;
       }
-      const changed = this._changed(gesture.before, after);
+      const changes = this._makeChanges(gesture.before, after);
+      const contextChanged = stableString(gesture.before.context) !== stableString(after.context);
+      const changed = changes.length > 0 || contextChanged;
       let accepted = true;
       if (typeof shouldCommit === 'function') accepted = Boolean(shouldCommit(result));
       else if (result === false || (result && typeof result === 'object' && result.success === false)) accepted = false;
@@ -308,7 +349,8 @@
       }
       if (!changed) return false;
 
-      const entry = this._makeEntry(gesture.label, gesture.before, after);
+      const entry = this._makeEntry(gesture.label, gesture.before, after, this.nextSequence, changes);
+      this.nextSequence++;
       this.redoStack.forEach((redoEntry) => { this.bytes -= redoEntry.bytes; });
       this.redoStack.length = 0;
       this.undoStack.push(entry);

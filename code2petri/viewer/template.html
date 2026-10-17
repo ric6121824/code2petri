@@ -3105,22 +3105,36 @@
         const selectedPlaceIds = getSelectedPlaceIds();
         if (selectedPlaceIds.length < 2) return;
 
-        return performViewerAction('Batch place fold', function() {
-          const viewportBefore = captureViewport(cy);
-          const result = foldEngine.executeBatchFold(selectedPlaceIds);
-          if (result.folded.length > 0) {
-            refreshFoldActionView(viewportBefore);
-            if (selectedInspectorNode && selectedInspectorNode.inside()) {
-              openInspector(selectedInspectorNode);
-            } else {
-              closeInspector();
+        let result;
+        try {
+          result = performViewerAction('Batch place fold', function() {
+            const viewportBefore = captureViewport(cy);
+            const actionResult = foldEngine.executeBatchFold(selectedPlaceIds);
+            if (actionResult.folded.length > 0) {
+              refreshFoldActionView(viewportBefore);
+              if (selectedInspectorNode && selectedInspectorNode.inside()) {
+                openInspector(selectedInspectorNode);
+              } else {
+                closeInspector();
+              }
             }
-          }
 
-          if (batchFoldResult) batchFoldResult.textContent = formatFoldActionResult(result);
-          updateBatchPlaceFoldControls();
-          return result;
-        }, function(result) { return Boolean(result && result.folded && result.folded.length > 0); });
+            updateBatchPlaceFoldControls();
+            return actionResult;
+          }, function(actionResult) {
+            return Boolean(actionResult && actionResult.folded && actionResult.folded.length > 0);
+          });
+        } catch (error) {
+          if (batchFoldResult) {
+            const reason = error && error.message ? error.message : 'Unknown error';
+            batchFoldResult.textContent = 'Batch fold failed: ' + reason;
+          }
+          return null;
+        }
+
+        if (batchFoldResult) batchFoldResult.textContent = formatFoldActionResult(result);
+        updateBatchPlaceFoldControls();
+        return result;
       }
 
       if (btnFoldSelectedPlaces) {

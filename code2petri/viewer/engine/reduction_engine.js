@@ -18,6 +18,21 @@
       class SESEInfrastructure {
         constructor(cy) {
           this.cy = cy;
+          this._activeAdjacency = null;
+        }
+
+        _buildAdjacencyIndex() {
+          const outgoing = new Map();
+          const incoming = new Map();
+          this.cy.edges().forEach(function(edge) {
+            const sourceId = edge.source().id();
+            const targetId = edge.target().id();
+            if (!outgoing.has(sourceId)) outgoing.set(sourceId, []);
+            if (!incoming.has(targetId)) incoming.set(targetId, []);
+            outgoing.get(sourceId).push(targetId);
+            incoming.get(targetId).push(sourceId);
+          });
+          return { outgoing: outgoing, incoming: incoming };
         }
 
         _reachability(startNodeId, boundaryNodeId, getNeighbors, allowedNodeIds = null, traverseBoundary = false) {
@@ -43,6 +58,7 @@
         }
 
         _forwardNeighbors(currId) {
+          if (this._activeAdjacency) return this._activeAdjacency.outgoing.get(currId) || [];
           const node = this.cy.getElementById(currId);
           if (!node || node.length === 0) return [];
           return node.outgoers('edge').map(function(edge) {
@@ -51,6 +67,7 @@
         }
 
         _backwardNeighbors(currId) {
+          if (this._activeAdjacency) return this._activeAdjacency.incoming.get(currId) || [];
           const node = this.cy.getElementById(currId);
           if (!node || node.length === 0) return [];
           return node.incomers('edge').map(function(edge) {
@@ -207,20 +224,26 @@
         _findAllCandidates(candidates, findNodes) {
           candidates = Array.from(candidates || []).sort();
           const results = [];
-          for (let i = 0; i < candidates.length; i++) {
-            for (let j = 0; j < candidates.length; j++) {
-              if (i === j) continue;
-              const sourceId = candidates[i];
-              const sinkId = candidates[j];
-              const nodes = findNodes(sourceId, sinkId);
-              if (nodes) {
-                results.push({
-                  sourceId: sourceId,
-                  sinkId: sinkId,
-                  nodes: nodes
-                });
+          const previousAdjacency = this._activeAdjacency;
+          this._activeAdjacency = this._buildAdjacencyIndex();
+          try {
+            for (let i = 0; i < candidates.length; i++) {
+              for (let j = 0; j < candidates.length; j++) {
+                if (i === j) continue;
+                const sourceId = candidates[i];
+                const sinkId = candidates[j];
+                const nodes = findNodes(sourceId, sinkId);
+                if (nodes) {
+                  results.push({
+                    sourceId: sourceId,
+                    sinkId: sinkId,
+                    nodes: nodes
+                  });
+                }
               }
             }
+          } finally {
+            this._activeAdjacency = previousAdjacency;
           }
           return results;
         }
