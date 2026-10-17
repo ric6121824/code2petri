@@ -7168,25 +7168,51 @@ if (!candidate) throw new Error('Scoped discovery did not recognize the fused en
 if (candidate.tauSum !== 6 || candidate.tauNew !== 12 || candidate.omega !== 6) {{
   throw new Error('Scoped State Machine candidate changed its existing weight calculation: ' + JSON.stringify(candidate));
 }}
-const scopeIssue = foldEngine._getFunctionScopeCandidateIssue({{
-  sourceId: 'p80', sinkId: 'p85', nodes: new Set(['p80', 'p2', 'p85', 'q1'])
-}}, 'fn', true);
-if (!scopeIssue || !scopeIssue.includes("out-of-scope node 'q1'")) {{
-  throw new Error('Function scope rejection did not identify the unrelated node: ' + scopeIssue);
-}}
-const nestedBoundaryIssue = foldEngine._getSESEFunctionBoundaryIssue(new Set(['q0']), new Set());
-if (!nestedBoundaryIssue || !nestedBoundaryIssue.includes("partially consumes protected nested function 'sibling'")) {{
-  throw new Error('Protected nested-function rejection was not specific: ' + nestedBoundaryIssue);
+const scopeFitNet = {{
+  compounds: [{{ id: 'scope_caller' }}, {{ id: 'scope_fn', parent: 'scope_caller', function_name: 'scope_fn' }}],
+  places: [
+    {{ id: 'scope_entry', parent: 'scope_caller' }},
+    {{ id: 'scope_intermediate', parent: 'scope_caller' }},
+    {{ id: 'scope_exit', parent: 'scope_fn' }}
+  ],
+  transitions: [{{ id: 'scope_t1', parent: 'scope_fn' }}, {{ id: 'scope_t2', parent: 'scope_fn' }}],
+  arcs: [
+    {{ source: 'scope_entry', target: 'scope_t1' }}, {{ source: 'scope_t1', target: 'scope_intermediate' }},
+    {{ source: 'scope_intermediate', target: 'scope_t2' }}, {{ source: 'scope_t2', target: 'scope_exit' }}
+  ]
+}};
+const scopeFitEngine = new LiveFoldReductionEngine(cytoscape({{ elements: netToElements(scopeFitNet) }}));
+const scopeFitResult = scopeFitEngine.executeFoldEntireFunction('scope_fn');
+if (scopeFitResult.success || !scopeFitResult.message.includes("out-of-scope node 'scope_intermediate'")) {{
+  throw new Error('Fold Entire Function did not surface its scope-fit rejection: ' + scopeFitResult.message);
 }}
 const tokenNet = JSON.parse(JSON.stringify(net));
+tokenNet.arcs = tokenNet.arcs.filter(function(arc) {{ return arc.id !== 'caller_in'; }});
+tokenNet.places.find(function(place) {{ return place.id === 'p80'; }}).initial_tokens = 0;
 tokenNet.places.find(function(place) {{ return place.id === 'p2'; }}).initial_tokens = 1;
-const tokenCy = cytoscape({{ elements: netToElements(tokenNet) }});
-const tokenEngine = new LiveFoldReductionEngine(tokenCy);
-const tokenIssue = tokenEngine._getTokenBearingPlaceIssue(
-  tokenCy.getElementById('p2'), {{ sourceId: 'p80', sinkId: 'p85' }}, 'state-machine', true
-);
-if (!tokenIssue || !tokenIssue.includes("token-bearing interior place 'p2'")) {{
-  throw new Error('Component validation rejection did not identify the token-bearing place: ' + tokenIssue);
+const tokenEngine = new LiveFoldReductionEngine(cytoscape({{ elements: netToElements(tokenNet) }}));
+const findTokenCandidates = tokenEngine.sese.findAllScopedSESECandidates.bind(tokenEngine.sese);
+tokenEngine.sese.findAllScopedSESECandidates = function(boundaryIds, allowedNodeIds, minTransitions) {{
+  return findTokenCandidates(['p80', 'p85'], allowedNodeIds, minTransitions);
+}};
+const tokenResult = tokenEngine.executeFoldEntireFunction('fn');
+if (tokenResult.success || !tokenResult.message.includes("token-bearing interior place 'p2'")) {{
+  throw new Error('Fold Entire Function did not surface its component-validation rejection: ' + tokenResult.message);
+}}
+const nestedNet = JSON.parse(JSON.stringify(net));
+nestedNet.compounds.push({{ id: 'protected_inner', parent: 'fn', function_name: 'inner' }});
+nestedNet.places.find(function(place) {{ return place.id === 'p80'; }}).initial_tokens = 0;
+nestedNet.places.find(function(place) {{ return place.id === 'p2'; }}).parent = 'protected_inner';
+nestedNet.places.push({{ id: 'protected_inner_unused', parent: 'protected_inner', initial_tokens: 0 }});
+nestedNet.arcs = nestedNet.arcs.filter(function(arc) {{ return arc.id !== 'caller_in'; }});
+const nestedEngine = new LiveFoldReductionEngine(cytoscape({{ elements: netToElements(nestedNet) }}));
+const findNestedCandidates = nestedEngine.sese.findAllScopedSESECandidates.bind(nestedEngine.sese);
+nestedEngine.sese.findAllScopedSESECandidates = function(boundaryIds, allowedNodeIds, minTransitions) {{
+  return findNestedCandidates(['p80', 'p85'], allowedNodeIds, minTransitions);
+}};
+const nestedResult = nestedEngine.executeFoldEntireFunction('fn');
+if (nestedResult.success || !nestedResult.message.includes("partially consumes protected nested function 'protected_inner'")) {{
+  throw new Error('Fold Entire Function did not surface its protected-boundary rejection: ' + nestedResult.message);
 }}
 if (foldEngine.hasElementaryReductions('fn')) throw new Error('Fixture unexpectedly has an eligible elementary reduction');
 const expectedSm = Number((originalSm - candidate.tauSum + candidate.tauNew).toFixed(2));
