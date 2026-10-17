@@ -6,6 +6,10 @@
 
 **Status:** ready-for-human
 
+**Implementation:** complete (`3ec9664`, `ef115ab`).
+
+**Verification:** browser rendering and the full post-open interaction sequence remain pending as recorded below.
+
 - [x] The existing CLI and generation API accept an optional explicit Project Title and carry it into the self-contained generated viewer's active document metadata. Preserve human-readable capitalization, spaces, punctuation, and Unicode. Omitted or blank titles are unavailable; do not guess from source/output folders, filenames, run suffixes, or source comments.
 - [x] Batch generation supplies each game's original human-readable name to all Global Scope and named-function HTML outputs before filename normalization. Tic Tac Toe and Dots & Boxes retain those titles across dated and fixed-run outputs; moving or renaming the generated HTML does not change project identity.
 - [x] Add a Project row above the existing File and Function rows. Use the current light-theme info-panel styling, render supplied titles as text, and handle long titles without overlapping controls. Titles resembling markup must not execute or render as HTML. Preserve the existing source-file label, qualified root-function name, canonical Global Scope label, and return information.
@@ -31,3 +35,7 @@ The user approved all Project Title decisions through grill-with-docs and reques
 ### 2026-10-13 — Implemented
 
 Implementation is complete in commits `3ec9664` and `ef115ab`; human verification remains. The focused Ticket 63 tests pass, including all-games batch fixtures for Tic Tac Toe and Dots & Boxes across dated/fixed outputs. The full unittest suite ran 563 tests; five pre-existing environment/baseline failures remain (missing `pytest`, missing `pygraphviz`, unrelated walker/API mismatches, and the prototype runner's unavailable test port). The browser tool policy blocked opening a local preview, so the long-title browser rendering check and direct post-open interaction sequence were not performed; the active document metadata is only reset during initialization or incoming-session restore.
+
+### 2026-10-16 — Delivery documentation synchronized
+
+The user confirmed implementation completion. The [Phase 2.8 delivery record](../specs/phase-2.8-viewer-interactive-enhancements.md), README, and [grand plan](../grand_plan.md) now describe Project Title as implemented. No tests or browser acceptance were run for this documentation update; the unchecked verification criterion and existing results remain unchanged.
