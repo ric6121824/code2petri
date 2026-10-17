@@ -1,8 +1,10 @@
 # Phase 2.7: Live Fold Reduction and Interactive Viewer Architecture
 
-Status: ready-for-agent
+Status: ready-for-human
 
-The original Tickets 29–44 are delivered. Ticket 67 adds the approved expanded-compound color follow-up; its publication does not claim implementation.
+Implementation: complete (Tickets 29–44, 61, and 67; updated 2026-10-16).
+
+Ticket 67's depth palette is implemented, including shared depth-class generation and restoration refresh. Rendered colors, legacy-session interaction, and related browser acceptance remain pending as recorded in its checklist. The original problem statements below describe the motivation before delivery.
 
 ## Problem Statement
 
@@ -10,7 +12,7 @@ The current `code2petri` workflow strictly segregates reduction logic from the v
 
 This leads to a rigid, top-down exploration experience. Users cannot selectively simplify messy knots, rename abstracted transitions for clarity, or export the resulting "half-folded" architecture to external tools like ProM. They are trapped on a linear undo slider that doesn't understand the localized, non-linear nature of program comprehension.
 
-The delivered viewer clamps deeper expanded compound colors to orange. GameState._coerce_direction() and its parent GameState._edge_for_move() therefore share that color despite different nesting depths. Orange also identifies unresolved call transitions, so expanded function boundaries can suggest unresolved status. Users need repeating depth colors that remain distinct between parent and child without changing graph hierarchy.
+Before Ticket 67, the viewer clamped deeper expanded compound colors to orange. GameState._coerce_direction() and its parent GameState._edge_for_move() therefore shared that color despite different nesting depths. Orange also identifies unresolved call transitions, so expanded function boundaries could suggest unresolved status. The implemented cycle distinguishes adjacent levels without changing graph hierarchy.
 
 ## Solution
 
@@ -64,7 +66,7 @@ Cycle expanded function compounds by nesting depth: green, blue, purple, then gr
   - **Focus Retention:** Folding a place successfully retains selection focus on the relevant target node, so subsequent fold states (e.g. from Choice to Sequence) are instantly displayed without re-selecting.
 - **Expanded compound palette:** Ticket 67 replaces the depth-three orange clamp with the existing green, blue, and purple colors repeating at arbitrary depth. Choose the palette slot using actual nesting depth modulo three: depths zero/three/six are green, one/four/seven blue, and two/five/eight purple. Derive depth from the active compound parent hierarchy. Apply coherent background, border, and label/text-background treatment using the production light theme. This is compound presentation, distinct from type-specific foldability marks.
 - **Hierarchy and state preservation:** Palette indexing must not replace or truncate semantic nesting depth, alter parent relationships, or restart depth-dependent padding. Preserve the existing brown/gold collapsed-compound override and ordinary orange unresolved-call styling. Refresh presentation during fresh viewer boot, runtime expansion, Component-Local Unfold, Reset, playback, and Open Session. Normalize active restored presentation rather than trusting saved legacy color classes; do not mutate detached snapshots, unopened input data, or stored restoration history just to recolor them. Existing session formats remain readable without source access or a schema migration.
-- **Undo Architecture:** Graph mutations in JS will not use a global state array. Instead, when a fold occurs, the newly created node's `data` dictionary will store a serialized copy of the nodes and edges it consumed. Component-Local Unfolding simply reads this data, removes the component node, and injects the stored elements back into the Cytoscape instance.
+- **Local Restoration Architecture:** The delivered Component-Local Unfold stores the consumed subnet on the created component and restores that chosen subnet independently of other folds. The original design did not provide chronological action Undo/Redo. On 2026-10-17, the user approved complementary, session-local Viewer Action History for committed graph edits, one entry per user gesture, without persisting Undo/Redo stacks in saved sessions. This explicitly amends the earlier prohibition on global state-array undo; it does not replace consumed-subnet restoration or prescribe the action-history storage mechanism. The agreed design is now owned by [Phase 2.8.1](./phase-2.8.1-viewer-search-and-action-history.md) and [ADR 0005](../../../docs/adr/0005-session-local-viewer-action-history.md). Implementation is pending in original [Ticket 68](../issues/68-viewer-action-history-undo-redo.md), followed by dependent search/Reveal Ticket 69.
 - **Client-Side Export:** A new JS function will traverse the current Cytoscape elements array, convert the places, transitions, arcs, and initial tokens into standard PNML XML syntax, and construct a `Blob` URL attached to a hidden `<a download>` tag to trigger a client-side export.
 - **Prototyping Strategy:** Development will begin on the `feature/live-fold-reduction-js-prototype` branch to validate the Live Fold Reduction math and the Cytoscape UI/UX feel before replacing the main Phase 2.6 infrastructure.
 
@@ -89,11 +91,13 @@ Cycle expanded function compounds by nesting depth: green, blue, purple, then gr
 
 ## Subsequent Updates
 
+- [Ticket 61 — Inline same-file callees in global composite HTML](../issues/61-single-file-global-composite-html.md) is resolved. Global HTML startup expands reachable same-file callees into compounds using the configured inline depth and recursion guard, extending the initial-composite behavior to single-file projects. Its recorded generated-HTML checks cover same-file and multi-file graphs; no new run is claimed here.
 - Phase 2.8's final sidebar and selection decisions are recorded in [ADR 0004](../../../docs/adr/0004-docked-sidebar-instead-of-floating-popover.md) and the [Phase 2.8 spec](./phase-2.8-viewer-interactive-enhancements.md).
 - Viewer viewport preservation and extended zoom-out were delivered in [Tickets 43](../issues/43-viewer-camera-viewport-preservation.md) and [44](../issues/44-viewer-extended-zoom-out-range.md).
-- [Ticket 67 — Cycle Nested Compound Colors](../issues/67-cycle-nested-compound-colors.md) is an independent ready-for-agent follow-up to Ticket 30's delivered compound presentation. It repeats green/blue/purple by depth and reserves orange for unresolved transitions while retaining brown/gold collapsed compounds.
+- [Ticket 67 — Cycle Nested Compound Colors](../issues/67-cycle-nested-compound-colors.md) is implemented and ready for human verification. It repeats green/blue/purple by depth and reserves orange for unresolved transitions while retaining brown/gold collapsed compounds. Ticket 30 remains completed.
 - [Ticket 66](../issues/66-function-scoped-structural-folding.md) and the [Phase 2.8 spec](./phase-2.8-viewer-interactive-enhancements.md) separately extend scoped function folding under the [ADR 0003 amendment](../../../docs/adr/0003-adopt-prom-local-reduction-algorithm.md). That action exhausts elementary reductions within the selected function before structural reductions, even if unrelated elementary folds remain elsewhere; whole-net priority is unchanged. Neither follow-up blocks the other.
 
 ## Comments
 
 - 2026-10-13: The user approved depth-based green/blue/purple cycling, exclusion of orange to avoid unresolved-call ambiguity, equal colors for siblings, and retention of existing brown/gold collapsed-compound styling. Published with to-spec and to-tickets as Ticket 67, independently of function-fold eligibility.
+- 2026-10-16: Implementation completion confirmed by the user. Commits `3d54cbb`, `96b6fb5`, and `6c37849` contain the palette and shared-helper follow-ups. The [Round 02 review](../reviews/phase-2.10-tickets-65-67-round-02.md) found no concrete palette mismatch. Ticket 67 retains its unperformed rendering/session checks; no new tests or browser acceptance were run for this documentation update.
