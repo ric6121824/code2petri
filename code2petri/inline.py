@@ -197,6 +197,12 @@ def _splice_callee_net(
     for ct in callee_net.transitions:
         new_id = f"{prefix}{ct.id}"
         new_meta = dict(ct.metadata) if ct.metadata is not None else {}
+        call_results = new_meta.get("call_results")
+        if isinstance(call_results, list):
+            new_meta["call_results"] = [
+                {**record, "transition_id": new_id} if isinstance(record, dict) else record
+                for record in call_results
+            ]
         _decorate_node_hierarchy(new_meta, compound_id, fn_name, prefix)
 
         cloned_t = caller_net.add_transition(

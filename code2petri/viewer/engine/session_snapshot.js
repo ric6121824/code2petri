@@ -121,6 +121,41 @@
     throw new Error('Invalid Fold State Snapshot: ' + reason);
   }
 
+  function _migrateLegacyInlineCallResultIds(snapshot) {
+    const visited = new WeakSet();
+
+    function migrateRecords(records, ownerId) {
+      if (!Array.isArray(records) || typeof ownerId !== 'string' || !ownerId.startsWith('inline_')) return;
+      const separator = ownerId.lastIndexOf('__');
+      if (separator <= 'inline_'.length || separator + 2 >= ownerId.length) return;
+      const localTransitionId = ownerId.slice(separator + 2);
+      records.forEach(function(record) {
+        if (_isObject(record) && record.transition_id === localTransitionId) {
+          record.transition_id = ownerId;
+        }
+      });
+    }
+
+    function visit(value, parentKey) {
+      if (Array.isArray(value)) {
+        value.forEach(function(item) { visit(item, parentKey); });
+        return;
+      }
+      if (!_isObject(value) || visited.has(value)) return;
+      visited.add(value);
+
+      if (value.group === 'nodes' && _isObject(value.data)) {
+        migrateRecords(value.data.call_results, value.data.id);
+      }
+      if (parentKey === 'transitions' && typeof value.id === 'string' && _isObject(value.metadata)) {
+        migrateRecords(value.metadata.call_results, value.id);
+      }
+      Object.keys(value).forEach(function(key) { visit(value[key], key); });
+    }
+
+    visit(snapshot, null);
+  }
+
   function _isObject(value) {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
   }
@@ -646,6 +681,10 @@
     if (!_isObject(snapshot)) _invalidSnapshot('root must be an object');
     if (snapshot.schemaVersion !== SCHEMA_VERSION) _invalidSnapshot('unsupported schema version');
     if (snapshot.snapshotType !== SNAPSHOT_TYPE) _invalidSnapshot('snapshot type is not supported');
+
+    // Older viewers saved callee-local call-result IDs on cloned inline transitions.
+    // Repair only an exact local-suffix match; unrelated ownership mismatches stay invalid.
+    _migrateLegacyInlineCallResultIds(snapshot);
 
     if (!Array.isArray(snapshot.elements)) _invalidSnapshot('elements must be an array');
     const liveNodeIds = new Set();

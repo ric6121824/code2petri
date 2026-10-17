@@ -208,6 +208,156 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Call-result snapshot validation failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+    def test_inlined_call_results_follow_prefixed_transition_and_round_trip(self):
+        from code2petri.inline import inline_expand
+        from code2petri.python_walker import PythonWalker
+        from code2petri.symbol_table import SymbolTable
+
+        source = (
+            "def worker():\n"
+            "    return len([1, 2])\n"
+            "\n"
+            "def caller():\n"
+            "    return worker()\n"
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source_path = os.path.join(temp_dir, "inline_call_result.py")
+            with open(source_path, "w", encoding="utf-8") as source_file:
+                source_file.write(source)
+            walker = PythonWalker()
+            symbol_table = SymbolTable()
+            symbol_table.index_file(source_path)
+            tree = walker.parse_file(source_path)
+            worker_node = walker.find_function(tree, "worker")
+            caller_node = walker.find_function(tree, "caller")
+            worker_result = walker.walk_function(worker_node, "worker", filepath=source_path)
+            caller_result = walker.walk_function(caller_node, "caller", filepath=source_path)
+            original_record = next(
+                record
+                for transition in worker_result.net.transitions
+                for record in (transition.metadata or {}).get("call_results", [])
+            )
+            preserved_fields = {
+                key: original_record[key]
+                for key in ("expression", "call_site_id", "caller_function", "caller_file", "source_location")
+            }
+
+            expanded_net = inline_expand(
+                caller_result.net,
+                caller_result.call_sites,
+                symbol_table,
+                max_depth=1,
+            )
+
+        cloned_transition = next(
+            transition for transition in expanded_net.transitions
+            if (transition.metadata or {}).get("call_results")
+        )
+        cloned_record = cloned_transition.metadata["call_results"][0]
+        self.assertTrue(cloned_transition.id.startswith("inline_worker__"))
+        self.assertEqual(original_record["transition_id"], "t1")
+        self.assertEqual(cloned_record["transition_id"], cloned_transition.id)
+        for key, value in preserved_fields.items():
+            self.assertEqual(cloned_record[key], value)
+
+        import json
+        from tests.test_html_viewer import _run_node_script
+
+        original_net = expanded_net.to_dict()
+        script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const {{ LiveFoldReductionEngine }} = require('./code2petri/viewer/engine/reduction_engine.js');
+const {{ serializeFoldStateSnapshot, parseFoldStateSnapshot }} = require('./code2petri/viewer/engine/session_snapshot.js');
+const originalNet = {json.dumps(original_net)};
+const clonedTransition = originalNet.transitions.find(transition => transition.metadata && transition.metadata.call_results);
+const clonedRecord = clonedTransition.metadata.call_results[0];
+const restoredNode = {{
+  group: 'nodes',
+  data: {{ id: clonedTransition.id, call_results: [clonedRecord] }}
+}};
+const cy = cytoscape({{ elements: [{{
+  group: 'nodes',
+  data: {{ id: 'folded-holder', consumedSubnet: {{ nodes: [restoredNode] }} }}
+}}] }});
+const document = {{
+  title: 'Caller', projectTitle: '', sourceFile: '/offline/caller.py', filename: 'caller.html',
+  functionName: 'caller', mode: 'no-fold', sidebarVisible: true, returnMetadata: null,
+  originalNet, compounds: [], foldSteps: [], calleeNets: {{}}, expandedNodes: [], finalSm: 0,
+  fullyReducible: false, playback: {{ currentStep: 0, totalSteps: 0 }}
+}};
+const engine = new LiveFoldReductionEngine(cy);
+const snapshot = parseFoldStateSnapshot(serializeFoldStateSnapshot({{ cy, engine, document }}));
+const nestedRecord = snapshot.elements[0].data.consumedSubnet.nodes[0].data.call_results[0];
+if (nestedRecord.transition_id !== clonedTransition.id) throw new Error('restorable call result lost its cloned transition ID');
+const originalTransition = snapshot.document.originalNet.transitions.find(transition => transition.id === clonedTransition.id);
+if (originalTransition.metadata.call_results[0].transition_id !== originalTransition.id) {{
+  throw new Error('inlined net call result lost its cloned transition ID');
+}}
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Inlined call-result snapshot round trip failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_snapshot_migrates_only_matching_legacy_inline_call_result_ids(self):
+        from tests.test_html_viewer import _run_node_script
+
+        script = r"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const { LiveFoldReductionEngine } = require('./code2petri/viewer/engine/reduction_engine.js');
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+function callResult(transitionId) {
+  return {
+    expression: 'len([])', transition_id: transitionId, call_site_id: '/offline/worker.py::worker@1:4',
+    caller_function: 'worker', caller_file: '/offline/worker.py', source_location: { line: 1, column: 4 },
+    state: 'known', type: 'int', canonical_builtin: 'builtins.len',
+    provenance: 'python_builtin_static_contract', unknown_reason: null
+  };
+}
+const liveId = 'inline_worker__t7';
+const nestedId = 'inline_worker_call_t2__t8';
+const elements = [
+  { group: 'nodes', data: { id: liveId, call_results: [callResult('t7')] } },
+  { group: 'nodes', data: { id: 'folded-holder', consumedSubnet: {
+    nodes: [{ group: 'nodes', data: { id: nestedId, call_results: [callResult('t8')] } }]
+  } } }
+];
+const cy = cytoscape({ elements });
+const originalNet = {
+  places: [],
+  transitions: [
+    { id: liveId, metadata: { call_results: [callResult('t7')] } },
+    { id: nestedId, metadata: { call_results: [callResult('t8')] } }
+  ],
+  arcs: []
+};
+const document = {
+  title: 'Legacy', projectTitle: '', sourceFile: '/offline/worker.py', filename: 'legacy.html',
+  functionName: 'worker', mode: 'no-fold', sidebarVisible: true, returnMetadata: null,
+  originalNet, compounds: [], foldSteps: [], calleeNets: {}, expandedNodes: [], finalSm: 0,
+  fullyReducible: false, playback: { currentStep: 0, totalSteps: 0 }
+};
+const engine = new LiveFoldReductionEngine(cy);
+const raw = serializeFoldStateSnapshot({ cy, engine, document });
+const parsed = parseFoldStateSnapshot(raw);
+if (parsed.elements[0].data.call_results[0].transition_id !== liveId) throw new Error('live legacy ID was not repaired');
+if (parsed.elements[1].data.consumedSubnet.nodes[0].data.call_results[0].transition_id !== nestedId) {
+  throw new Error('nested restoration legacy ID was not repaired');
+}
+if (parsed.document.originalNet.transitions.some(t => t.metadata.call_results[0].transition_id !== t.id)) {
+  throw new Error('original net legacy ID was not repaired');
+}
+const invalid = JSON.parse(JSON.stringify(raw));
+invalid.elements[0].data.call_results[0].transition_id = 'unrelated';
+let rejected = false;
+try { parseFoldStateSnapshot(invalid); } catch (error) { rejected = error.message.includes('transition_id'); }
+if (!rejected) throw new Error('a non-matching inline transition ID was silently repaired');
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Legacy inline snapshot migration failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_nonlocal_global_and_wildcard_bindings_do_not_claim_builtin_contracts(self):
         source = '''
 def outer(len):
