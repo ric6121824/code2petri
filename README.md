@@ -59,9 +59,13 @@ The project is actively being developed to analyze large-scale game engine codeb
 - **Phase 2 (Completed)**: Cross-File Reference Tracing (resolving function and method calls across multiple files with constructor variable bindings, symbol indexing, and PNML/DOT/JSON serialization).
 - **Phase 2.5 (Completed)**: Structural Component Folding & Structuredness Metric (SM) computation per Lassen & van der Aalst (2008), inline expansion engine (`inline.py`), and standalone Cytoscape.js HTML viewer.
 - **Phase 2.6 (Completed)**: ProM reduction algorithm port (Single-Place Contraction, Atomic Choice Collapse, SESE reachability), nested call resolution, interactive client-side compound subnet expansion, and canvas viewport controls (middle/right drag pan, scroll wheel zoom, node dragging).
-- **Phase 2.7 (Completed)**: Live Fold Reduction, component-local unfold, component renaming, client-side PNML export, boot-to-composite startup, viewport preservation, and extended zoom-out.
-- **Phase 2.8 (Completed)**: Docked inspector sidebar, Batch Place Fold, Fold Entire Function, versioned session snapshot save/open, and root-function identity in the viewer.
-- **Active Next — Phase 3**: **C# / Unity** support, including Unity lifecycle modeling. Phase 4 (**C++ / Unreal Engine**) remains planned.
+- **Phase 2.7 (Implemented)**: Live Fold Reduction, component-local unfold, component renaming, client-side PNML export, boot-to-composite startup, viewport preservation, extended zoom-out, and repeating green/blue/purple expanded-compound colors by nesting depth.
+- **Phase 2.8 (Implemented)**: Docked inspector with a near-top hide/recall edge tab, Batch Place Fold, function-scoped elementary and validated structural folding, versioned session snapshot save/open, and Project/File/Function identity in the info panel.
+- **Phase 2.9 (Implemented)**: Compact, lossless nested restoration records, legacy snapshot compatibility, and independent bounded Save Session download lifetimes.
+- **Phase 2.10 (Implemented)**: Python/JavaScript Function Return Metadata, bounded list-expression inference, and separate per-call results for ten Python built-ins with supported import aliases and specific Unknown reasons.
+- **Phase 2.8.1 (Implemented; browser acceptance remains open)**: [Viewer Search and Action History](.scratch/code2petri/specs/phase-2.8.1-viewer-search-and-action-history.md), including nested hidden-node search, explicit Reveal, and session-only Undo/Redo. The user confirmed Undo/Redo in the browser; remaining viewer checks stay documented in the original tickets.
+- **Verification still recorded separately**: Browser download/rendering and generated-viewer session acceptance gaps remain documented in the [grand plan](.scratch/code2petri/grand_plan.md). Implementation completion does not mark those checks passed.
+- **Planned language work — Phase 3**: **C# / Unity** support, including Unity lifecycle modeling. Phase 4 (**C++ / Unreal Engine**) remains planned.
 
 ## License
 
