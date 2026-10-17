@@ -18,7 +18,7 @@
     return JSON.parse(JSON.stringify(value));
   }
 
-  function cloneCanonicalValue(value, ancestors) {
+  function cloneCanonicalValue(value, ancestors, snapshotCache) {
     if (value === undefined || typeof value === 'function' || typeof value === 'symbol') return undefined;
     if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
     if (typeof value === 'number') return Number.isFinite(value) ? value : null;
@@ -27,14 +27,14 @@
 
     if (typeof value.toJSON === 'function') {
       const jsonValue = value.toJSON();
-      if (jsonValue !== value) return cloneCanonicalValue(jsonValue, ancestors);
+      if (jsonValue !== value) return cloneCanonicalValue(jsonValue, ancestors, snapshotCache);
     }
     if (ancestors.has(value)) throw new TypeError('Converting circular structure to JSON');
     ancestors.add(value);
     let copy;
     if (Array.isArray(value)) {
       copy = value.map(function(item) {
-        const cloned = cloneCanonicalValue(item, ancestors);
+        const cloned = cloneCanonicalValue(item, ancestors, snapshotCache);
         return cloned === undefined ? null : cloned;
       });
     } else {
@@ -43,10 +43,10 @@
         ? value.data : null;
       Object.keys(value).forEach(function(key) {
         if (key === 'data' && elementData) {
-          copy.data = cloneCanonicalData(elementData, ancestors);
+          copy.data = cloneCanonicalData(elementData, ancestors, snapshotCache);
           return;
         }
-        const cloned = cloneCanonicalValue(value[key], ancestors);
+        const cloned = cloneCanonicalValue(value[key], ancestors, snapshotCache);
         if (cloned !== undefined) copy[key] = cloned;
       });
     }
@@ -54,7 +54,7 @@
     return copy;
   }
 
-  function cloneCanonicalData(data, ancestors) {
+  function cloneCanonicalData(data, ancestors, snapshotCache) {
     const copy = {};
     const keys = Object.keys(data);
     const hasCanonical = keys.indexOf('consumedSubnet') !== -1;
@@ -64,18 +64,101 @@
     keys.forEach(function(key) {
       if (key === 'consumedSubgraph') return;
       const source = key === 'consumedSubnet' ? canonical : data[key];
-      const cloned = cloneCanonicalValue(source, ancestors);
+      const cloned = key === 'consumedSubnet'
+        ? cloneCachedRestoration(source, ancestors, snapshotCache)
+        : cloneCanonicalValue(source, ancestors, snapshotCache);
       if (cloned !== undefined) copy[key] = cloned;
     });
     if (canonical === undefined && legacy !== undefined) {
-      const clonedLegacy = cloneCanonicalValue(legacy, ancestors);
+      const clonedLegacy = cloneCachedRestoration(legacy, ancestors, snapshotCache);
       if (clonedLegacy !== undefined) copy.consumedSubnet = clonedLegacy;
     }
     return copy;
   }
 
-  function canonicalElement(element) {
-    const copy = cloneCanonicalValue(element, new WeakSet());
+  function canonicalEntries(value, descriptors, isDataMap) {
+    const entries = Object.keys(value).map(function(key) {
+      return [key, descriptors[key] && descriptors[key].value];
+    });
+    if (!isDataMap) return entries;
+    const hasCanonical = Object.prototype.hasOwnProperty.call(value, 'consumedSubnet');
+    const canonical = hasCanonical && descriptors.consumedSubnet ? descriptors.consumedSubnet.value : undefined;
+    const legacy = canonical === undefined && Object.prototype.hasOwnProperty.call(value, 'consumedSubgraph')
+      ? (descriptors.consumedSubgraph && descriptors.consumedSubgraph.value) : undefined;
+    const normalized = entries.filter(function(entry) {
+      return entry[0] !== 'consumedSubgraph' && entry[0] !== 'consumedSubnet';
+    });
+    if (canonical !== undefined) normalized.push(['consumedSubnet', canonical]);
+    else if (legacy !== undefined) normalized.push(['consumedSubnet', legacy]);
+    normalized.sort(function(a, b) { return a[0].localeCompare(b[0]); });
+    return normalized;
+  }
+
+  function canonicalValuesEqual(value, snapshot, ancestors, arrayItem, isDataMap) {
+    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
+      return arrayItem ? snapshot === null : snapshot === undefined;
+    }
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') return value === snapshot;
+    if (typeof value === 'number') return (Number.isFinite(value) ? value : null) === snapshot;
+    if (typeof value === 'bigint' || typeof value !== 'object') return false;
+    if (typeof value.toJSON === 'function' || ancestors.has(value)) return false;
+
+    ancestors.add(value);
+    let equal = true;
+    if (Array.isArray(value)) {
+      equal = Array.isArray(snapshot) && value.length === snapshot.length && value.every(function(item, index) {
+        return canonicalValuesEqual(item, snapshot[index], ancestors, true);
+      });
+    } else if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+      equal = false;
+    } else {
+      const descriptors = Object.getOwnPropertyDescriptors(value);
+      if (Object.keys(descriptors).some(function(key) {
+        return !Object.prototype.hasOwnProperty.call(descriptors[key], 'value');
+      })) {
+        equal = false;
+      }
+      const sourceEntries = canonicalEntries(value, descriptors, isDataMap);
+      const snapshotDescriptors = Object.getOwnPropertyDescriptors(snapshot);
+      const snapshotEntries = canonicalEntries(snapshot, snapshotDescriptors, isDataMap);
+      if (sourceEntries.length !== snapshotEntries.length) {
+        equal = false;
+      } else if (equal) {
+        for (let index = 0; index < sourceEntries.length; index++) {
+          const sourceEntry = sourceEntries[index];
+          const snapshotEntry = snapshotEntries[index];
+          const descriptor = descriptors[sourceEntry[0]];
+          if (sourceEntry[0] !== snapshotEntry[0] || !descriptor || !Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+            equal = false;
+            break;
+          }
+          const child = descriptor.value;
+          const childIsDataMap = sourceEntry[0] === 'data' && child && typeof child === 'object' && !Array.isArray(child);
+          if (!canonicalValuesEqual(child, snapshotEntry[1], ancestors, false, childIsDataMap)) {
+            equal = false;
+            break;
+          }
+        }
+      }
+    }
+    ancestors.delete(value);
+    return equal;
+  }
+
+  function cloneCachedRestoration(value, ancestors, snapshotCache) {
+    if (value && typeof value === 'object' && snapshotCache && snapshotCache.has(value)) {
+      const cached = snapshotCache.get(value);
+      if (canonicalValuesEqual(value, cached, new WeakSet(), false, false)) return cached;
+    }
+    const cloned = cloneCanonicalValue(value, ancestors, snapshotCache);
+    if (value && typeof value === 'object' && snapshotCache && cloned !== undefined) {
+      snapshotCache.set(value, cloned);
+    }
+    return cloned;
+  }
+
+  function canonicalElement(element, snapshotCache) {
+    const copy = cloneCanonicalValue(element, new WeakSet(), snapshotCache);
     if (copy && Object.prototype.hasOwnProperty.call(copy, 'selected')) delete copy.selected;
     if (copy && copy.group === 'nodes' && typeof copy.classes === 'string') {
       copy.classes = stripTransientSearchClasses(copy.classes);
@@ -87,8 +170,10 @@
     return JSON.stringify(value);
   }
 
-  function sortedElements(cy) {
-    return cy.elements().jsons().map(canonicalElement).sort(function(a, b) {
+  function sortedElements(cy, snapshotCache) {
+    return cy.elements().jsons().map(function(element) {
+      return canonicalElement(element, snapshotCache);
+    }).sort(function(a, b) {
       return String(a.data.id).localeCompare(String(b.data.id));
     });
   }
@@ -116,6 +201,7 @@
         throw new Error('Viewer Action History requires a Cytoscape instance');
       }
       this.cy = opts.cy;
+      this._canonicalSubnetSnapshots = new WeakMap();
       this.captureContext = typeof opts.captureContext === 'function' ? opts.captureContext : function() { return {}; };
       this.restoreContext = typeof opts.restoreContext === 'function' ? opts.restoreContext : function() {};
       this.captureUi = typeof opts.captureUi === 'function' ? opts.captureUi : function() { return null; };
@@ -138,7 +224,10 @@
     }
 
     _capture() {
-      return { elements: sortedElements(this.cy), context: this.captureContextState() };
+      return {
+        elements: sortedElements(this.cy, this._canonicalSubnetSnapshots),
+        context: this.captureContextState()
+      };
     }
 
     _captureViewport() {
@@ -173,11 +262,11 @@
         // Cytoscape may retain nested references from element definitions. The
         // reducer mutates live compounds inside retained consumedSubnet data,
         // so rebuilds must never share objects with detached history entries.
-        const addedNodes = this.cy.add(nodes.map(canonicalElement));
+        const addedNodes = this.cy.add(nodes.map(function(element) { return canonicalElement(element); }));
         if (addedNodes.length !== nodes.length) throw new Error('Cytoscape did not restore all graph nodes');
-        const addedEdges = this.cy.add(edges.map(canonicalElement));
+        const addedEdges = this.cy.add(edges.map(function(element) { return canonicalElement(element); }));
         if (addedEdges.length !== edges.length) throw new Error('Cytoscape did not restore all graph edges');
-        const actual = this.cy.elements().jsons().map(canonicalElement);
+        const actual = this.cy.elements().jsons().map(function(element) { return canonicalElement(element); });
         if (actual.length !== elements.length) throw new Error('Graph restoration produced a different element count');
         const actualById = elementMap(actual);
         elements.forEach(function(expected) {
@@ -421,6 +510,7 @@
       this.undoStack.length = 0;
       this.redoStack.length = 0;
       this.bytes = 0;
+      this._canonicalSubnetSnapshots = new WeakMap();
       this.onChange();
     }
   }

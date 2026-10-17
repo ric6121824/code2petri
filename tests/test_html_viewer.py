@@ -6529,6 +6529,27 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"History alias canonicalization failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+    def test_history_snapshot_reuses_unchanged_restoration_and_copies_mutations(self):
+        script = r"""
+const { ViewerActionHistory } = require('./code2petri/viewer/engine/action_history.js');
+const subnet = { nodes: [{ data: { id: 'nested', label: 'before' } }] };
+const element = { group: 'nodes', data: { id: 'owner', consumedSubnet: subnet } };
+const cy = { elements: () => ({ jsons: () => [element] }) };
+const history = new ViewerActionHistory({ cy });
+const first = history._capture().elements[0].data.consumedSubnet;
+const second = history._capture().elements[0].data.consumedSubnet;
+if (first !== second) throw new Error('an unchanged restoration subnet was copied again');
+subnet.nodes[0].data.label = 'after';
+const third = history._capture().elements[0].data.consumedSubnet;
+if (third === second) throw new Error('a mutated restoration subnet reused a stale snapshot');
+if (third.nodes[0].data.label !== 'after') throw new Error('the changed restoration data was not captured');
+if (second.nodes[0].data.label !== 'before') throw new Error('a later live mutation changed an earlier snapshot');
+console.log('PASS');
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, f"Restoration snapshot reuse failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_large_44_place_batch_reports_and_restores_one_history_action(self):
         net_literal = """(() => {
   const places = [], transitions = [], arcs = [];
