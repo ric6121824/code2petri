@@ -1394,25 +1394,32 @@
             {
               foldTypes: ['marked_graph', 'state_machine'],
               run: function(engine, scopeId, rejectionReasons) {
-                return {
-                  marked_graph: engine.detectMarkedGraphs(scopeId),
-                  state_machine: engine.detectStateMachines(scopeId, rejectionReasons)
-                };
+                const markedGraphReasons = [];
+                const stateMachineReasons = [];
+                const markedGraph = engine.detectMarkedGraphs(scopeId, markedGraphReasons);
+                const stateMachine = engine.detectStateMachines(scopeId, stateMachineReasons);
+                const preferredReasons = stateMachineReasons.length > 0
+                  ? stateMachineReasons
+                  : markedGraphReasons;
+                if (Array.isArray(rejectionReasons) && rejectionReasons.length === 0 && preferredReasons.length > 0) {
+                  rejectionReasons.push(preferredReasons[0]);
+                }
+                return { marked_graph: markedGraph, state_machine: stateMachine };
               }
             },
             {
               foldTypes: ['well_structured'],
-              run: function(engine, scopeId) {
+              run: function(engine, scopeId, rejectionReasons) {
                 return {
-                  well_structured: engine.detectWellStructured(scopeId)
+                  well_structured: engine.detectWellStructured(scopeId, rejectionReasons)
                 };
               }
             },
             {
               foldTypes: ['unstructured'],
-              run: function(engine, scopeId) {
+              run: function(engine, scopeId, rejectionReasons) {
                 return {
-                  unstructured: engine.detectUnstructured(scopeId)
+                  unstructured: engine.detectUnstructured(scopeId, rejectionReasons)
                 };
               }
             }
@@ -1598,8 +1605,8 @@
             message: complete
               ? `Function '${compoundId}' is fully collapsed after ${folded.length} reduction${folded.length === 1 ? '' : 's'}.`
               : success
-                ? `Function '${compoundId}' remains partially folded after ${folded.length} reduction${folded.length === 1 ? '' : 's'}; ${rejectionReason || 'no further eligible places were found.'}`
-                : `No progress folding function '${compoundId}'; ${rejectionReason || 'no validated elementary or contained structural candidate is available within this function scope.'}`
+                ? `Function '${compoundId}' remains partially folded after ${folded.length} reduction${folded.length === 1 ? '' : 's'}; ${rejectionReason || 'no further elementary reduction or contained SESE region satisfied the function-scope rules.'}`
+                : `No progress folding function '${compoundId}'; ${rejectionReason || 'no elementary reduction or contained SESE region satisfied the function-scope rules.'}`
           };
         }
 
@@ -2084,7 +2091,7 @@
           return consumedCompounds;
         }
 
-        _validateSESEFunctionBoundaries(nodesSet, allowedPartialParentIds) {
+        _getSESEFunctionBoundaryIssue(nodesSet, allowedPartialParentIds) {
           const self = this;
           const allowedPartials = allowedPartialParentIds instanceof Set ? allowedPartialParentIds : new Set();
           const compoundChildrenCount = new Map();
@@ -2110,16 +2117,18 @@
             const totalCount = compoundChildrenCount.get(parentId);
             if (internalCount < totalCount) {
               if (!allowedPartials.has(parentId) && !self.isFunctionFoldedIntoSingleComponent(parentId)) {
-                return false;
+                return `candidate partially consumes protected nested function '${parentId}' (${internalCount} of ${totalCount} direct children).`;
               }
             }
           }
-          return true;
+          return null;
         }
 
-        _candidateFitsFunctionScope(candidate, scopeId, placeBoundaries) {
+        _getFunctionScopeCandidateIssue(candidate, scopeId, placeBoundaries) {
           const scope = this.cy.getElementById(scopeId);
-          if (!scope || scope.length === 0 || !scope.hasClass('compound')) return false;
+          if (!scope || scope.length === 0 || !scope.hasClass('compound')) {
+            return `selected function scope '${scopeId}' no longer exists.`;
+          }
           const parentId = scope.data('parent') || null;
           const boundaryIds = placeBoundaries
             ? new Set([candidate.sourceId, candidate.sinkId])
@@ -2127,24 +2136,28 @@
           let hasOwnedInteriorPlace = false;
           for (const nodeId of candidate.nodes) {
             const node = this.cy.getElementById(nodeId);
-            if (!node || node.length === 0) return false;
+            if (!node || node.length === 0) return `candidate node '${nodeId}' no longer exists.`;
             const owned = this._getNodeAncestors(nodeId).includes(scopeId);
             if (!owned) {
               if (!boundaryIds.has(nodeId) || !node.hasClass('place') || (node.data('parent') || null) !== parentId) {
-                return false;
+                return `candidate includes out-of-scope node '${nodeId}' that is not a direct caller boundary place.`;
               }
               continue;
             }
             if (node.hasClass('place') && !boundaryIds.has(nodeId)) hasOwnedInteriorPlace = true;
           }
-          if (!hasOwnedInteriorPlace) return false;
+          if (!hasOwnedInteriorPlace) {
+            return 'candidate contains no function-owned interior place to fold.';
+          }
           candidate.scopeId = scopeId;
           candidate.triggerId = Array.from(candidate.nodes).find((nodeId) => {
             if (boundaryIds.has(nodeId) || !this._getNodeAncestors(nodeId).includes(scopeId)) return false;
             const node = this.cy.getElementById(nodeId);
             return node && node.length > 0 && node.hasClass('place');
           });
-          return Boolean(candidate.triggerId);
+          return candidate.triggerId
+            ? null
+            : 'candidate has no function-owned interior place that can serve as a fold trigger.';
         }
 
         _getFunctionFoldReachabilityNodeIds(scopeId) {
@@ -2224,32 +2237,51 @@
                   return nodeId !== cand.sourceId && nodeId !== cand.sinkId;
                 }))
               : cand.nodes;
-            if (options.scopeId && !self._candidateFitsFunctionScope(cand, options.scopeId, options.boundarySelector === '.place')) {
-              return;
+            if (options.scopeId) {
+              const scopeIssue = self._getFunctionScopeCandidateIssue(
+                cand,
+                options.scopeId,
+                options.boundarySelector === '.place'
+              );
+              if (scopeIssue) {
+                self._recordRejectionReason(options.rejectionReasons, scopeIssue);
+                return;
+              }
             }
             let valid = true;
             for (const nid of cand.nodes) {
               const node = self.cy.getElementById(nid);
               if (!node || node.length === 0) {
                 valid = false;
+                self._recordRejectionReason(options.rejectionReasons, `candidate node '${nid}' no longer exists.`);
                 break;
               }
-              if (options.validateNode && !options.validateNode(node, cand)) {
-                valid = false;
-                break;
+              if (options.validateNode) {
+                const nodeIssue = options.validateNode(node, cand);
+                if (nodeIssue) {
+                  valid = false;
+                  self._recordRejectionReason(options.rejectionReasons, nodeIssue);
+                  break;
+                }
               }
             }
             if (!valid) return;
 
-            if (options.validateSubnet && !options.validateSubnet(cand)) {
-              return;
+            if (options.validateSubnet) {
+              const subnetIssue = options.validateSubnet(cand);
+              if (subnetIssue) {
+                self._recordRejectionReason(options.rejectionReasons, subnetIssue);
+                return;
+              }
             }
 
             const allowedPartialParents = options.scopeId ? new Set([options.scopeId]) : null;
-            if (!self._validateSESEFunctionBoundaries(
+            const boundaryIssue = self._getSESEFunctionBoundaryIssue(
               options.scopeId ? consumedForScope : cand.nodes,
               allowedPartialParents
-            )) {
+            );
+            if (boundaryIssue) {
+              self._recordRejectionReason(options.rejectionReasons, boundaryIssue);
               return;
             }
 
@@ -2323,26 +2355,26 @@
               if (isMarkedGraph) {
                 if (node.hasClass('place')) {
                   if (node.incomers('edge').length !== 1 || node.outgoers('edge').length !== 1) {
-                    return false;
+                    return `marked-graph candidate has place '${node.id()}' without exactly one incoming and one outgoing arc.`;
                   }
                   if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                    return false;
+                    return `marked-graph candidate contains token-bearing place '${node.id()}'.`;
                   }
                 }
               } else {
                 if (node.hasClass('transition')) {
                   if (node.incomers('edge').length !== 1 || node.outgoers('edge').length !== 1) {
-                    return false;
+                    return `state-machine candidate has transition '${node.id()}' without exactly one incoming and one outgoing arc.`;
                   }
                 } else if (node.hasClass('place')) {
                   if (node.id() !== cand.sourceId && node.id() !== cand.sinkId) {
                     if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                      return false;
+                      return `state-machine candidate contains token-bearing interior place '${node.id()}'.`;
                     }
                   }
                 }
               }
-              return true;
+              return null;
             },
             calculateMultiplier: function(cand, compTrans) {
               const diff = self.sese.calculateSymmetryMultiplier(cand.nodes, null, false);
@@ -2358,30 +2390,31 @@
           });
         }
 
-        detectMarkedGraphs(scopeId = null) {
-          return this._detectSESESubnetCandidates(true, scopeId);
+        detectMarkedGraphs(scopeId = null, rejectionReasons = null) {
+          return this._detectSESESubnetCandidates(true, scopeId, rejectionReasons);
         }
 
         detectStateMachines(scopeId = null, rejectionReasons = null) {
           return this._detectSESESubnetCandidates(false, scopeId, rejectionReasons);
         }
 
-        detectWellStructured(scopeId = null) {
+        detectWellStructured(scopeId = null, rejectionReasons = null) {
           const self = this;
           return this._discoverSESESubnets({
             boundarySelector: '.place',
             componentType: 'WellStructured',
             scopeId: scopeId,
+            rejectionReasons: rejectionReasons,
             filterMaximal: true,
             validateNode: function(node, cand) {
               if (node.hasClass('place')) {
                 if (node.id() !== cand.sourceId && node.id() !== cand.sinkId) {
                   if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                    return false;
+                    return `well-structured candidate contains token-bearing interior place '${node.id()}'.`;
                   }
                 }
               }
-              return true;
+              return null;
             },
             validateSubnet: function(cand) {
               for (const nid of cand.nodes) {
@@ -2395,19 +2428,19 @@
                       const tid = tNode.id();
 
                       if (node.outgoers('edge').length > 1 && tNode.incomers('edge').length > 1) {
-                        return false;
+                        return `well-structured candidate has a PT handle between place '${nid}' and transition '${tid}'.`;
                       }
                       if (node.incomers('edge').length > 1 && tNode.incomers('edge').length > 1) {
-                        return false;
+                        return `well-structured candidate has a TP handle at place '${nid}' and transition '${tid}'.`;
                       }
                       if (self.sese.forwardReachability(tid, cand.sinkId).has(nid)) {
-                        return false;
+                        return `well-structured candidate contains a cycle through place '${nid}' and transition '${tid}'.`;
                       }
                     }
                   }
                 }
               }
-              return true;
+              return null;
             },
             calculateMultiplier: function(cand, compTrans) {
               const sym = self.sese.calculateSubnetSymmetry(cand.nodes, false);
@@ -2468,23 +2501,24 @@
           };
         }
 
-        detectUnstructured(scopeId = null) {
+        detectUnstructured(scopeId = null, rejectionReasons = null) {
           const self = this;
           const knotCandidates = this._discoverSESESubnets({
             boundarySelector: '.place',
             componentType: 'Unstructured',
             scopeId: scopeId,
+            rejectionReasons: rejectionReasons,
             filterMaximal: false,
             sortMinimal: true,
             validateNode: function(node, cand) {
               if (node.hasClass('place')) {
                 if (node.id() !== cand.sourceId && node.id() !== cand.sinkId) {
                   if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                    return false;
+                    return `unstructured candidate contains token-bearing interior place '${node.id()}'.`;
                   }
                 }
               }
-              return true;
+              return null;
             },
             calculateMultiplier: function(cand, compTrans) {
               const calc = self._calculateUnstructuredOmega(cand.nodes, compTrans);
