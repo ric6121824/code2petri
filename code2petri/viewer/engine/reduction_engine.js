@@ -2343,6 +2343,16 @@
         // Detects SESE Subnets for structural folding (Marked Graph or State Machine).
         // Internal places must have initial_tokens === 0 to preserve workflow net
         // token conservation during live SESE structural folding.
+        _getTokenBearingPlaceIssue(node, cand, componentType, interiorOnly) {
+          if (!node.hasClass('place')) return null;
+          const isBoundary = node.id() === cand.sourceId || node.id() === cand.sinkId;
+          if (interiorOnly && isBoundary) return null;
+          if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
+            return `${componentType} candidate contains token-bearing ${interiorOnly ? 'interior ' : ''}place '${node.id()}'.`;
+          }
+          return null;
+        }
+
         _detectSESESubnetCandidates(isMarkedGraph, scopeId = null, rejectionReasons = null) {
           const self = this;
           return this._discoverSESESubnets({
@@ -2357,9 +2367,7 @@
                   if (node.incomers('edge').length !== 1 || node.outgoers('edge').length !== 1) {
                     return `marked-graph candidate has place '${node.id()}' without exactly one incoming and one outgoing arc.`;
                   }
-                  if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                    return `marked-graph candidate contains token-bearing place '${node.id()}'.`;
-                  }
+                  return self._getTokenBearingPlaceIssue(node, cand, 'marked-graph', false);
                 }
               } else {
                 if (node.hasClass('transition')) {
@@ -2367,11 +2375,7 @@
                     return `state-machine candidate has transition '${node.id()}' without exactly one incoming and one outgoing arc.`;
                   }
                 } else if (node.hasClass('place')) {
-                  if (node.id() !== cand.sourceId && node.id() !== cand.sinkId) {
-                    if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                      return `state-machine candidate contains token-bearing interior place '${node.id()}'.`;
-                    }
-                  }
+                  return self._getTokenBearingPlaceIssue(node, cand, 'state-machine', true);
                 }
               }
               return null;
@@ -2407,14 +2411,7 @@
             rejectionReasons: rejectionReasons,
             filterMaximal: true,
             validateNode: function(node, cand) {
-              if (node.hasClass('place')) {
-                if (node.id() !== cand.sourceId && node.id() !== cand.sinkId) {
-                  if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                    return `well-structured candidate contains token-bearing interior place '${node.id()}'.`;
-                  }
-                }
-              }
-              return null;
+              return self._getTokenBearingPlaceIssue(node, cand, 'well-structured', true);
             },
             validateSubnet: function(cand) {
               for (const nid of cand.nodes) {
@@ -2511,14 +2508,7 @@
             filterMaximal: false,
             sortMinimal: true,
             validateNode: function(node, cand) {
-              if (node.hasClass('place')) {
-                if (node.id() !== cand.sourceId && node.id() !== cand.sinkId) {
-                  if (parseInt(node.data('initial_tokens') || 0, 10) > 0) {
-                    return `unstructured candidate contains token-bearing interior place '${node.id()}'.`;
-                  }
-                }
-              }
-              return null;
+              return self._getTokenBearingPlaceIssue(node, cand, 'unstructured', true);
             },
             calculateMultiplier: function(cand, compTrans) {
               const calc = self._calculateUnstructuredOmega(cand.nodes, compTrans);

@@ -7168,6 +7168,26 @@ if (!candidate) throw new Error('Scoped discovery did not recognize the fused en
 if (candidate.tauSum !== 6 || candidate.tauNew !== 12 || candidate.omega !== 6) {{
   throw new Error('Scoped State Machine candidate changed its existing weight calculation: ' + JSON.stringify(candidate));
 }}
+const scopeIssue = foldEngine._getFunctionScopeCandidateIssue({{
+  sourceId: 'p80', sinkId: 'p85', nodes: new Set(['p80', 'p2', 'p85', 'q1'])
+}}, 'fn', true);
+if (!scopeIssue || !scopeIssue.includes("out-of-scope node 'q1'")) {{
+  throw new Error('Function scope rejection did not identify the unrelated node: ' + scopeIssue);
+}}
+const nestedBoundaryIssue = foldEngine._getSESEFunctionBoundaryIssue(new Set(['q0']), new Set());
+if (!nestedBoundaryIssue || !nestedBoundaryIssue.includes("partially consumes protected nested function 'sibling'")) {{
+  throw new Error('Protected nested-function rejection was not specific: ' + nestedBoundaryIssue);
+}}
+const tokenNet = JSON.parse(JSON.stringify(net));
+tokenNet.places.find(function(place) {{ return place.id === 'p2'; }}).initial_tokens = 1;
+const tokenCy = cytoscape({{ elements: netToElements(tokenNet) }});
+const tokenEngine = new LiveFoldReductionEngine(tokenCy);
+const tokenIssue = tokenEngine._getTokenBearingPlaceIssue(
+  tokenCy.getElementById('p2'), {{ sourceId: 'p80', sinkId: 'p85' }}, 'state-machine', true
+);
+if (!tokenIssue || !tokenIssue.includes("token-bearing interior place 'p2'")) {{
+  throw new Error('Component validation rejection did not identify the token-bearing place: ' + tokenIssue);
+}}
 if (foldEngine.hasElementaryReductions('fn')) throw new Error('Fixture unexpectedly has an eligible elementary reduction');
 const expectedSm = Number((originalSm - candidate.tauSum + candidate.tauNew).toFixed(2));
 const trigger = cy.getElementById('p2');
@@ -7260,6 +7280,17 @@ if (leakyResult.success || leakyResult.complete || fingerprint(leakyCy) !== leak
 }}
 if (!leakyResult.message.includes('interior node') || !leakyResult.message.includes('outside the candidate')) {{
   throw new Error('Function fold did not report why the crossing-edge candidate was rejected: ' + leakyResult.message);
+}}
+const fallbackNet = {{
+  compounds: [{{ id: 'fallback_fn', function_name: 'fallback' }}],
+  places: [{{ id: 'isolated', parent: 'fallback_fn', initial_tokens: 0 }}],
+  transitions: [], arcs: []
+}};
+const fallbackCy = cytoscape({{ elements: netToElements(fallbackNet) }});
+const fallbackEngine = new LiveFoldReductionEngine(fallbackCy);
+const fallbackResult = fallbackEngine.executeFoldEntireFunction('fallback_fn');
+if (fallbackResult.success || !fallbackResult.message.includes('no elementary reduction or contained SESE region')) {{
+  throw new Error('Function fold did not explain when no candidate fits its scope: ' + fallbackResult.message);
 }}
 if (layoutCount < 2) throw new Error('Expected the generated trigger and Fold Entire Function layouts');
 console.log('PASS');
