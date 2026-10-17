@@ -6,6 +6,10 @@
 
 **Status:** ready-for-human
 
+**Implementation:** complete (`2e0db87`, subsequent sidebar fix in `a500c13`).
+
+**Verification:** actual browser geometry, pointer/keyboard interaction, and full session acceptance remain pending as recorded below.
+
 - [x] When shown, place a small hide/recall tab near the top of the sidebar's left boundary. When hidden, retain it near the top of the graph's far-right edge at the same height. Use a right-pointing chevron to hide and a left-pointing chevron to recall, descriptive Hide Sidebar / Show Sidebar tooltips and accessible labels/state, keyboard activation, and visible focus. The tab must remain usable regardless of inspector scrolling and must not be clipped off-screen. It replaces the proposed toolbar toggle.
 - [x] Hiding removes the entire sidebar from layout and returns its full width to the graph, leaving only the small recall tab. Showing restores the existing docked width and light-theme layout. Both transitions are immediate: no slide, fade, or width animation. The existing clear-inspection control retains its separate action.
 - [x] Resize the canvas to the resulting layout without graph layout, fit, recentering, reset, reduction, or changes to node positions, zoom, or pan. Keep graph pointer/selection interactions correct after repeated toggles. Do not add sidebar drag resizing or an overlay inspector mode.
@@ -34,3 +38,7 @@ The user settled all hide/recall, persistence, draft, and placement decisions th
 Implemented the independent hide/recall edge tab in the generated viewer. Hiding returns the sidebar width to the graph while preserving the camera, inspector state, and same-node draft; keyboard focus moves out of hidden controls. Fold State Snapshots now save and validate the optional visibility boolean, restore the sidebar layout before camera state, default older snapshots to shown, and leave Reset behavior unchanged.
 
 Focused verification passed: `python3 -m unittest tests.test_sidebar_visibility` and the targeted sidebar, inspector, and session snapshot tests. `python3 -m compileall -q code2petri` passed. The full suite ran 566 tests and reported five existing environment/baseline issues: the prototype runner could not bind its test port; pygraphviz and pytest are unavailable; and two unrelated legacy tests fail on existing result-shape/protocol mismatches. Actual generated-viewer browser geometry, pointer, keyboard, and end-to-end session checks remain pending human verification, so the ticket remains `ready-for-human`.
+
+### 2026-10-16 — Delivery documentation synchronized
+
+The user confirmed implementation completion. The [Phase 2.8 delivery record](../specs/phase-2.8-viewer-interactive-enhancements.md), README, and [grand plan](../grand_plan.md) now describe hide/recall and session visibility as implemented. No tests or browser checks were run for this documentation update; the remaining acceptance criterion stays unchecked.
