@@ -36,11 +36,17 @@ We have a fully working, multi-language `code2petri` CLI and Python package that
   - Implements **Client-Side Export**: downloads the current on-screen canvas state as standard ISO/IEC 15909-2 compliant PNML without server roundtrips, ready for direct analysis in tools like ProM.
   - Preserves zoom and pan through folds and unfolds, keeps the folded component at the selected place's screen position, and supports zooming out to 0.1% for very large nets (Tickets 43–44).
   - Modularized frontend architecture: extracted `code2petri/viewer/engine/reduction_engine.js` (2,500 lines) and `pnml_exporter.js` (236 lines), eliminating ~3,000 lines of inlined JS from `template.html`.
+  - Includes same-file callees in initial global composite HTML (Ticket 61) and cycles expanded compound colors green → blue → purple by nesting depth (Ticket 67).
 - Delivers **Interactive Viewer Enhancements** (Phase 2.8):
   - Replaces the floating inspector with a docked right sidebar that pushes the canvas and provides a stable home for inspection and reduction actions ([ADR 0004](../../docs/adr/0004-docked-sidebar-instead-of-floating-popover.md)).
   - Supports box selection and one-pass Batch Place Fold, plus repeated Fold Entire Function passes scoped to a selected compound.
   - Saves and opens versioned Fold State Snapshots offline, restoring graph and restoration records, engine state, document identity, layout, and viewport.
-  - Displays the active root function alongside the source file; the label continues to describe the root document when a callee is inspected.
+  - Displays Project, File, and root Function identity, retaining the active document's title through session restore and callee inspection (Ticket 63).
+  - Adds explicit near-top sidebar hide/recall with session visibility (Ticket 64), and function-scoped validated structural folding after local elementary exhaustion (Ticket 66).
+- Implements **Compact Fold State Snapshots** (Phase 2.9, Tickets 51–52): canonical restoration records, compact detached capture, legacy compatibility, and independent bounded download-resource cleanup.
+- Implements **Function Return and Call Result Metadata** (Phase 2.10, Tickets 54–60, 62, 65): Python/JavaScript return inspection, bounded local/list inference, and separate per-call contracts for ten Python built-ins with supported import aliases and specific Unknown reasons.
+- Delivery status synchronized 2026-10-16: the then-current tickets are implemented; outstanding browser/session acceptance remains listed in the delivery and verification table below. Implementation completion does not establish a new test-suite or browser pass.
+- Implemented 2026-10-17: [Phase 2.8.1 — Viewer Search and Action History](./specs/phase-2.8.1-viewer-search-and-action-history.md) owns the requirements extracted from Phase 2.8. Retain original Tickets 68–69 without further splitting; 68 precedes dependent 69. The user manually confirmed Undo/Redo; remaining generated-viewer browser acceptance is recorded in the tickets.
 - Outputs PNML (ISO/IEC 15909 compliant XML), Graphviz DOT, JSON, PNG, SVG, and interactive self-contained offline HTML.
 - Automated coverage includes **over 400 unit, integration, and cross-file validation tests**, including headless viewer DOM, prototype, and session-resumption coverage; the real-world multi-file target is [GameOfLife_Simulator](file:///Users/pingchungtsai/My%20Drive%20%28ric6121824%40gmail.com%29/Digital%20Media%20MSc/Semester%204/GameOfLife_Simulator).
 - Completed the Phase 2.8 review through Round 3 with no blocking standards or specification findings; Round 3 recorded one optional low-priority result-shape cleanup suggestion.
@@ -72,8 +78,9 @@ graph LR
     P25 --> P26["Phase 2.6 ✅\nProM Port & Interactive\nCompound Expansion"]
     P26 --> P27["Phase 2.7 ✅\nLive Fold Reduction,\nLocal Unfold & Export"]
     P27 --> P28["Phase 2.8 ✅\nViewer Interaction &\nSession Continuity"]
-    P28 --> P29["Phase 2.9\nCompact & Reliable\nSession Saves"]
-    P29 --> P210["Phase 2.10\nFunction Return\nMetadata"]
+    P28 --> P281["Phase 2.8.1 — Implemented\nViewer Search &\nAction History"]
+    P28 --> P29["Phase 2.9 — Implemented\nCompact & Reliable\nSession Saves"]
+    P29 --> P210["Phase 2.10 — Implemented\nFunction Return\nMetadata"]
     P210 --> P3["Phase 3\nC# Walker +\nUnity Lifecycle"]
     P210 --> P4["Phase 4\nC++ Walker +\nUnreal Lifecycle"]
     P3 --> P5["Phase 5\nProject-Scale\nComposite Nets"]
@@ -85,6 +92,9 @@ graph LR
     style P26 fill:#2d6a2d,color:#fff
     style P27 fill:#2d6a2d,color:#fff
     style P28 fill:#2d6a2d,color:#fff
+    style P281 fill:#2d6a2d,color:#fff
+    style P29 fill:#2d6a2d,color:#fff
+    style P210 fill:#2d6a2d,color:#fff
     style P6 stroke-dasharray: 5 5
 ```
 
@@ -317,7 +327,7 @@ While Phase 2.5 established baseline folding, maximal pattern matching failed on
 
 ---
 
-## Phase 2.7 — Live Fold Reduction & Interactive Viewer Architecture (Baseline Completed; Ticket 67 Ready)
+## Phase 2.7 — Live Fold Reduction & Interactive Viewer Architecture (Implemented; Browser Verification Pending)
 
 ### Motivation & Problem Statement
 
@@ -370,11 +380,15 @@ Phase 2.7 fundamentally rearchitected the viewer around **Live Fold Reduction**,
 - Shared viewport helpers preserve zoom and pan during Live Fold Reduction and Component-Local Unfold, placing the new component at the selected place's screen position without a `cy.fit()` reset.
 - The viewer lowers the minimum zoom to 0.1%, allowing the initial fit and scroll wheel to show very large composite nets.
 
-### Expanded Compound Color Follow-up (Ticket 67 — ready-for-human)
+### Delivered Composite Startup Fix (Ticket 61 — resolved)
+
+- [Ticket 61](./issues/61-single-file-global-composite-html.md) makes global HTML boot with reachable same-file function subnets already expanded, retaining configured inline depth, recursion guards, compound boundaries, and multi-file behavior. Its implementation note records focused generated-HTML checks; the ticket is resolved.
+
+### Expanded Compound Color Follow-up (Ticket 67 — implemented; ready-for-human)
 
 - [Ticket 67 — Cycle Nested Compound Colors](./issues/67-cycle-nested-compound-colors.md) replaces the orange clamp at deep nesting with green → blue → purple → green cycling. Depth zero starts green; siblings share their depth's color and adjacent levels differ.
 - Orange remains reserved for unresolved call transitions; collapsed compounds retain their existing brown/gold styling. Presentation uses active hierarchy without changing semantic depth, parent relationships, or nested padding.
-- Fresh exports, expansion, local unfolding, Reset/playback, and older session restoration use the same palette. The [Phase 2.7 specification](./specs/phase-2.7-live-fold-reduction.md) records rendering/session verification and preservation requirements. Ticket 30 remains completed; this follow-up has no blockers and is independent of Ticket 66.
+- Fresh exports, expansion, local unfolding, Reset/playback, and older session restoration share palette handling. Implementation is in `3d54cbb` with shared-helper fixes in `96b6fb5` and `6c37849`. The [Phase 2.7 specification](./specs/phase-2.7-live-fold-reduction.md) records delivery and remaining rendered-color/session checks. Ticket 30 remains completed; Ticket 67 is implemented independently of Ticket 66.
 
 ### Deliverables Summary
 
@@ -387,7 +401,7 @@ Phase 2.7 fundamentally rearchitected the viewer around **Live Fold Reduction**,
 
 ---
 
-## Phase 2.8 — Viewer Interactive Enhancements (Baseline Completed; Follow-ups Ready)
+## Phase 2.8 — Viewer Interactive Enhancements (Implemented; Viewer/Session Verification Pending)
 
 Phase 2.8 extends the self-contained HTML viewer with persistent controls for inspection, bulk reduction, and session continuity. It keeps the generated offline viewer architecture and does not add PNML import or a separate application.
 
@@ -406,13 +420,13 @@ Phase 2.8 extends the self-contained HTML viewer with persistent controls for in
 ### 4. Root Function Identity (Ticket 50)
 - The info panel displays the root function name with the source path, including qualified methods and Global Scope. Inspecting an inlined callee does not change the root identity.
 
-### Approved Follow-ups (Tickets 63, 64, 66)
+### Implemented Follow-ups (Tickets 63, 64, 66)
 
-- [Ticket 63](./issues/63-info-panel-project-title.md) is ready-for-human and adds explicit Project Title generation metadata, Project/File/Function presentation, and incoming-session identity ownership.
-- [Ticket 64](./issues/64-hide-recall-docked-sidebar.md) is ready-for-human and adds the near-top sidebar edge tab, instant hide/recall, reclaimed canvas width, preserved camera/drafts, and session visibility continuity.
-- [Ticket 66 — Function-Scoped Structural Folding](./issues/66-function-scoped-structural-folding.md) is ready-for-human verification and extends Fold-Entire-Function after elementary exhaustion within the selected function, allowing its existing validated structural reductions while unrelated elementary folds remain elsewhere. An internal reduction-type marker and the sidebar button share safe eligibility; caller-owned entrance/exit places remain retained anchors.
+- [Ticket 63](./issues/63-info-panel-project-title.md) implements explicit Project Title generation metadata, Project/File/Function presentation, and incoming-session identity ownership (`3ec9664`, `ef115ab`). Browser readability and complete post-open interaction checks remain ready for human verification.
+- [Ticket 64](./issues/64-hide-recall-docked-sidebar.md) implements the near-top sidebar edge tab, instant hide/recall, reclaimed canvas width, preserved camera/drafts, and session visibility continuity (`2e0db87`, subsequent fix in `a500c13`). Browser geometry, pointer/keyboard, and end-to-end session acceptance remain ready for human verification.
+- [Ticket 66 — Function-Scoped Structural Folding](./issues/66-function-scoped-structural-folding.md) implements Fold-Entire-Function after elementary exhaustion within the selected function, allowing its existing validated structural reductions while unrelated elementary folds remain elsewhere (`3d54cbb`, scope fix in `96b6fb5`). An internal reduction-type marker and the sidebar button share safe eligibility; caller-owned entrance/exit places remain retained anchors. Full caller-context/session acceptance remains ready for human verification.
 - Unsupported regions still stop with a specific partial/no-progress reason; no new mathematical rule, forced class/penalty, or whole-net completion fallback is introduced. Completed functions retain brown/gold tiles, reversible local unfolding, session continuity, and unchanged unrelated graph/camera state. The [ADR 0003 scope amendment](../../docs/adr/0003-adopt-prom-local-reduction-algorithm.md) and [Phase 2.8 specification](./specs/phase-2.8-viewer-interactive-enhancements.md) record the agreed priority and consumption checks.
-- Each follow-up can start immediately. Tickets 47 and 53 retain their completed elementary-folding contracts; Ticket 66 and Phase 2.7's Ticket 67 are independent.
+- All three follow-ups are implemented. Tickets 47 and 53 retain their completed elementary-folding contracts; Ticket 66 and Phase 2.7's Ticket 67 are independent. Unchecked acceptance criteria remain visible in the tickets rather than being recorded as passed.
 
 ### Delivery and Review
 - All six implementation issues are resolved: [45](./issues/45-viewer-docked-sidebar.md), [46](./issues/46-batch-place-fold-selection.md), [47](./issues/47-fold-entire-function-compound.md), [48](./issues/48-save-session.md), [49](./issues/49-smart-open-session-pnml.md), and [50](./issues/50-info-panel-function-name.md).
@@ -421,20 +435,35 @@ Phase 2.8 extends the self-contained HTML viewer with persistent controls for in
 - The separately tracked [Ticket 53](./issues/53-called-function-fold-boundary-trigger.md) follow-up is also resolved. It enables eligible called-function Choices at shared caller boundaries, rejects mixed-parent bundles, and covers both boundary directions through generated-viewer/headless action regressions.
 - Ticket 53's two review rounds found no blocking standards or specification findings. The implementation report records the Aeroblasters replay acceptance check as passed and the generated-viewer/headless test results in [the Round 02 report](./reviews/phase-2.8-ticket-53-round-02.md).
 
-## Phase 2.9 — Compact and Reliable Fold State Snapshots (Planned)
+## Phase 2.8.1 — Viewer Search and Action History (Implemented; Browser Acceptance Open)
 
-Optimize Save Session while retaining the self-contained offline HTML viewer and version-1 JSON snapshots. The [Phase 2.9 specification](./specs/phase-2.9-session-snapshot-optimization.md) is `ready-for-agent`.
+The standalone [Phase 2.8.1 specification](./specs/phase-2.8.1-viewer-search-and-action-history.md) is the canonical source for the agreed search/history requirements. Phase 2.8 retains a short pointer and its delivered baseline. [ADR 0005](../../docs/adr/0005-session-local-viewer-action-history.md) records session-local history alongside existing Component-Local Unfold.
 
-- Store nested restoration records once under their canonical field before cloning or serialization can duplicate them; keep legacy snapshots readable and preserve complete Component-Local Unfold history.
-- Encode compact JSON with fewer temporary copies, preserving the existing engine/document context, layout, viewport, and non-mutating save behavior.
-- Validate a bounded Blob URL lifecycle for reliable Save Session downloads in Safari, Chrome, and Firefox.
-- Extend save/open round-trip coverage with nested-history size regressions and completed-file browser checks. Workers and compression remain follow-up options after profiling.
+- Search includes current and nested restorable hidden nodes, exact occurrence context, graph-neutral Locate, and explicit Reveal. Preserve unrelated folds/positions and current zoom; center the target. One Reveal is one history action.
+- Undo/Redo covers approved graph edits, keeps current zoom/pan and viewing preferences, and uses exact transactional restoration. Retain at most 50 gestures with a soft approximate 32 MiB data budget, keeping the newest action. Save/Open does not persist the stacks; ordinary nested local-unfold data remains saved.
+- Retain original [68](./issues/68-viewer-action-history-undo-redo.md) and [69](./issues/69-node-search-and-explicit-reveal.md) as the two end-to-end implementation tickets. A five-slice alternative was assessed and withdrawn following the user's preference to avoid splitting when model context is sufficient:
 
-Implementation tickets: [51 — Compact, lossless Fold State Snapshot saves](./issues/51-safari-large-session-download.md) and [52 — Reliable large Save Session downloads across browsers](./issues/52-reliable-save-session-downloads.md). Ticket 52 is blocked by Ticket 51 for end-to-end acceptance with the optimized snapshot.
+| Ticket | Delivers | Blocked by | Status |
+| --- | --- | --- | --- |
+| [68 — Viewer Action History](./issues/68-viewer-action-history-undo-redo.md) | Complete Undo/Redo across approved graph gestures, with controls, transactions, retention, and session boundaries | None | implemented; ready for human browser acceptance |
+| [69 — Node Search and Explicit Reveal](./issues/69-node-search-and-explicit-reveal.md) | Current/restorable-node discovery and Locate, plus exact transactional Reveal as one undoable action | 68 | implemented; ready for human browser acceptance |
 
-## Phase 2.10 — Function Return Metadata (Baseline Implemented; Follow-up Ready)
+Each ticket includes UI, production behavior, and acceptance through the existing generated-viewer/session seam plus relevant real-browser checks. Implementation is complete. The user confirmed Undo/Redo in the browser; final browser acceptance for the toolbar, search navigation, Reveal layout, and remaining interaction details is still open.
 
-Show function return-contract information for both Python and JavaScript while preserving the control-flow net's reduction and metric semantics. The scope combines declarations/documentation with bounded inference, including simple returned local variables and contextual display evidence such as `x: int (inferred)`. It infers container outer types, displays branch-dependent locals as `x: unknown (inference unavailable)`, and distinguishes clearly non-returning bodies from unknown results. Expression, type, analysis state, and provenance are stored separately; notation does not rename variables or define identifiers. Inference describes the expression at its return site, and a written source type named `unknown` remains separate from the analysis status. Declared/inferred evidence appears separately in root info, selected-function compounds, and resolved call transitions; incomplete evidence retains known observations. Async/generator metadata separates the call result, awaited/yielded values, and generator completion. HTML, net JSON, and saved sessions preserve the metadata. The [Phase 2.10 specification](./specs/phase-2.10-function-return-metadata.md) and seven approved implementation tickets are resolved, with acceptance through source generation, viewer inspection, folding, and session restoration.
+## Phase 2.9 — Compact and Reliable Fold State Snapshots (Implemented; Browser Downloads Unverified)
+
+Save Session now uses compact canonical restoration records and independent bounded download lifetimes while retaining the self-contained offline HTML viewer and version-1 snapshots. The [Phase 2.9 specification](./specs/phase-2.9-session-snapshot-optimization.md) records implementation completion and remains `ready-for-human` for browser download acceptance.
+
+- Nested restoration records are stored once under their canonical field before cloning or serialization can duplicate them; legacy snapshots remain readable and Component-Local Unfold history is retained.
+- Compact JSON avoids redundant temporary copies while preserving engine/document context, layout, viewport, and detached non-mutating capture.
+- Each download has an independent 30-second Blob URL grace period, temporary-anchor cleanup, and detectable failure cleanup. The grace period does not establish file completion or prove a Safari/Firefox fix.
+- Automated snapshot/download regressions are recorded in the tickets. Completed-file checks in Safari 18.6, Chrome, and Firefox remain pending; workers and compression remain deferred options after profiling.
+
+Implementation tickets: [51 — Compact, lossless Fold State Snapshot saves](./issues/51-safari-large-session-download.md) is resolved; [52 — Reliable large Save Session downloads across browsers](./issues/52-reliable-save-session-downloads.md) is implemented and ready for human verification. Ticket 51's prerequisite is satisfied.
+
+## Phase 2.10 — Function Return Metadata (Implemented; Built-in Viewer/Session Verification Pending)
+
+Show function return-contract information for both Python and JavaScript while preserving the control-flow net's reduction and metric semantics. The scope combines declarations/documentation with bounded inference, including simple returned local variables and contextual display evidence such as `x: int (inferred)`. It infers container outer types, displays branch-dependent locals as `x: unknown (inference unavailable)`, and distinguishes clearly non-returning bodies from unknown results. Expression, type, analysis state, and provenance are stored separately; notation does not rename variables or define identifiers. Inference describes the expression at its return site, and a written source type named `unknown` remains separate from the analysis status. Declared/inferred evidence appears separately in root info, selected-function compounds, and resolved call transitions; incomplete evidence retains known observations. Async/generator metadata separates the call result, awaited/yielded values, and generator completion. HTML, net JSON, and saved sessions preserve the metadata. Tickets 54–60 and 62 are resolved. The [Phase 2.10 specification](./specs/phase-2.10-function-return-metadata.md) records all nine tickets implemented, with Ticket 65's remaining viewer/session acceptance tracked separately.
 
 | Ticket | Delivers | Blocked by |
 | --- | --- | --- |
@@ -446,18 +475,35 @@ Show function return-contract information for both Python and JavaScript while p
 | [59 — Separate generator objects, yields, and completion](./issues/59-generator-yield-and-completion-results.md) | Generator/async-generator roles and language-specific completion behavior | 57 |
 | [60 — Inspect called functions through folding and restoration](./issues/60-called-function-return-inspection.md) | Resolved Call Site/compound inspection, stable identity, and compact nested restoration | 55 |
 
-Tickets 54–60 and the [Ticket 62 list-inference extension](./issues/62-python-list-return-inference.md) are implemented. Their dependencies and acceptance criteria are recorded in the linked issue files. The initial completed scope was reviewed against the Phase 2.10 specification; the specification now also records the open Ticket 65 follow-up.
+Tickets 54–60, the [Ticket 62 list-inference extension](./issues/62-python-list-return-inference.md), and [Ticket 65](./issues/65-python-builtin-call-result-metadata.md) are implemented. Their dependencies, delivery records, and acceptance criteria are recorded in the linked issue files. Ticket 65 remains ready for human verification, rather than awaiting implementation.
 
 ### Call Result Metadata follow-ups
 
-- **Ready-for-human — Python built-ins first:** [Ticket 65](./issues/65-python-builtin-call-result-metadata.md) covers range, len, str, int, float, bool, list, tuple, dict, and set, including statically identified explicit builtins imports and import aliases. Show each call's result separately from the enclosing function's returned-expression type, reuse trusted evidence through existing local inference, and preserve it offline. Unsupported or uncertain calls remain Unknown with a specific reason. Keep project-source resolution and folding behavior independent; do not execute game code to infer types. Generated-viewer session continuation and local-unfold checks remain to exercise.
+- **Implemented — Python built-ins first:** [Ticket 65](./issues/65-python-builtin-call-result-metadata.md) covers range, len, str, int, float, bool, list, tuple, dict, and set, including statically identified explicit builtins imports and import aliases. Each call's result appears separately from the enclosing function's returned-expression type, with trusted evidence reused through existing local inference. Unsupported or uncertain calls remain Unknown with a specific reason; project-source resolution stays independent. Implementation is in `3d54cbb`, shared validation fixes in `96b6fb5`, and imported-alias rebinding invalidation in `1885e61`. Generated-viewer session continuation, local-unfold, malformed-session preservation, and broader fidelity checks remain ready for human verification.
 - **To-do — Other libraries:** Add reliable result evidence for Python standard-library and third-party-library calls whose definitions are outside the indexed project. Select supported contracts and identity/version rules in a later design; do not guess from function names.
 - **To-do — Other languages:** Extend unavailable-source call-result inspection to JavaScript and later supported languages using their own trusted contracts and binding rules. Existing source-based Function Return Metadata support is unchanged.
 - **To-do — Broader aliases and programmer-defined types:** Design evidence for assignment-created callable aliases/alias chains, project-defined constructor results, and type-alias expansion as a separate follow-up. Existing written custom annotations remain declared evidence. Do not infer a custom return contract from an arbitrary alias or callable name alone.
 
-Recorded 2026-10-13 after the user selected Python built-ins as the first slice, approved simple import aliases and local inference propagation, and requested remaining library/language work be retained in the grand plan. Ticket 65 is published as one complete unblocked slice; the To-do items above remain deferred.
+Scope agreed 2026-10-13; implementation completion confirmed by the user on 2026-10-16. The To-do items above remain deferred and are not made complete by delivery of the agreed catalog.
 
-The separately reported called-function boundary-folding problem is tracked under Phase 2.8 in [Ticket 53](./issues/53-called-function-fold-boundary-trigger.md).
+The separately reported called-function boundary-folding work remains under Phase 2.8: resolved [Ticket 53](./issues/53-called-function-fold-boundary-trigger.md) and implemented [Ticket 66](./issues/66-function-scoped-structural-folding.md).
+
+### Delivery and remaining verification — 2026-10-16
+
+The user confirmed that all tickets current on 2026-10-16 were implemented. The later search/history scope from original Tickets 68–69 now belongs to Phase 2.8.1 and is implemented without further ticket splitting. The user also manually confirmed Undo/Redo; remaining Phase 2.8.1 browser acceptance is open. The [Round 02 review](./reviews/phase-2.10-tickets-65-67-round-02.md) records the Ticket 66 candidate-discovery finding as resolved; its remaining Ticket 65 alias-rebinding finding and Ticket 67 comment-placement finding were addressed in `1885e61`. Existing review reports retain their original findings and comparison points.
+
+| Ticket | Implementation | Recorded acceptance still to exercise |
+| --- | --- | --- |
+| [52](./issues/52-reliable-save-session-downloads.md) | Complete; 51 prerequisite satisfied | Completed small/large/deep downloads and reopening in Safari, Chrome, Firefox; lifecycle evidence and browser versions |
+| [63](./issues/63-info-panel-project-title.md) | Complete | Browser long-title rendering and full generated-viewer post-open interaction sequence |
+| [64](./issues/64-hide-recall-docked-sidebar.md) | Complete | Browser geometry, pointer/keyboard interaction, and complete session round trips |
+| [65](./issues/65-python-builtin-call-result-metadata.md) | Complete, including alias-rebinding fix | Generated-viewer/session continuation, metadata fidelity, source-resolution independence, malformed-input preservation, and local unfolding |
+| [66](./issues/66-function-scoped-structural-folding.md) | Complete, including scoped-candidate fix | Both Dots & Boxes caller contexts, nested-container/weights checks, browser actions, session continuation and unfolding |
+| [67](./issues/67-cycle-nested-compound-colors.md) | Complete | Actual rendered colors/labels, legacy-session and runtime restoration, and history/state preservation |
+| [68](./issues/68-viewer-action-history-undo-redo.md) | Complete; Undo/Redo manually confirmed | Remaining toolbar, focus/shortcut, drag, draft, sidebar, and viewport browser checks |
+| [69](./issues/69-node-search-and-explicit-reveal.md) | Complete | Final dropdown/keyboard navigation, Reveal placement/layout, target centering, and interaction browser checks |
+
+These tickets retain `ready-for-human` and their unchecked acceptance criteria. The final implementation note records 577 tests with one port-binding failure and four existing dependency/legacy errors; no tests were rerun for this documentation update. Broader libraries/languages and future phases remain planned.
 
 ## Phase 3 — C# Support & Unity Lifecycle Modeling
 
@@ -893,10 +939,11 @@ graph TD
 | Phase 2 — Cross-file tracing | 5 tickets (Tickets 11–15) | 6 review rounds | ✅ Complete |
 | Phase 2.5 — Structural folding & viewer | 6 tickets (Tickets 16–21) | 3 review rounds | ✅ Complete |
 | Phase 2.6 — ProM port & compound expansion | 6 tickets (Tickets 22–27) | 4 review rounds | ✅ Complete |
-| Phase 2.7 — Live Fold Reduction & Viewer | 17 tickets (Tickets 29–44, 67) | 12 baseline review rounds; follow-up TBD | Baseline complete; Ticket 67 ready for human |
-| Phase 2.8 — Viewer Interactive Enhancements | 10 tickets (Tickets 45–50, 53, 63–64, 66) | 5 baseline review rounds; follow-ups TBD | Baseline complete; 63–64 and 66 ready for human |
-| Phase 2.9 — Compact and Reliable Fold State Snapshots | 2 tickets (Tickets 51–52) | TBD | Planned Next |
-| Phase 2.10 — Function Return Metadata | 9 tickets (Tickets 54–60, 62, 65) | 1 baseline review round; follow-up TBD | Baseline implemented; Ticket 65 ready for human |
+| Phase 2.7 — Live Fold Reduction & Viewer | 18 tickets (Tickets 29–44, 61, 67) | 12 baseline rounds; 2 shared 65–67 review rounds | Implemented; 67 browser/session acceptance pending |
+| Phase 2.8 — Viewer Interactive Enhancements | 10 tickets (Tickets 45–50, 53, 63–64, 66) | 5 baseline rounds; 2 shared 65–67 review rounds | Implemented; prior acceptance pending |
+| Phase 2.8.1 — Viewer Search & Action History | 2 tickets (68–69) | Implementation checks recorded in tickets | Implemented; browser acceptance pending |
+| Phase 2.9 — Compact and Reliable Fold State Snapshots | 2 tickets (Tickets 51–52) | Implementation checks recorded in tickets | Implemented; 52 browser download acceptance pending |
+| Phase 2.10 — Function Return Metadata | 9 tickets (Tickets 54–60, 62, 65) | 1 baseline round; 2 shared 65–67 review rounds | Implemented; 65 viewer/session acceptance pending |
 | Phase 3 — C# + Unity | 4–5 tickets | 2–3 sessions | Planned |
 | Phase 4 — C++ + Unreal | 5–6 tickets | 3–4 sessions | Planned |
 | Phase 5 — Project-scale | 4–5 tickets | 2–3 sessions | Planned |
@@ -904,4 +951,4 @@ graph TD
 | Phase 6 — CPN (future) | 4–6 tickets | 3–5 sessions | Future |
 | **Grand Total (incl. future)** | **~54–62 tickets** | **~30–38 sessions** | |
 
-The existing total estimates exclude Phases 2.9 and 2.10 and the newly approved Phase 2.7/2.8 follow-ups pending effort updates.
+The existing total estimates are historical planning estimates, not implemented-ticket counts: they exclude Phases 2.8.1, 2.9, and 2.10 and the Phase 2.7/2.8 follow-ups pending effort re-estimation. The shared Tickets 65–67 review rounds above describe the same two reviews, not separate rounds per phase.
