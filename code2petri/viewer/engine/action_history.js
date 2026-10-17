@@ -36,6 +36,11 @@
     const copy = cloneJson(element);
     normalizeRestorationAliases(copy);
     if (copy && Object.prototype.hasOwnProperty.call(copy, 'selected')) delete copy.selected;
+    if (copy && copy.group === 'nodes' && typeof copy.classes === 'string') {
+      copy.classes = copy.classes.split(/\s+/).filter(function(name) {
+        return name && name !== 'search-match' && name !== 'search-active';
+      }).join(' ');
+    }
     return copy;
   }
 
@@ -126,9 +131,12 @@
       this.cy.startBatch();
       try {
         this.cy.elements().remove();
-        const addedNodes = this.cy.add(nodes);
+        // Cytoscape may retain nested references from element definitions. The
+        // reducer mutates live compounds inside retained consumedSubnet data,
+        // so rebuilds must never share objects with detached history entries.
+        const addedNodes = this.cy.add(nodes.map(canonicalElement));
         if (addedNodes.length !== nodes.length) throw new Error('Cytoscape did not restore all graph nodes');
-        const addedEdges = this.cy.add(edges);
+        const addedEdges = this.cy.add(edges.map(canonicalElement));
         if (addedEdges.length !== edges.length) throw new Error('Cytoscape did not restore all graph edges');
         const actual = this.cy.elements().jsons().map(canonicalElement);
         if (actual.length !== elements.length) throw new Error('Graph restoration produced a different element count');

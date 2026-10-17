@@ -34,7 +34,11 @@
        Object.prototype.hasOwnProperty.call(value.data, 'consumedSubgraph'));
     const clone = {};
     Object.keys(value).forEach(function(key) {
-      if (hasRestoration && key === 'data') {
+      if (isNodeRecord && key === 'classes' && typeof value.classes === 'string') {
+        clone.classes = value.classes.split(/\s+/).filter(function(name) {
+          return name && name !== 'search-match' && name !== 'search-active';
+        }).join(' ');
+      } else if (hasRestoration && key === 'data') {
         const data = {};
         Object.keys(value.data).forEach(function(dataKey) {
           if (dataKey === 'consumedSubgraph') return;

@@ -7927,6 +7927,390 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+
+class TestViewerSearch(unittest.TestCase):
+    SEARCH_NET = r"""{
+      places: [
+        { id: 'p_live', label: 'Visible [token]+', initial_tokens: 3 },
+        { id: 'p_end', label: 'end', initial_tokens: 0 }
+      ],
+      transitions: [
+        { id: 't_C_outer_a', label: 'Folded outer A', metadata: { opaque: true, tau: 12, component_type: 'Sequence' } },
+        { id: 't_C_outer_b', label: 'Folded outer B', metadata: { opaque: true, tau: 7, component_type: 'Sequence' } },
+        { id: 't_C_tile_call', label: 'Shared Call', parent: 'compound_tile', metadata: { opaque: true, tau: 4, component_type: 'Sequence' } },
+        { id: 't_C_off_path', label: 'Off path', metadata: { opaque: true, tau: 5, component_type: 'Sequence' } }
+      ],
+      compounds: [
+        { id: 'compound_tile', label: 'Shared Call (c_1)', function_name: 'shared_call' }
+      ],
+      arcs: [
+        { id: 'e_outer_in', source: 'p_live', target: 't_C_outer_a', weight: 1 },
+        { id: 'e_outer_out', source: 't_C_outer_a', target: 'p_end', weight: 1 }
+      ]
+    }"""
+
+    SEARCH_SETUP_JS = r"""
+function element(group, id, label, classes, data) {
+  return {
+    group,
+    data: Object.assign({ id, label }, data || {}),
+    classes: classes || ''
+  };
+}
+function restoration(nodes, compounds) {
+  return {
+    componentType: 'Sequence', omega: 1, tau: 2,
+    nodes: nodes || [], consumedCompounds: compounds || [],
+    internalEdges: [], boundaryInArcs: [], boundaryOutArcs: []
+  };
+}
+function arcRecord(edgeId, sourceId, targetId, originalSourceId, originalTargetId) {
+  return {
+    edgeId, sourceId, targetId, originalSourceId, originalTargetId,
+    weight: 1, classes: 'arc', data: { id: edgeId, source: sourceId, target: targetId, weight: 1 }
+  };
+}
+const nestedCompound = element('nodes', 'compound_hidden', 'worker A()', 'compound', {
+  function_name: 'worker A', file: 'worker.py'
+});
+const deepTarget = element('nodes', 't_target_deep', 'Needle+[x]', 'transition', {
+  raw_label: 'needle+[x]', type: 'Transition', line_number: 44,
+  source_line: 44, enclosing_function: 'worker A'
+});
+const innerOwner = element('nodes', 't_C_inner_a', 'inner invoke worker A', 'transition opaque component', {
+  raw_label: 'invoke worker A', type: 'Opaque Transition', is_opaque: true,
+  tau: 6, component_type: 'Sequence', parent: 'compound_hidden'
+});
+innerOwner.data.consumedSubnet = Object.assign(restoration([deepTarget]), {
+  boundaryInArcs: [arcRecord('e_outer_in', 'p_live', 't_C_inner_a', null, 't_target_deep')],
+  boundaryOutArcs: [arcRecord('e_outer_out', 't_C_inner_a', 'p_end', 't_target_deep', null)]
+});
+const shallowTarget = element('nodes', 'p_target_shallow', 'Shallow Needle+[x]', 'place', {
+  raw_label: 'Shallow Needle+[x]', custom_name: 'Special Alias +', type: 'Place', initial_tokens: 2, tokens: 2
+});
+const otherTarget = element('nodes', 'p_target_other', 'NEEDLE+[X]', 'place', {
+  raw_label: 'NEEDLE+[X]', type: 'Place', initial_tokens: 0, tokens: 0, source_line: 71
+});
+const tileInterior = element('nodes', 'p_inside_tile', 'Tile interior', 'place', { raw_label: 'Tile interior' });
+const offPathInterior = element('nodes', 'p_off_path_interior', 'Off path interior', 'place', { raw_label: 'Off path interior' });
+
+cy.getElementById('t_C_outer_a').data({
+  is_opaque: true,
+  consumedSubnet: Object.assign(restoration([innerOwner, shallowTarget], [nestedCompound]), {
+    boundaryInArcs: [arcRecord('e_outer_in', 'p_live', 't_C_outer_a', null, 't_C_inner_a')],
+    boundaryOutArcs: [arcRecord('e_outer_out', 't_C_outer_a', 'p_end', 't_C_inner_a', null)]
+  })
+});
+// The live engine emits two aliases for some folds; search must choose one record.
+cy.getElementById('t_C_outer_a').data('consumedSubgraph', cy.getElementById('t_C_outer_a').data('consumedSubnet'));
+cy.getElementById('t_C_outer_b').data({
+  is_opaque: true,
+  consumedSubgraph: restoration([otherTarget])
+});
+cy.getElementById('t_C_tile_call').data({
+  is_opaque: true,
+  is_collapsed_child: true,
+  original_label: 'Shared Call',
+  consumedSubnet: restoration([tileInterior])
+});
+cy.getElementById('t_C_tile_call').addClass('collapsed-child');
+cy.getElementById('compound_tile').addClass('collapsed-compound');
+cy.getElementById('compound_tile').data({
+  is_collapsed_compound: true,
+  collapsed_opaque_id: 't_C_tile_call',
+  collapsed_label: 'Shared Call (c_1)'
+});
+cy.getElementById('t_C_outer_a').position({ x: 100, y: 100 });
+cy.getElementById('t_C_outer_b').position({ x: 450, y: 100 });
+cy.getElementById('t_C_off_path').position({ x: 800, y: 300 });
+cy.getElementById('p_live').select();
+"""
+
+    def test_search_finds_current_and_nested_occurrences_and_locates_without_graph_edits(self):
+        generated_html = generate_html(PetriNet(), title="Search acceptance")
+        self.assertTrue("class ViewerGraphSearch" in generated_html, "generated viewer must embed production search controller")
+
+        test_logic = self.SEARCH_SETUP_JS + r"""
+const { ViewerGraphSearch } = require('./code2petri/viewer/engine/graph_search.js');
+const search = new ViewerGraphSearch({ cy, engine: foldEngine });
+const snapshot = require('./code2petri/viewer/engine/session_snapshot.js');
+const queryMatches = search.findMatches('needle+[x]');
+if (queryMatches.length !== 3) throw new Error('literal substring search should find the visible and two hidden matching occurrences');
+const hiddenDeep = queryMatches.find(item => item.nodeId === 't_target_deep');
+const hiddenOther = queryMatches.find(item => item.nodeId === 'p_target_other');
+const visibleShallow = queryMatches.find(item => item.nodeId === 'p_target_shallow');
+if (!hiddenDeep || JSON.stringify(hiddenDeep.ownerPath) !== JSON.stringify(['t_C_outer_a', 't_C_inner_a'])) {
+  throw new Error('nested result must retain its exact outer-to-inner restoration owners');
+}
+if (!hiddenOther || JSON.stringify(hiddenOther.ownerPath) !== JSON.stringify(['t_C_outer_b'])) {
+  throw new Error('legacy-only restoration alias should be searchable once under its actual owner');
+}
+if (!visibleShallow || visibleShallow.visible !== false || hiddenDeep.sourceLocation.line !== 44) {
+  throw new Error('restorable transition metadata and hidden status should be retained');
+}
+if (!search.findMatches('worker A').some(item => item.nodeId === 'compound_hidden')) {
+  throw new Error('restorable function compounds should be searchable by their stored function name');
+}
+if (!search.findMatches('SPECIAL ALIAS +').some(item => item.nodeId === 'p_target_shallow')) {
+  throw new Error('custom names should match literally without case sensitivity');
+}
+if (!search.findMatches('p_target_shallow').some(item => item.nodeId === 'p_target_shallow')) {
+  throw new Error('node IDs should be searchable');
+}
+if (!search.findMatches('shared_call').some(item => item.nodeId === 'compound_tile')) {
+  throw new Error('function names stored on visible function compounds should be searchable');
+}
+const tileMatch = search.findMatches('t_C_tile_call')[0];
+if (!tileMatch || !tileMatch.visible || tileMatch.visibleNodeId !== 'compound_tile' || tileMatch.canReveal) {
+  throw new Error('collapsed opaque child IDs should locate their visible tile without offering destructive Reveal');
+}
+const before = snapshot.serializeFoldStateSnapshot({
+  cy, engine: foldEngine,
+  document: {
+    title: 'Search acceptance', sourceFile: '', filename: 'search.html', functionName: 'main',
+    mode: 'no-fold', originalNet: { places: [], transitions: [], arcs: [], compounds: [] },
+    compounds: [], foldSteps: [], calleeNets: {}, expandedNodes: [],
+    playback: { currentStep: 0, totalSteps: 0 }
+  }
+});
+const zoomBeforeLocate = 1.35;
+cy.viewport({ zoom: zoomBeforeLocate, pan: { x: 21, y: -17 } });
+const selectionBefore = cy.nodes(':selected').map(node => node.id());
+const locateResult = search.locate(hiddenDeep.occurrenceId);
+if (!locateResult.success || locateResult.visibleNodeId !== 't_C_outer_a') throw new Error('Locate should center the nearest visible restoration owner');
+if (cy.zoom() !== zoomBeforeLocate) throw new Error('Locate must retain current zoom');
+if (JSON.stringify(cy.nodes(':selected').map(node => node.id())) !== JSON.stringify(selectionBefore)) {
+  throw new Error('Locate must not change graph selection');
+}
+if (!cy.getElementById('t_C_outer_a').hasClass('search-active')) throw new Error('Locate should use its separate highlight class');
+const { ViewerActionHistory: HistoryForSearch } = require('./code2petri/viewer/engine/action_history.js');
+const transientHistory = new HistoryForSearch({ cy });
+const historicalClasses = transientHistory._capture().elements.map(item => item.classes || '').join(' ');
+if (/search-(?:match|active)/.test(historicalClasses)) throw new Error('search highlights must stay out of action history graph state');
+const after = snapshot.serializeFoldStateSnapshot({
+  cy, engine: foldEngine,
+  document: {
+    title: 'Search acceptance', sourceFile: '', filename: 'search.html', functionName: 'main',
+    mode: 'no-fold', originalNet: { places: [], transitions: [], arcs: [], compounds: [] },
+    compounds: [], foldSteps: [], calleeNets: {}, expandedNodes: [],
+    playback: { currentStep: 0, totalSteps: 0 }
+  }
+});
+const persistedClasses = after.elements.map(item => item.classes || '').join(' ');
+if (/search-(?:match|active)/.test(persistedClasses)) throw new Error('Save Session must omit transient search highlights');
+function graphWithoutSearchClasses(elements) {
+  return elements.map(item => {
+    const copy = JSON.parse(JSON.stringify(item));
+    copy.classes = String(copy.classes || '').split(/\s+/).filter(name => name !== 'search-match' && name !== 'search-active').join(' ');
+    return copy;
+  }).sort((a, b) => a.data.id.localeCompare(b.data.id));
+}
+if (JSON.stringify(graphWithoutSearchClasses(before.elements)) !== JSON.stringify(graphWithoutSearchClasses(after.elements))) {
+  throw new Error('Locate must not mutate the graph or retained restoration state');
+}
+if (!snapshot.parseFoldStateSnapshot(JSON.stringify(after))) throw new Error('the current graph should remain a valid session snapshot');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(self.SEARCH_NET, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Node search acceptance failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_reveal_is_one_exact_reversible_action_and_rolls_back_mid_chain_failures(self):
+        test_logic = self.SEARCH_SETUP_JS + r"""
+const { ViewerGraphSearch } = require('./code2petri/viewer/engine/graph_search.js');
+const { ViewerActionHistory: TestActionHistory } = require('./code2petri/viewer/engine/action_history.js');
+const snapshot = require('./code2petri/viewer/engine/session_snapshot.js');
+const search = new ViewerGraphSearch({ cy, engine: foldEngine });
+const query = 'needle+[x]';
+function documentContext() {
+  return {
+    title: 'Reveal acceptance', sourceFile: '', filename: 'reveal.html', functionName: 'main',
+    mode: 'no-fold', originalNet: { places: [], transitions: [], arcs: [], compounds: [] },
+    compounds: [], foldSteps: [], calleeNets: {}, expandedNodes: [],
+    playback: { currentStep: 0, totalSteps: 0 }
+  };
+}
+function graphState() {
+  return snapshot.serializeFoldStateSnapshot({ cy, engine: foldEngine, document: documentContext() }).elements
+    .map(item => {
+      const copy = JSON.parse(JSON.stringify(item));
+      copy.classes = String(copy.classes || '').split(/\s+/).filter(name => name !== 'search-match' && name !== 'search-active').join(' ');
+      return copy;
+    })
+    .sort((a, b) => a.data.id.localeCompare(b.data.id));
+}
+function refreshSearch() {
+  const current = search.findMatches(query);
+  const active = current.find(item => item.nodeId === 't_target_deep');
+  search.applyHighlights(current, active ? active.occurrenceId : null);
+}
+const history = new TestActionHistory({
+  cy,
+  captureContext: () => ({
+    stepCounter: foldEngine.stepCounter,
+    cfg: foldEngine.cfg,
+    rememberedCustomNames: Array.from(foldEngine.rememberedCustomNames.entries())
+  }),
+  restoreContext: state => {
+    foldEngine.stepCounter = state.stepCounter;
+    foldEngine.cfg = state.cfg;
+    foldEngine.rememberedCustomNames = new Map(state.rememberedCustomNames);
+  },
+  captureUi: () => ({ selectionIds: cy.nodes(':selected').map(node => node.id()) }),
+  restoreUi: state => {
+    cy.nodes(':selected').unselect();
+    (state.selectionIds || []).forEach(id => {
+      const node = cy.getElementById(id);
+      if (node.length) node.select();
+    });
+  },
+  afterRestore: refreshSearch
+});
+const before = graphState();
+const beforeSm = foldEngine.calculateSMScore();
+const nestedMatch = search.findMatches(query).find(item => item.nodeId === 't_target_deep');
+if (!nestedMatch) throw new Error('fixture must contain the nested target occurrence');
+cy.viewport({ zoom: 1.6, pan: { x: 10, y: 20 } });
+const locate = search.locate(nestedMatch.occurrenceId);
+if (!locate.success || locate.visibleNodeId !== 't_C_outer_a') throw new Error('hidden result should Locate its outer visible owner');
+const reveal = history.perform('Reveal search result', () => search.reveal(nestedMatch.occurrenceId));
+if (!reveal.success || reveal.nodeId !== 't_target_deep') throw new Error('Reveal should restore the exact nested occurrence');
+if (history.undoStack.length !== 1 || history.redoStack.length !== 0) throw new Error('the entire multi-level Reveal must be one history entry');
+if (cy.getElementById('t_C_outer_a').length || cy.getElementById('t_C_inner_a').length) throw new Error('only the containing owner chain should unfold');
+if (!cy.getElementById('t_C_outer_b').length || !cy.getElementById('t_C_off_path').length) throw new Error('off-path folded components must remain folded');
+if (JSON.stringify(cy.getElementById('t_C_off_path').position()) !== JSON.stringify({ x: 800, y: 300 })) {
+  throw new Error('Reveal must preserve unrelated node positions');
+}
+const revealedMatch = search.findMatches(query).find(item => item.nodeId === 't_target_deep');
+if (!revealedMatch || !revealedMatch.visible || revealedMatch.ownerPath.length !== 0) throw new Error('the exact target should now be visible in the live graph');
+if (cy.zoom() !== 1.6) throw new Error('Reveal navigation must retain the current zoom');
+if (cy.getElementById('e_outer_in').source().id() !== 'p_live' || cy.getElementById('e_outer_in').target().id() !== 't_target_deep') {
+  throw new Error('nested boundary input arc should be restored to the exact target');
+}
+if (cy.getElementById('e_outer_out').source().id() !== 't_target_deep' || cy.getElementById('e_outer_out').target().id() !== 'p_end') {
+  throw new Error('nested boundary output arc should be restored from the exact target');
+}
+if (cy.getElementById('p_target_shallow').data('tokens') !== 2) throw new Error('neighbor tokens should be restored with the immediate subnet');
+if (Math.abs(foldEngine.calculateSMScore() - (beforeSm - 12 + 1)) > 1e-6) {
+  throw new Error('SM should reflect the opened outer component and visible transition');
+}
+const after = graphState();
+const saved = snapshot.serializeFoldStateSnapshot({ cy, engine: foldEngine, document: documentContext() });
+const reopened = snapshot.parseFoldStateSnapshot(JSON.stringify(saved));
+if (!reopened.elements.some(item => item.group === 'nodes' && item.data.id === 't_target_deep')) {
+  throw new Error('Save Session should retain the revealed current graph');
+}
+function expectGraph(expected, name) {
+  const actual = graphState();
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) throw new Error(name + ' should restore the exact graph and restoration records');
+}
+cy.viewport({ zoom: 2.15, pan: { x: -71, y: 43 } });
+const userCamera = { zoom: cy.zoom(), pan: cy.pan() };
+if (!history.undo()) throw new Error('one Undo should reverse the complete Reveal');
+expectGraph(before, 'Undo');
+const hiddenAgain = search.findMatches(query).find(item => item.nodeId === 't_target_deep');
+if (!cy.getElementById('t_C_outer_a').length || !hiddenAgain || JSON.stringify(hiddenAgain.ownerPath) !== JSON.stringify(['t_C_outer_a', 't_C_inner_a'])) {
+  throw new Error('Undo should reinstate the complete nested restoration path');
+}
+if (cy.zoom() !== userCamera.zoom || JSON.stringify(cy.pan()) !== JSON.stringify(userCamera.pan)) throw new Error('Undo should retain subsequent camera navigation');
+cy.viewport({ zoom: 1.9, pan: { x: 27, y: -36 } });
+const redoCamera = { zoom: cy.zoom(), pan: cy.pan() };
+if (!history.redo()) throw new Error('one Redo should restore the exact Reveal');
+expectGraph(after, 'Redo');
+if (cy.zoom() !== redoCamera.zoom || JSON.stringify(cy.pan()) !== JSON.stringify(redoCamera.pan)) throw new Error('Redo should retain subsequent camera navigation');
+if (!history.undo()) throw new Error('fixture should return to the pre-Reveal state for rollback acceptance');
+expectGraph(before, 'second Undo');
+const failureMatch = search.findMatches(query).find(item => item.nodeId === 't_target_deep');
+const originalUnfold = foldEngine._unfoldSingleOpaqueTransition;
+foldEngine._unfoldSingleOpaqueTransition = function(owner) {
+  const result = originalUnfold.call(this, owner);
+  return owner.id() === 't_C_inner_a' ? null : result;
+};
+let failureRaised = false;
+try {
+  history.perform('Failed Reveal', () => search.reveal(failureMatch.occurrenceId));
+} catch (error) {
+  failureRaised = /Failed to restore Folded Component/.test(error.message);
+} finally {
+  foldEngine._unfoldSingleOpaqueTransition = originalUnfold;
+}
+if (!failureRaised) throw new Error('an injected second-owner restore failure should be reported');
+expectGraph(before, 'failed Reveal rollback');
+if (history.undoStack.length !== 0 || history.redoStack.length !== 1) throw new Error('failed Reveal must preserve the existing Redo branch and history position');
+if (!history.redo()) throw new Error('the preserved Redo branch should still work after a failed Reveal');
+expectGraph(after, 'Redo after failure');
+if (!history.undo()) throw new Error('fixture should undo before boundary-arc failure acceptance');
+const originalArcUnfold = foldEngine._unfoldSingleOpaqueTransition;
+foldEngine._unfoldSingleOpaqueTransition = function(owner) {
+  const result = originalArcUnfold.call(this, owner);
+  if (result && owner.id() === 't_C_inner_a') {
+    const silentlySkippedArc = cy.getElementById('e_outer_in');
+    if (silentlySkippedArc.length) silentlySkippedArc.remove();
+  }
+  return result;
+};
+let boundaryFailureRaised = false;
+try {
+  history.perform('Reveal missing boundary arc', () => search.reveal(failureMatch.occurrenceId));
+} catch (error) {
+  boundaryFailureRaised = /could not reconnect boundary arc e_outer_in/.test(error.message);
+} finally {
+  foldEngine._unfoldSingleOpaqueTransition = originalArcUnfold;
+}
+if (!boundaryFailureRaised) throw new Error('a silently skipped boundary arc must fail Reveal validation');
+expectGraph(before, 'missing boundary arc rollback');
+if (history.undoStack.length !== 0 || history.redoStack.length !== 1) throw new Error('missing boundary arc failure must preserve history position');
+if (!history.redo()) throw new Error('the pre-existing Redo branch must survive missing boundary arc failure');
+expectGraph(after, 'Redo after boundary arc failure');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(self.SEARCH_NET, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Node Reveal acceptance failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_stale_occurrence_does_not_switch_to_another_matching_owner(self):
+        test_logic = self.SEARCH_SETUP_JS + r"""
+const { ViewerGraphSearch } = require('./code2petri/viewer/engine/graph_search.js');
+const search = new ViewerGraphSearch({ cy, engine: foldEngine });
+const stale = search.findMatches('needle+[x]').find(item => item.nodeId === 't_target_deep');
+if (!stale) throw new Error('fixture must contain the exact nested result');
+const outerOwner = cy.getElementById('t_C_outer_a');
+outerOwner.removeData('consumedSubnet');
+outerOwner.removeData('consumedSubgraph');
+if (search.resolveOccurrence(stale.occurrenceId)) throw new Error('a stale occurrence must not resolve through a missing owner path');
+const otherOwnerMatch = search.findMatches('needle+[x]').find(item => item.nodeId === 'p_target_other');
+if (!otherOwnerMatch) throw new Error('the same-named result under another owner remains available');
+const locate = search.locate(stale.occurrenceId);
+if (locate.success || !/no longer available/.test(locate.reason)) throw new Error('Locate should report the stale exact occurrence');
+let revealMessage = '';
+try { search.reveal(stale.occurrenceId); } catch (error) { revealMessage = error.message; }
+if (!/stale/.test(revealMessage)) throw new Error('Reveal should report a stale exact occurrence without substituting another owner');
+if (cy.getElementById('t_C_outer_b').length === 0) throw new Error('stale lookup must not unfold the other matching owner');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(self.SEARCH_NET, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Node stale-result acceptance failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_generated_viewer_wires_search_controls_keyboard_and_session_lifecycle(self):
+        generated_html = generate_html(PetriNet(), title="Search toolbar")
+        expected_contract = [
+            'id="viewer-search-input"',
+            'id="viewer-search-results"',
+            'id="viewer-search-status"',
+            'aria-label="Search current graph and folded components"',
+            "event.key === 'ArrowDown'",
+            "event.key === 'ArrowUp'",
+            "event.key === 'Escape'",
+            "performViewerAction('Reveal search result'",
+            'clearViewerSearch',
+            'refreshViewerSearch'
+        ]
+        for contract in expected_contract:
+            self.assertIn(contract, generated_html, f"generated viewer is missing search contract {contract!r}")
+
+
+class TestViewportRestoreModule(unittest.TestCase):
     def test_viewport_engine_attachment(self):
         """Verifies that viewport.js attaches to LiveFoldReductionEngine.viewport when engine is loaded."""
         script = """

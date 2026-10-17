@@ -55,6 +55,131 @@
       align-items: center;
       gap: 8px;
     }
+    #viewer-search-controls {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    #viewer-search-input {
+      width: min(250px, 24vw);
+      min-width: 150px;
+      padding: 6px 9px;
+      border: 1px solid #6c757d;
+      border-radius: 4px;
+      background: #ffffff;
+      color: #212529;
+      font: inherit;
+      font-size: 13px;
+    }
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+    #viewer-search-input:focus-visible,
+    .search-result-option:focus-visible,
+    .search-result-reveal:focus-visible {
+      outline: 2px solid #58a6ff;
+      outline-offset: 2px;
+    }
+    #viewer-search-dropdown {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      width: min(430px, calc(100vw - 32px));
+      max-height: min(65vh, 520px);
+      display: flex;
+      flex-direction: column;
+      background: #ffffff;
+      color: #212529;
+      border: 1px solid #c8d0d8;
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+      z-index: 30;
+    }
+    #viewer-search-dropdown[hidden] { display: none; }
+    #viewer-search-status {
+      padding: 9px 11px;
+      color: #57606a;
+      font-size: 12px;
+      border-bottom: 1px solid #eaeef2;
+    }
+    #viewer-search-results {
+      overflow-y: auto;
+      padding: 4px;
+    }
+    .viewer-search-result-row {
+      display: flex;
+      align-items: stretch;
+      gap: 4px;
+      margin: 2px 0;
+    }
+    .search-result-option,
+    .search-result-reveal {
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: #212529;
+      cursor: pointer;
+      text-align: left;
+      font: inherit;
+    }
+    .search-result-option {
+      flex: 1;
+      min-width: 0;
+      padding: 7px 8px;
+    }
+    .search-result-option[aria-selected="true"] { background: #eaf3ff; }
+    .search-result-option:hover,
+    .search-result-reveal:hover { background: #f1f5f9; }
+    .search-result-label {
+      display: block;
+      overflow: hidden;
+      font-size: 13px;
+      font-weight: 600;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .search-result-detail {
+      display: block;
+      margin-top: 2px;
+      overflow: hidden;
+      color: #57606a;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .search-result-reveal {
+      align-self: center;
+      padding: 6px 8px;
+      color: #0550ae;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .viewer-search-pagination {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 9px;
+      border-top: 1px solid #eaeef2;
+      color: #57606a;
+      font-size: 11px;
+    }
+    .viewer-search-pagination button {
+      border: 0;
+      background: transparent;
+      color: #0550ae;
+      cursor: pointer;
+      padding: 4px 7px;
+    }
+    .viewer-search-pagination button:disabled { color: #8c959f; cursor: default; }
     .btn {
       background-color: #343a40;
       color: #ffffff;
@@ -428,6 +553,22 @@
     </div>
 
     <div class="toolbar" id="viewer-toolbar">
+      <div id="viewer-search-controls">
+        <label for="viewer-search-input" class="visually-hidden">Search current graph and folded components</label>
+        <input id="viewer-search-input" type="search" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" autocomplete="off"
+          aria-label="Search current graph and folded components"
+          aria-controls="viewer-search-results" aria-expanded="false" placeholder="Search graph…" />
+        <button class="btn" id="viewer-search-clear" type="button" aria-label="Clear graph search" title="Clear search">Clear</button>
+        <div id="viewer-search-dropdown" hidden>
+          <div id="viewer-search-status" role="status" aria-live="polite">Type to search current nodes and folded components.</div>
+          <div id="viewer-search-results" role="listbox" aria-label="Graph search results"></div>
+          <div class="viewer-search-pagination">
+            <button id="viewer-search-previous" type="button" aria-label="Previous search results page">Previous</button>
+            <span id="viewer-search-page-label">0 results</span>
+            <button id="viewer-search-next" type="button" aria-label="Next search results page">More</button>
+          </div>
+        </div>
+      </div>
       <div class="controls" id="action-history-controls" aria-label="Viewer action history">
         <button class="btn" id="btn-undo" type="button" title="Undo the last graph edit" aria-label="Undo" disabled>Undo</button>
         <button class="btn" id="btn-redo" type="button" title="Redo the last undone graph edit" aria-label="Redo" disabled>Redo</button>
@@ -1567,6 +1708,22 @@
             }
           },
           {
+            selector: 'node.search-match',
+            style: {
+              'underlay-color': '#58a6ff',
+              'underlay-opacity': 0.52,
+              'underlay-padding': 8
+            }
+          },
+          {
+            selector: 'node.search-active',
+            style: {
+              'underlay-color': '#d29922',
+              'underlay-opacity': 0.88,
+              'underlay-padding': 11
+            }
+          },
+          {
             selector: 'edge.arc',
             style: {
               'curve-style': 'bezier',
@@ -2343,6 +2500,270 @@
       const valSm = document.getElementById('val-sm');
       const infoTitle = document.getElementById('info-step-title');
       const infoDesc = document.getElementById('info-step-desc');
+      const viewerSearchInput = document.getElementById('viewer-search-input');
+      const viewerSearchClear = document.getElementById('viewer-search-clear');
+      const viewerSearchDropdown = document.getElementById('viewer-search-dropdown');
+      const viewerSearchResults = document.getElementById('viewer-search-results');
+      const viewerSearchStatus = document.getElementById('viewer-search-status');
+      const viewerSearchPrevious = document.getElementById('viewer-search-previous');
+      const viewerSearchNext = document.getElementById('viewer-search-next');
+      const viewerSearchPageLabel = document.getElementById('viewer-search-page-label');
+      const VIEWER_SEARCH_PAGE_SIZE = 40;
+      const viewerGraphSearch = new ViewerGraphSearch({ cy: cy, engine: foldEngine });
+      let viewerSearchMatches = [];
+      let viewerSearchActiveId = null;
+      let viewerSearchPage = 0;
+      let viewerSearchOpen = false;
+      let viewerSearchFocusSuppressed = false;
+      let viewerSearchMessage = '';
+
+      function setViewerSearchOpen(open) {
+        viewerSearchOpen = Boolean(open);
+        if (viewerSearchDropdown) viewerSearchDropdown.hidden = !viewerSearchOpen;
+        if (viewerSearchInput) viewerSearchInput.setAttribute('aria-expanded', viewerSearchOpen ? 'true' : 'false');
+      }
+
+      function setViewerSearchMessage(message) {
+        viewerSearchMessage = String(message || '');
+        renderViewerSearchResults();
+      }
+
+      function renderViewerSearchResults() {
+        if (!viewerSearchResults) return;
+        viewerSearchResults.replaceChildren();
+        const query = viewerSearchInput ? viewerSearchInput.value : '';
+        const pageCount = Math.max(1, Math.ceil(viewerSearchMatches.length / VIEWER_SEARCH_PAGE_SIZE));
+        viewerSearchPage = Math.max(0, Math.min(viewerSearchPage, pageCount - 1));
+        const start = viewerSearchPage * VIEWER_SEARCH_PAGE_SIZE;
+        const pageMatches = viewerSearchMatches.slice(start, start + VIEWER_SEARCH_PAGE_SIZE);
+        pageMatches.forEach(function(match, pageIndex) {
+          const resultIndex = start + pageIndex;
+          const row = document.createElement('div');
+          row.className = 'viewer-search-result-row';
+
+          const locateButton = document.createElement('button');
+          locateButton.type = 'button';
+          locateButton.className = 'search-result-option';
+          locateButton.id = 'viewer-search-result-' + resultIndex;
+          locateButton.setAttribute('role', 'option');
+          locateButton.setAttribute('aria-selected', match.occurrenceId === viewerSearchActiveId ? 'true' : 'false');
+          locateButton.setAttribute('aria-label', 'Locate ' + match.label + ', node ID ' + match.nodeId);
+          const label = document.createElement('span');
+          label.className = 'search-result-label';
+          label.textContent = match.label;
+          const detail = document.createElement('span');
+          detail.className = 'search-result-detail';
+          const pathText = match.ownerPath.length
+            ? 'Hidden in ' + (match.contextPath.length ? match.contextPath.join(' › ') : match.ownerPath.join(' › '))
+            : 'Current graph';
+          const locationParts = [];
+          if (match.sourceLocation && match.sourceLocation.file) locationParts.push(match.sourceLocation.file);
+          if (match.sourceLocation && match.sourceLocation.line !== null) {
+            locationParts.push('line ' + match.sourceLocation.line);
+          }
+          const fullDetail = pathText +
+            (locationParts.length ? ' · ' + locationParts.join(', ') : '') +
+            ' · ID ' + match.nodeId + ' · occurrence ' + match.occurrenceId;
+          detail.textContent = fullDetail;
+          detail.title = fullDetail;
+          locateButton.appendChild(label);
+          locateButton.appendChild(detail);
+          locateButton.addEventListener('click', function() {
+            viewerSearchActiveId = match.occurrenceId;
+            viewerGraphSearch.applyHighlights(viewerSearchMatches, viewerSearchActiveId);
+            viewerSearchPage = Math.floor(resultIndex / VIEWER_SEARCH_PAGE_SIZE);
+            renderViewerSearchResults();
+            const result = viewerGraphSearch.locate(match.occurrenceId);
+            if (result.success) {
+              setViewerSearchMessage('Located ' + match.label + ' in the current graph.');
+            } else {
+              setViewerSearchMessage(result.reason);
+            }
+          });
+          row.appendChild(locateButton);
+
+          if (!match.visible && match.canReveal) {
+            const revealButton = document.createElement('button');
+            revealButton.type = 'button';
+            revealButton.className = 'search-result-reveal';
+            revealButton.textContent = 'Reveal';
+            revealButton.setAttribute('aria-label', 'Reveal ' + match.label + ' in the graph');
+            revealButton.addEventListener('click', function(event) {
+              if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
+              try {
+                const current = viewerGraphSearch.resolveOccurrence(match.occurrenceId);
+                if (!current) throw new Error('This search result is no longer available in the current graph.');
+                if (viewerSearchInput) viewerSearchInput.value = query;
+                viewerSearchActiveId = current.occurrenceId;
+                viewerSearchMessage = '';
+                const result = performViewerAction('Reveal search result', function() {
+                  return viewerGraphSearch.reveal(current.occurrenceId);
+                });
+                if (!result || !result.success) throw new Error('Could not reveal this search result.');
+                const nowVisible = viewerGraphSearch.resolveOccurrence(JSON.stringify([[], result.nodeId]));
+                if (nowVisible) {
+                  viewerSearchActiveId = nowVisible.occurrenceId;
+                  viewerGraphSearch.applyHighlights(viewerSearchMatches, viewerSearchActiveId);
+                  renderViewerSearchResults();
+                }
+                setViewerSearchMessage('Revealed ' + (nowVisible ? nowVisible.label : match.label) + '.');
+              } catch (error) {
+                refreshViewerSearch({ preserveActive: true, defaultFirst: false });
+                setViewerSearchMessage(error && error.message ? error.message : 'Could not reveal this search result.');
+              }
+            });
+            row.appendChild(revealButton);
+          }
+          viewerSearchResults.appendChild(row);
+        });
+
+        if (viewerSearchStatus) {
+          if (viewerSearchMessage) viewerSearchStatus.textContent = viewerSearchMessage;
+          else if (!query) viewerSearchStatus.textContent = 'Type to search current nodes and folded components.';
+          else if (viewerSearchMatches.length === 0) viewerSearchStatus.textContent = 'No matches for “' + query + '”.';
+          else viewerSearchStatus.textContent = viewerSearchMatches.length + ' result' +
+            (viewerSearchMatches.length === 1 ? '' : 's') + ' in the current graph and folded components.';
+        }
+        if (viewerSearchPageLabel) {
+          viewerSearchPageLabel.textContent = viewerSearchMatches.length
+            ? (start + 1) + '–' + Math.min(start + VIEWER_SEARCH_PAGE_SIZE, viewerSearchMatches.length) +
+              ' of ' + viewerSearchMatches.length
+            : '0 results';
+        }
+        if (viewerSearchPrevious) viewerSearchPrevious.disabled = viewerSearchPage <= 0;
+        if (viewerSearchNext) viewerSearchNext.disabled = viewerSearchPage >= pageCount - 1;
+        if (viewerSearchClear) viewerSearchClear.disabled = !query;
+        if (viewerSearchInput) {
+          const activeIndex = viewerSearchMatches.findIndex(function(item) { return item.occurrenceId === viewerSearchActiveId; });
+          if (activeIndex >= start && activeIndex < start + pageMatches.length) {
+            viewerSearchInput.setAttribute('aria-activedescendant', 'viewer-search-result-' + activeIndex);
+          } else {
+            viewerSearchInput.removeAttribute('aria-activedescendant');
+          }
+        }
+      }
+
+      function refreshViewerSearch(options) {
+        const opts = options || {};
+        const oldActive = viewerSearchMatches.find(function(item) { return item.occurrenceId === viewerSearchActiveId; }) || null;
+        const oldActiveIdCount = oldActive
+          ? viewerSearchMatches.filter(function(item) { return item.nodeId === oldActive.nodeId; }).length
+          : 0;
+        const query = viewerSearchInput ? viewerSearchInput.value : '';
+        viewerSearchMatches = query ? viewerGraphSearch.findMatches(query) : [];
+        let active = null;
+        if (opts.preserveActive && oldActive) {
+          active = viewerSearchMatches.find(function(item) { return item.occurrenceId === oldActive.occurrenceId; }) ||
+            (oldActiveIdCount === 1 && viewerSearchMatches.filter(function(item) { return item.nodeId === oldActive.nodeId; }).length === 1
+              ? viewerSearchMatches.find(function(item) { return item.nodeId === oldActive.nodeId; })
+              : null);
+        } else if (!opts.preserveActive && opts.defaultFirst !== false) {
+          active = viewerSearchMatches[0] || null;
+        }
+        viewerSearchActiveId = active ? active.occurrenceId : null;
+        viewerSearchPage = active
+          ? Math.floor(viewerSearchMatches.indexOf(active) / VIEWER_SEARCH_PAGE_SIZE)
+          : Math.min(viewerSearchPage, Math.max(0, Math.ceil(viewerSearchMatches.length / VIEWER_SEARCH_PAGE_SIZE) - 1));
+        if (!opts.keepMessage) viewerSearchMessage = '';
+        viewerGraphSearch.applyHighlights(viewerSearchMatches, viewerSearchActiveId);
+        renderViewerSearchResults();
+      }
+
+      function clearViewerSearch(options) {
+        if (viewerSearchInput) viewerSearchInput.value = '';
+        viewerSearchMatches = [];
+        viewerSearchActiveId = null;
+        viewerSearchPage = 0;
+        viewerSearchMessage = '';
+        viewerGraphSearch.applyHighlights([], null);
+        setViewerSearchOpen(false);
+        renderViewerSearchResults();
+        if (options && options.focus && viewerSearchInput) viewerSearchInput.focus();
+      }
+
+      function moveViewerSearchActive(delta) {
+        if (viewerSearchMatches.length === 0) return;
+        const currentIndex = viewerSearchMatches.findIndex(function(item) { return item.occurrenceId === viewerSearchActiveId; });
+        const nextIndex = currentIndex < 0
+          ? (delta > 0 ? 0 : viewerSearchMatches.length - 1)
+          : (currentIndex + delta + viewerSearchMatches.length) % viewerSearchMatches.length;
+        const active = viewerSearchMatches[nextIndex];
+        viewerSearchActiveId = active.occurrenceId;
+        viewerSearchPage = Math.floor(nextIndex / VIEWER_SEARCH_PAGE_SIZE);
+        viewerGraphSearch.applyHighlights(viewerSearchMatches, viewerSearchActiveId);
+        renderViewerSearchResults();
+      }
+
+      function locateViewerSearchActive() {
+        const active = viewerSearchMatches.find(function(item) { return item.occurrenceId === viewerSearchActiveId; });
+        if (!active) return;
+        const result = viewerGraphSearch.locate(active.occurrenceId);
+        if (result.success) setViewerSearchMessage('Located ' + active.label + ' in the current graph.');
+        else {
+          refreshViewerSearch({ preserveActive: true, defaultFirst: false });
+          setViewerSearchMessage(result.reason);
+        }
+      }
+
+      if (viewerSearchInput) {
+        viewerSearchInput.addEventListener('focus', function() {
+          if (viewerSearchFocusSuppressed) {
+            viewerSearchFocusSuppressed = false;
+            return;
+          }
+          setViewerSearchOpen(true);
+          refreshViewerSearch({ preserveActive: true });
+        });
+        viewerSearchInput.addEventListener('input', function() {
+          setViewerSearchOpen(true);
+          refreshViewerSearch({ defaultFirst: true });
+        });
+        viewerSearchInput.addEventListener('keydown', function(event) {
+          if (!event || event.isComposing || event.keyCode === 229) return;
+          if (event.ctrlKey || event.metaKey || event.altKey) return;
+          if (event.key === 'ArrowDown' && viewerSearchMatches.length) {
+            event.preventDefault();
+            setViewerSearchOpen(true);
+            moveViewerSearchActive(1);
+          } else if (event.key === 'ArrowUp' && viewerSearchMatches.length) {
+            event.preventDefault();
+            setViewerSearchOpen(true);
+            moveViewerSearchActive(-1);
+          } else if (event.key === 'Enter' && viewerSearchOpen && viewerSearchActiveId) {
+            event.preventDefault();
+            locateViewerSearchActive();
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            setViewerSearchOpen(false);
+          }
+        });
+      }
+      if (viewerSearchClear) viewerSearchClear.addEventListener('click', function() { clearViewerSearch({ focus: true }); });
+      if (viewerSearchPrevious) viewerSearchPrevious.addEventListener('click', function() {
+        viewerSearchPage = Math.max(0, viewerSearchPage - 1);
+        renderViewerSearchResults();
+      });
+      if (viewerSearchNext) viewerSearchNext.addEventListener('click', function() {
+        viewerSearchPage += 1;
+        renderViewerSearchResults();
+      });
+      if (viewerSearchDropdown) viewerSearchDropdown.addEventListener('keydown', function(event) {
+        if (!event || event.isComposing || event.keyCode === 229) return;
+        if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') &&
+            !event.ctrlKey && !event.metaKey && !event.altKey) {
+          event.preventDefault();
+          moveViewerSearchActive(event.key === 'ArrowDown' ? 1 : -1);
+          if (viewerSearchInput) viewerSearchInput.focus();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          setViewerSearchOpen(false);
+          if (viewerSearchInput) {
+            viewerSearchFocusSuppressed = true;
+            viewerSearchInput.focus();
+          }
+        }
+      });
+      renderViewerSearchResults();
 
       if (isFoldMode) {
         foldControls.style.display = 'flex';
@@ -2548,8 +2969,12 @@
           if (valSm) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
           updateBatchPlaceFoldControls();
           updateActionHistoryControls();
+          if (typeof refreshViewerSearch === 'function') refreshViewerSearch({ preserveActive: true });
         },
-        onChange: updateActionHistoryControls
+        onChange: function() {
+          updateActionHistoryControls();
+          if (typeof refreshViewerSearch === 'function') refreshViewerSearch({ preserveActive: true });
+        }
       });
       updateActionHistoryControls();
 
@@ -2768,6 +3193,7 @@
         updateFoldableHighlights();
         updateBatchPlaceFoldControls();
         restoreViewport(cy, snapshot.viewport.zoom, snapshot.viewport.pan);
+        if (typeof clearViewerSearch === 'function') clearViewerSearch();
         if (viewerActionHistory) viewerActionHistory.clear();
       }
 
