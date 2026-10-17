@@ -204,27 +204,20 @@
           return { diffP: diffP, diffT: diffT };
         }
 
-        findAllSESECandidates(boundaryIds = null, minTransitions = 2) {
-          let candidates;
-          if (boundaryIds) {
-            candidates = Array.from(boundaryIds);
-          } else {
-            candidates = this.cy.nodes('.place').map(function(n) { return n.id(); });
-          }
-          candidates.sort();
-
+        _findAllCandidates(candidates, findNodes) {
+          candidates = Array.from(candidates || []).sort();
           const results = [];
           for (let i = 0; i < candidates.length; i++) {
             for (let j = 0; j < candidates.length; j++) {
               if (i === j) continue;
-              const src = candidates[i];
-              const snk = candidates[j];
-              const sese = this.findSESENodes(src, snk, minTransitions);
-              if (sese) {
+              const sourceId = candidates[i];
+              const sinkId = candidates[j];
+              const nodes = findNodes(sourceId, sinkId);
+              if (nodes) {
                 results.push({
-                  sourceId: src,
-                  sinkId: snk,
-                  nodes: sese
+                  sourceId: sourceId,
+                  sinkId: sinkId,
+                  nodes: nodes
                 });
               }
             }
@@ -232,21 +225,22 @@
           return results;
         }
 
+        findAllSESECandidates(boundaryIds = null, minTransitions = 2) {
+          const candidates = boundaryIds
+            ? Array.from(boundaryIds)
+            : this.cy.nodes('.place').map(function(n) { return n.id(); });
+          return this._findAllCandidates(candidates, (sourceId, sinkId) => {
+            return this.findSESENodes(sourceId, sinkId, minTransitions);
+          });
+        }
+
         findAllScopedSESECandidates(boundaryIds, allowedNodeIds, minTransitions = 2) {
           const candidates = Array.from(boundaryIds || []).filter(function(nodeId) {
             return allowedNodeIds && allowedNodeIds.has(nodeId);
-          }).sort();
-          const results = [];
-          for (let i = 0; i < candidates.length; i++) {
-            for (let j = 0; j < candidates.length; j++) {
-              if (i === j) continue;
-              const sourceId = candidates[i];
-              const sinkId = candidates[j];
-              const nodes = this.findScopedSESENodes(sourceId, sinkId, allowedNodeIds, minTransitions);
-              if (nodes) results.push({ sourceId: sourceId, sinkId: sinkId, nodes: nodes });
-            }
-          }
-          return results;
+          });
+          return this._findAllCandidates(candidates, (sourceId, sinkId) => {
+            return this.findScopedSESENodes(sourceId, sinkId, allowedNodeIds, minTransitions);
+          });
         }
       }
 
