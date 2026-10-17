@@ -6,6 +6,10 @@
 
 **Status:** ready-for-human
 
+**Implementation:** complete (`3d54cbb`; validation follow-ups in `96b6fb5`; imported-alias rebinding fix in `1885e61`).
+
+**Verification:** complete generated-viewer/session and invariance acceptance remains pending in the unchecked criteria below.
+
 - [x] Support a documented static normal-result catalog for range→range, len→int, str→str, int→int, float→float, bool→bool, list→list, tuple→tuple, dict→dict, and set→set. Range denotes Python's immutable integer sequence. Claims describe the result if a call completes normally, not guaranteed execution, argument validity, inferred element types, or evaluated values. Never execute/import the analyzed application or invoke its callables to obtain evidence.
 - [x] Recognize unshadowed bare catalog names, explicit imports from builtins with optional imported-name aliases, and qualified calls through an explicit builtins module import with optional module aliases. Derive identity from supported lexical bindings and actual import targets, not alias spelling. Rebinding, parameter/local/global shadowing, conflicting imports/project definitions, wildcard imports, writes to catalog attributes through a recognized builtins module binding, unsupported writes/control flow, or dynamic uncertainty must not inherit a catalog contract. Assignment-created callable aliases and alias chains are deferred.
 - [x] Capture independent Call Result Metadata for each call from original source expression/location and owning function/statement identity. Retain repeated, nested, and multiple calls on the same transition without last-call overwrite. Store result type/state, canonical built-in identity where recognized, and static-contract provenance or a specific unknown reason separately from labels and enclosing Function Return Metadata. Field names and storage factoring remain implementation choices.
@@ -41,3 +45,7 @@ The first full suite at implementation time ran 576 tests with one environment f
 ### 2026-10-13 — Round 02 review fix
 
 Scope binding analysis now tracks non-import writes separately so rebinding imported built-in callable aliases or imported `builtins` module aliases invalidates static contract evidence. Regression coverage includes local aliases and module-level imported aliases followed by assignment. Focused metadata tests pass. The final full suite ran 577 tests with 1 port-binding failure and 4 existing errors: missing `pygraphviz`, missing `pytest`, and legacy JavaScript and walker return-shape expectations.
+
+### 2026-10-16 — Delivery documentation synchronized
+
+The user confirmed implementation completion. The [Round 02 review](../reviews/phase-2.10-tickets-65-67-round-02.md) predates `1885e61`; its alias-rebinding finding is addressed by that commit, as recorded above. The [Phase 2.10 delivery record](../specs/phase-2.10-function-return-metadata.md), README, and [grand plan](../grand_plan.md) now describe the catalog as implemented. This is not a new post-fix review or test run. End-to-end metadata/resolution fidelity, save/open/continue-fold/local-unfold, malformed-session preservation, and invariant checks stay explicit rather than being marked passed without evidence.
