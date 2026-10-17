@@ -1,8 +1,12 @@
 # Phase 2.8: Viewer Interactive Enhancements
 
-Status: ready-for-agent
+Status: ready-for-human
 
-The original Tickets 45–50 are resolved. Ticket 63 adds the agreed Project Title follow-up; Ticket 64 adds optional Docked Sidebar visibility to the existing viewer and session workflow. Ticket 66 extends function folding to validated structural reductions within a Function Fold Scope.
+Implementation: complete (Tickets 45–50, 53, 63, 64, and 66; updated 2026-10-16).
+
+The original Tickets 45–50 and Ticket 53 are resolved. Project Title (63), optional Docked Sidebar visibility (64), and function-scoped structural folding (66) are implemented. Their remaining generated-viewer/browser and session checks are recorded in the tickets, which remain ready for human verification. The problem statements below retain the original feature motivation.
+
+The newly agreed Node Search and Undo/Redo scope has moved to [Phase 2.8.1](./phase-2.8.1-viewer-search-and-action-history.md). This document retains the delivered Phase 2.8 baseline and its outstanding human-verification records.
 
 ## Problem Statement
 
@@ -141,14 +145,22 @@ Extend Fold-Entire-Function to exhaust elementary reductions inside the selected
 - 2026-10-13: The user approved hiding the entire sidebar, reclaiming its width without layout/camera changes, explicit recall without automatic reveal on inspection, session visibility persistence, shown defaults, Reset preservation, and same-node unfinished-edit retention. The final control is a near-top left-edge tab, remaining at the graph's far-right edge when hidden, with no animation. This replaces the initially proposed toolbar button and centered tab position. Published with to-spec and to-tickets as Ticket 64.
 - 2026-10-13: The user approved function-local elementary-first priority despite unrelated elementary folds elsewhere, both an internal reduction-type marker and the Fold Entire Function action, retained caller anchors, and existing mathematical validators. Published as independent Ticket 66; expanded compound color cycling belongs to Ticket 67 in Phase 2.7.
 
+## Subsequent Phase 2.8.1
+
+Node Search and Viewer Action History are owned by the standalone [Phase 2.8.1 specification](./phase-2.8.1-viewer-search-and-action-history.md). It contains the complete agreed behavior, implementation boundaries, verification seam, and retained two-ticket plan. This Phase 2.8 document remains the delivered viewer baseline; the new requirements are no longer duplicated here.
+
+Original [Tickets 68](../issues/68-viewer-action-history-undo-redo.md) and [69](../issues/69-node-search-and-explicit-reveal.md) now link directly to Phase 2.8.1, with 69 still blocked by 68. Their scope is retained without further child-ticket splitting. Existing Phase 2.8 implementation and human-verification records remain unchanged.
+
 ## Delivery Record
 
 Tickets 45–50 are resolved. The docked sidebar, selection and compound folding actions, offline Fold State Snapshot save/open flow, and root-function info panel are delivered. See the [Phase 2.8 Round 3 review report](../reviews/phase-2.8-tickets-45-50-round-03.md) for their final review outcome.
 
 Ticket 53 is a resolved Phase 2.8 follow-up for Choice folding at shared caller boundaries. It retains caller-owned boundary places, restricts consumed transitions to the eligible function container, and supports both split and merge trigger directions. Generated-viewer/headless regressions cover individual and batch folds, Fold-Entire-Function, containment rejection, session continuation, nested local unfolding, and viewport preservation. The [Ticket 53 Round 02 report](../reviews/phase-2.8-ticket-53-round-02.md) records 150 passing viewer tests; the full suite had three unrelated errors, and its implementation note records the Aeroblasters manual acceptance check as passed.
 
-Ticket 63 is ready for implementation. The Project Title requirements above extend the delivered info panel and session contracts; this publication does not claim the feature has been implemented.
+Ticket 63 is implemented in `3ec9664` and `ef115ab`. Explicit CLI/API titles, batch propagation, Project/File/Function display, incoming-session identity, and metadata validation are delivered. Long-title browser rendering and the complete post-open interaction sequence remain unverified; see [Ticket 63](../issues/63-info-panel-project-title.md).
 
-Ticket 64 is ready for implementation. Its hide/recall requirements extend the delivered Docked Sidebar and saved viewing state; this publication does not claim implementation.
+Ticket 64 is implemented in `2e0db87`, with the subsequent sidebar fix recorded in `a500c13`. The near-top edge tab, independent visibility/inspection state, draft retention, and snapshot visibility are delivered. Actual browser geometry, pointer/keyboard interaction, and full session checks remain pending; see [Ticket 64](../issues/64-hide-recall-docked-sidebar.md).
 
-Ticket 66 is ready for implementation. Function-scoped structural folding is an approved extension, not a reopening of the completed elementary-folding tickets or a claim that the reported graph has been fixed.
+Ticket 66 is implemented in `3d54cbb` with scoped-candidate and containment fixes in `96b6fb5`. The [Round 02 review](../reviews/phase-2.10-tickets-65-67-round-02.md) records the Round 01 structural-candidate finding as resolved. Caller anchors, scope-local elementary gating, structural candidates, internal triggers, and stale-target checks are delivered. Full Dots & Boxes caller-context, nested-container, weights/SM, session/unfold, and browser-action verification remain pending; see [Ticket 66](../issues/66-function-scoped-structural-folding.md). Tickets 47 and 53 remain resolved.
+
+2026-10-16: The user confirmed all tickets implemented. This delivery update records implementation completion without checking off unperformed acceptance work. Historical test results remain attributed to the ticket implementation notes; no new test suite or browser session was run for this documentation update.
