@@ -1393,10 +1393,10 @@
           return [
             {
               foldTypes: ['marked_graph', 'state_machine'],
-              run: function(engine, scopeId) {
+              run: function(engine, scopeId, rejectionReasons) {
                 return {
                   marked_graph: engine.detectMarkedGraphs(scopeId),
-                  state_machine: engine.detectStateMachines(scopeId)
+                  state_machine: engine.detectStateMachines(scopeId, rejectionReasons)
                 };
               }
             },
@@ -1419,12 +1419,12 @@
           ];
         }
 
-        getActiveStructuralCandidates(scopeId = null) {
+        getActiveStructuralCandidates(scopeId = null, rejectionReasons = null) {
           if (this.hasElementaryReductions(scopeId)) {
             return {};
           }
           for (const tier of LiveFoldReductionEngine.STRUCTURAL_DETECTORS) {
-            const results = tier.run(this, scopeId);
+            const results = tier.run(this, scopeId, rejectionReasons);
             const totalCount = Object.values(results).reduce(function(sum, cands) {
               return sum + (cands ? cands.length : 0);
             }, 0);
@@ -1435,7 +1435,7 @@
           return {};
         }
 
-        getFoldType(node, scopeId = null) {
+        getFoldType(node, scopeId = null, rejectionReasons = null) {
           if (!node || typeof node.hasClass !== 'function') return null;
 
           if (node.hasClass('place')) {
@@ -1446,7 +1446,7 @@
 
           // SESE structural reductions are gated behind exhaustion of elementary reductions
           // per Lassen & van der Aalst (2008) Def. 21 to prevent premature structural folding.
-          const activeStructural = this.getActiveStructuralCandidates(scopeId);
+          const activeStructural = this.getActiveStructuralCandidates(scopeId, rejectionReasons);
           const targetGroup = node.hasClass('place') ? 'place' : 'transition';
           const nodeId = node.id();
 
@@ -1465,7 +1465,7 @@
           return null;
         }
 
-        executeBatchFold(placeIds, scopeId = null) {
+        executeBatchFold(placeIds, scopeId = null, rejectionReasons = null) {
           const requestedIds = Array.isArray(placeIds) ? placeIds.slice() : [];
           const folded = [];
           const skipped = [];
@@ -1489,7 +1489,7 @@
               return;
             }
 
-            const foldType = this.getFoldType(place, scopeId);
+            const foldType = this.getFoldType(place, scopeId, rejectionReasons);
             const foldMeta = foldType && LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
             const scopedStructuralPlaceTrigger = Boolean(scopeId && foldType &&
               ['marked_graph', 'state_machine', 'well_structured', 'unstructured'].includes(foldType));
@@ -1526,6 +1526,7 @@
             : (compoundIdOrNode && typeof compoundIdOrNode.id === 'function' ? compoundIdOrNode.id() : null);
           const folded = [];
           const skipped = [];
+          const rejectionReasons = [];
           let passes = 0;
           const compound = compoundId ? this.cy.getElementById(compoundId) : null;
 
@@ -1574,9 +1575,10 @@
             });
             if (descendantPlaces.length === 0) break;
 
+            rejectionReasons.length = 0;
             const passResult = this.executeBatchFold(descendantPlaces.map(function(place) {
               return place.id();
-            }), compoundId);
+            }), compoundId, rejectionReasons);
             passes++;
             folded.push.apply(folded, passResult.folded);
             skipped.push.apply(skipped, passResult.skipped);
@@ -1586,6 +1588,7 @@
 
           const complete = compound.inside() && this.isFunctionFoldedIntoSingleComponent(compound);
           const success = folded.length > 0;
+          const rejectionReason = rejectionReasons[0] || null;
           return {
             success: success,
             complete: complete,
@@ -1595,8 +1598,8 @@
             message: complete
               ? `Function '${compoundId}' is fully collapsed after ${folded.length} reduction${folded.length === 1 ? '' : 's'}.`
               : success
-                ? `Function '${compoundId}' remains partially folded after ${folded.length} reduction${folded.length === 1 ? '' : 's'}; no further eligible places were found.`
-                : `No progress folding function '${compoundId}'; no validated elementary or contained structural candidate is available within this function scope.`
+                ? `Function '${compoundId}' remains partially folded after ${folded.length} reduction${folded.length === 1 ? '' : 's'}; ${rejectionReason || 'no further eligible places were found.'}`
+                : `No progress folding function '${compoundId}'; ${rejectionReason || 'no validated elementary or contained structural candidate is available within this function scope.'}`
           };
         }
 
@@ -2158,18 +2161,34 @@
           return allowed;
         }
 
-        _hasClosedConsumedInterior(candidate) {
+        _getConsumedInteriorIssue(candidate) {
           const candidateNodeIds = candidate.nodes;
           for (const nodeId of candidateNodeIds) {
             if (nodeId === candidate.sourceId || nodeId === candidate.sinkId) continue;
             const node = this.cy.getElementById(nodeId);
-            if (!node || node.length === 0) return false;
-            const hasCrossingEdge = node.connectedEdges().some(function(edge) {
+            if (!node || node.length === 0) {
+              return { reason: `candidate node '${nodeId}' no longer exists.` };
+            }
+            const crossingEdge = node.connectedEdges().filter(function(edge) {
               return !candidateNodeIds.has(edge.source().id()) || !candidateNodeIds.has(edge.target().id());
-            });
-            if (hasCrossingEdge) return false;
+            })[0];
+            if (crossingEdge) {
+              const externalNodeId = candidateNodeIds.has(crossingEdge.source().id())
+                ? crossingEdge.target().id()
+                : crossingEdge.source().id();
+              return {
+                interiorNodeId: nodeId,
+                externalNodeId: externalNodeId
+              };
+            }
           }
-          return true;
+          return null;
+        }
+
+        _recordRejectionReason(rejectionReasons, reason) {
+          if (Array.isArray(rejectionReasons) && rejectionReasons.length === 0) {
+            rejectionReasons.push(reason);
+          }
         }
 
         _discoverSESESubnets(options) {
@@ -2190,7 +2209,16 @@
           const self = this;
 
           seseCandidates.forEach(function(cand) {
-            if (hasScopedStateMachineBoundaries && !self._hasClosedConsumedInterior(cand)) return;
+            if (hasScopedStateMachineBoundaries) {
+              const issue = self._getConsumedInteriorIssue(cand);
+              if (issue) {
+                const reason = issue.interiorNodeId
+                  ? `state-machine candidate '${cand.sourceId}' → '${cand.sinkId}' was skipped because interior node '${issue.interiorNodeId}' has an edge to '${issue.externalNodeId}' outside the candidate.`
+                  : issue.reason;
+                self._recordRejectionReason(options.rejectionReasons, reason);
+                return;
+              }
+            }
             const consumedForScope = options.boundarySelector === '.place'
               ? new Set(Array.from(cand.nodes).filter(function(nodeId) {
                   return nodeId !== cand.sourceId && nodeId !== cand.sinkId;
@@ -2283,12 +2311,13 @@
         // Detects SESE Subnets for structural folding (Marked Graph or State Machine).
         // Internal places must have initial_tokens === 0 to preserve workflow net
         // token conservation during live SESE structural folding.
-        _detectSESESubnetCandidates(isMarkedGraph, scopeId = null) {
+        _detectSESESubnetCandidates(isMarkedGraph, scopeId = null, rejectionReasons = null) {
           const self = this;
           return this._discoverSESESubnets({
             boundarySelector: isMarkedGraph ? '.transition' : '.place',
             componentType: isMarkedGraph ? 'MarkedGraph' : 'StateMachine',
             scopeId: scopeId,
+            rejectionReasons: rejectionReasons,
             filterMaximal: false,
             validateNode: function(node, cand) {
               if (isMarkedGraph) {
@@ -2333,8 +2362,8 @@
           return this._detectSESESubnetCandidates(true, scopeId);
         }
 
-        detectStateMachines(scopeId = null) {
-          return this._detectSESESubnetCandidates(false, scopeId);
+        detectStateMachines(scopeId = null, rejectionReasons = null) {
+          return this._detectSESESubnetCandidates(false, scopeId, rejectionReasons);
         }
 
         detectWellStructured(scopeId = null) {

@@ -7258,6 +7258,9 @@ const leakyResult = leakyEngine.executeFoldEntireFunction('fn');
 if (leakyResult.success || leakyResult.complete || fingerprint(leakyCy) !== leakyBefore) {{
   throw new Error('An unsafe scope crossing was forced through a function fold');
 }}
+if (!leakyResult.message.includes('interior node') || !leakyResult.message.includes('outside the candidate')) {{
+  throw new Error('Function fold did not report why the crossing-edge candidate was rejected: ' + leakyResult.message);
+}}
 if (layoutCount < 2) throw new Error('Expected the generated trigger and Fold Entire Function layouts');
 console.log('PASS');
 """
