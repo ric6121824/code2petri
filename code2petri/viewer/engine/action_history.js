@@ -156,14 +156,6 @@
       }
     }
 
-    _applyFull(state, ui, viewport) {
-      this._rebuild(state.elements, this._selectedIds());
-      this.restoreContext(cloneJson(state.context));
-      this.restoreUi(ui);
-      this.afterRestore();
-      this._restoreViewport(viewport);
-    }
-
     _makeEntry(label, before, after) {
       const beforeById = elementMap(before.elements);
       const afterById = elementMap(after.elements);

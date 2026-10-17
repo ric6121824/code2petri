@@ -137,7 +137,8 @@
         sourceLocation: sourceLocation(data),
         classes: classes || '',
         searchText: [
-          data.label, data.original_label, data.raw_label, data.function_name, data.custom_name, data.id
+          data.label, data.original_label, data.raw_label, data.function_name, data.custom_name,
+          data.resolved_to, data.id
         ].filter(function(value) { return value !== undefined && value !== null; }).map(String)
       };
     }

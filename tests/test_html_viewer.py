@@ -8026,6 +8026,28 @@ cy.getElementById('t_C_off_path').position({ x: 800, y: 300 });
 cy.getElementById('p_live').select();
 """
 
+    def test_search_includes_stored_resolved_target_for_transitions(self):
+        test_logic = self.SEARCH_SETUP_JS + r"""
+const { ViewerGraphSearch } = require('./code2petri/viewer/engine/graph_search.js');
+const transition = cy.getElementById('t_C_off_path');
+transition.data({ label: 'Visible alias', raw_label: 'raw-alias', resolved_to: 'pkg.Target+[]' });
+const search = new ViewerGraphSearch({ cy, engine: foldEngine });
+const matches = search.findMatches('PKG.TARGET+[]');
+if (!matches.some(item => item.nodeId === 't_C_off_path')) {
+  throw new Error('transition search should include its stored resolved_to literally and case-insensitively');
+}
+if (matches.some(item => item.nodeId !== 't_C_off_path')) {
+  throw new Error('resolved_to lookup should remain attached to its exact transition occurrence');
+}
+if (search.findMatches('pkg.Other+[]').some(item => item.nodeId === 't_C_off_path')) {
+  throw new Error('search must read stored resolved_to rather than infer a target from the query');
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(self.SEARCH_NET, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Node resolved target search acceptance failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_search_finds_current_and_nested_occurrences_and_locates_without_graph_edits(self):
         generated_html = generate_html(PetriNet(), title="Search acceptance")
         self.assertTrue("class ViewerGraphSearch" in generated_html, "generated viewer must embed production search controller")
