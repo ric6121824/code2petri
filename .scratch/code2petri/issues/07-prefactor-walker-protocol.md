@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] `WalkerProtocol` is defined as an `abc.ABC` with `parse_file`, `find_function`, `find_all_functions`, `walk_function`, and `get_node_lineno` instance methods.
 - [x] `ControlFlowBuilder` is created, encapsulating `place_counter`, `trans_counter`, `loop_stack`, `try_stack`, `new_place()`, and `new_transition()`.
@@ -13,3 +13,7 @@
 - [x] Shared structural assertions (e.g., `assert_has_start_and_end`) are extracted into `tests/petri_assertions.py`.
 - [x] `engine.py` instantiates the walker (`walker = WALKERS[ext]()`) rather than calling static methods.
 - [x] All existing Python tests pass without modification to their underlying logic.
+
+## Comments
+
+- 2026-10-16: Corrected the stale ready-for-agent state to match this ticket's already completed checklist and the delivered Phase 1 record. This documentation synchronization does not claim a new test run.
