@@ -44,6 +44,7 @@ def _load_engine_scripts() -> str:
     pnml_path = os.path.join(engine_dir, "pnml_exporter.js")
     engine_path = os.path.join(engine_dir, "reduction_engine.js")
     viewport_path = os.path.join(engine_dir, "viewport.js")
+    transient_classes_path = os.path.join(engine_dir, "viewer_transient_classes.js")
     session_snapshot_path = os.path.join(engine_dir, "session_snapshot.js")
     action_history_path = os.path.join(engine_dir, "action_history.js")
     graph_search_path = os.path.join(engine_dir, "graph_search.js")
@@ -53,6 +54,8 @@ def _load_engine_scripts() -> str:
         engine_content = f.read()
     with open(viewport_path, "r", encoding="utf-8") as f:
         viewport_content = f.read()
+    with open(transient_classes_path, "r", encoding="utf-8") as f:
+        transient_classes_content = f.read()
     with open(session_snapshot_path, "r", encoding="utf-8") as f:
         session_snapshot_content = f.read()
     with open(action_history_path, "r", encoding="utf-8") as f:
@@ -61,7 +64,7 @@ def _load_engine_scripts() -> str:
         graph_search_content = f.read()
     return (
         f"{pnml_content}\n\n{engine_content}\n\n{viewport_content}"
-        f"\n\n{session_snapshot_content}\n\n{action_history_content}"
+        f"\n\n{transient_classes_content}\n\n{session_snapshot_content}\n\n{action_history_content}"
         f"\n\n{graph_search_content}"
     )
 

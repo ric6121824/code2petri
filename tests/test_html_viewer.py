@@ -99,7 +99,9 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
 
     m_cxttap = re.search(r"function handleRightClickUnfold\(node\) \{.*?\n      cy\.on\('cxttap', 'node', function\(evt\) \{.*?\n      \}\);", html, re.DOTALL)
     assert m_cxttap is not None, "Could not extract handleRightClickUnfold and cy.on('cxttap') from template.html"
-    cxttap_handler_js = m_cxttap.group(0)
+    m_component_unfold = re.search(r'function performComponentLocalUnfold\(node\) \{.*?\n      \}', html, re.DOTALL)
+    assert m_component_unfold is not None, "Could not extract the shared component-local unfold operation"
+    cxttap_handler_js = m_component_unfold.group(0) + "\n" + m_cxttap.group(0)
 
     def extract_function(name, end_marker):
         start = html.index(f"      function {name}(")
@@ -8139,10 +8141,34 @@ console.log('PASS');
 
     def test_reveal_is_one_exact_reversible_action_and_rolls_back_mid_chain_failures(self):
         test_logic = self.SEARCH_SETUP_JS + r"""
+const Module = require('module');
+const originalRequire = Module.prototype.require;
+const dagre = require('./code2petri/viewer/vendor/dagre.min.js');
+Module.prototype.require = function(path) {
+  if (path === 'dagre') return dagre;
+  return originalRequire.apply(this, arguments);
+};
+cytoscape.use(require('./code2petri/viewer/vendor/cytoscape-dagre.js'));
+Module.prototype.require = originalRequire;
 const { ViewerGraphSearch } = require('./code2petri/viewer/engine/graph_search.js');
 const { ViewerActionHistory: TestActionHistory } = require('./code2petri/viewer/engine/action_history.js');
 const snapshot = require('./code2petri/viewer/engine/session_snapshot.js');
-const search = new ViewerGraphSearch({ cy, engine: foldEngine });
+const layoutCalls = [];
+const realLayout = cy.layout.bind(cy);
+cy.layout = function(options) {
+  layoutCalls.push(options);
+  return realLayout(options);
+};
+function componentLocalUnfold(owner) {
+  const viewportBefore = captureViewport(cy);
+  const result = foldEngine.executeComponentLocalUnfold(owner);
+  if (!result || !result.success) return false;
+  cy.layout({ name: 'dagre', rankDir: 'TB', nodeDimensionsIncludeLabels: true,
+    spacingFactor: 1.15, rankSep: 40, nodeSep: 35, padding: 30, fit: false, animate: false }).run();
+  restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
+  return result;
+}
+const search = new ViewerGraphSearch({ cy, engine: foldEngine, unfoldComponent: componentLocalUnfold });
 const query = 'needle+[x]';
 function documentContext() {
   return {
@@ -8198,11 +8224,13 @@ if (!locate.success || locate.visibleNodeId !== 't_C_outer_a') throw new Error('
 const reveal = history.perform('Reveal search result', () => search.reveal(nestedMatch.occurrenceId));
 if (!reveal.success || reveal.nodeId !== 't_target_deep') throw new Error('Reveal should restore the exact nested occurrence');
 if (history.undoStack.length !== 1 || history.redoStack.length !== 0) throw new Error('the entire multi-level Reveal must be one history entry');
+if (layoutCalls.length !== nestedMatch.ownerPath.length) throw new Error('Reveal should run the right-click layout after each owner unfolds');
+if (layoutCalls.some(options => options.fit !== false || Object.prototype.hasOwnProperty.call(options, 'eles'))) {
+  throw new Error('Reveal should use the right-click whole-graph layout without fitting the camera');
+}
 if (cy.getElementById('t_C_outer_a').length || cy.getElementById('t_C_inner_a').length) throw new Error('only the containing owner chain should unfold');
 if (!cy.getElementById('t_C_outer_b').length || !cy.getElementById('t_C_off_path').length) throw new Error('off-path folded components must remain folded');
-if (JSON.stringify(cy.getElementById('t_C_off_path').position()) !== JSON.stringify({ x: 800, y: 300 })) {
-  throw new Error('Reveal must preserve unrelated node positions');
-}
+if (!cy.getElementById('t_C_off_path').length) throw new Error('full-graph layout must retain unrelated nodes');
 const revealedMatch = search.findMatches(query).find(item => item.nodeId === 't_target_deep');
 if (!revealedMatch || !revealedMatch.visible || revealedMatch.ownerPath.length !== 0) throw new Error('the exact target should now be visible in the live graph');
 if (cy.zoom() !== 1.6) throw new Error('Reveal navigation must retain the current zoom');
@@ -8290,6 +8318,55 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Node Reveal acceptance failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+    def test_reveal_uses_whole_graph_layout_for_each_component_path_step(self):
+        test_logic = self.SEARCH_SETUP_JS + r"""
+const Module = require('module');
+const originalRequire = Module.prototype.require;
+const dagre = require('./code2petri/viewer/vendor/dagre.min.js');
+Module.prototype.require = function(path) {
+  if (path === 'dagre') return dagre;
+  return originalRequire.apply(this, arguments);
+};
+cytoscape.use(require('./code2petri/viewer/vendor/cytoscape-dagre.js'));
+Module.prototype.require = originalRequire;
+const { ViewerGraphSearch } = require('./code2petri/viewer/engine/graph_search.js');
+const layoutCalls = [];
+const realLayout = cy.layout.bind(cy);
+cy.layout = function(options) {
+  layoutCalls.push(options);
+  return realLayout(options);
+};
+function componentLocalUnfold(owner) {
+  const result = foldEngine.executeComponentLocalUnfold(owner);
+  if (!result || !result.success) return false;
+  cy.layout({ name: 'dagre', rankDir: 'TB', nodeDimensionsIncludeLabels: true,
+    spacingFactor: 1.15, rankSep: 40, nodeSep: 35, padding: 30, fit: false, animate: false }).run();
+  return result;
+}
+const search = new ViewerGraphSearch({ cy, engine: foldEngine, unfoldComponent: componentLocalUnfold });
+const outerRecord = cy.getElementById('t_C_outer_a').data('consumedSubnet');
+const innerDefinition = outerRecord.nodes.find(item => item.data.id === 't_C_inner_a');
+const shallowDefinition = outerRecord.nodes.find(item => item.data.id === 'p_target_shallow');
+const innerRecord = innerDefinition.data.consumedSubnet;
+const deepDefinition = innerRecord.nodes.find(item => item.data.id === 't_target_deep');
+// Model saved coordinates colliding with a live neighbor and each other.
+innerDefinition.position = { x: 100, y: 100 };
+shallowDefinition.position = { x: 100, y: 100 };
+deepDefinition.position = { x: 100, y: 100 };
+cy.getElementById('p_live').position({ x: 100, y: 100 });
+cy.getElementById('p_end').position({ x: 650, y: 100 });
+const match = search.findMatches('needle+[x]').find(item => item.nodeId === 't_target_deep');
+search.reveal(match.occurrenceId);
+if (layoutCalls.length !== match.ownerPath.length) throw new Error('Reveal should run one full layout for each owner on the target path');
+if (layoutCalls.some(options => Object.prototype.hasOwnProperty.call(options, 'eles'))) {
+  throw new Error('Reveal must invoke a whole-graph layout, matching right-click Unfold');
+}
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(self.SEARCH_NET, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Node Reveal layout acceptance failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_stale_occurrence_does_not_switch_to_another_matching_owner(self):
         test_logic = self.SEARCH_SETUP_JS + r"""
 const { ViewerGraphSearch } = require('./code2petri/viewer/engine/graph_search.js');
@@ -8318,6 +8395,7 @@ console.log('PASS');
         generated_html = generate_html(PetriNet(), title="Search toolbar")
         expected_contract = [
             'id="viewer-search-input"',
+            'id="viewer-search-field"',
             'id="viewer-search-results"',
             'id="viewer-search-status"',
             'aria-label="Search current graph and folded components"',
@@ -8330,6 +8408,20 @@ console.log('PASS');
         ]
         for contract in expected_contract:
             self.assertIn(contract, generated_html, f"generated viewer is missing search contract {contract!r}")
+        search_css = re.search(r"#viewer-search-dropdown\s*\{([^}]+)\}", generated_html)
+        self.assertIsNotNone(search_css, "generated viewer should style the search dropdown")
+        self.assertRegex(search_css.group(1), r"left\s*:\s*0")
+        self.assertRegex(search_css.group(1), r"right\s*:\s*auto")
+        self.assertRegex(generated_html, r"#fold-controls\s*\{\s*display\s*:\s*none\s*!important\s*;")
+        search_field_start = generated_html.index('<div id="viewer-search-field">')
+        search_field_end = generated_html.index('</div>', search_field_start)
+        search_field = generated_html[search_field_start:search_field_end]
+        self.assertIn('id="viewer-search-clear"', search_field)
+        self.assertIn('>×</button>', search_field)
+        self.assertNotIn('>Clear</button>', generated_html)
+        self.assertIn('viewerSearchClear.hidden = !query', generated_html)
+        self.assertRegex(generated_html, r"#viewer-search-clear\s*\{[^}]*position:\s*absolute")
+        self.assertIn('unfoldComponent: performComponentLocalUnfold', generated_html)
 
 
 class TestViewportRestoreModule(unittest.TestCase):

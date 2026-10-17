@@ -23,18 +23,22 @@
       background-color: #24292e;
       color: #ffffff;
       padding: 10px 20px;
-      display: flex;
+      display: grid;
+      grid-template-columns:
+        max-content minmax(0, 1fr)
+        max-content max-content
+        minmax(0, 1fr)
+        max-content max-content max-content max-content;
       align-items: center;
-      justify-content: space-between;
       box-shadow: 0 2px 4px rgba(0,0,0,0.15);
       z-index: 10;
-      flex-wrap: wrap;
       gap: 10px;
     }
     .header-left {
       display: flex;
       align-items: center;
       gap: 15px;
+      grid-column: 1;
     }
     .header-title {
       font-size: 16px;
@@ -46,10 +50,14 @@
       color: #adb5bd;
     }
     .toolbar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      display: contents;
     }
+    #viewer-search-controls { grid-column: 3; }
+    #action-history-controls { grid-column: 4; }
+    #badge-sm { grid-column: 6; }
+    #btn-open-session { grid-column: 7; }
+    #btn-save-session { grid-column: 8; }
+    #btn-export-pnml { grid-column: 9; }
     .controls {
       display: flex;
       align-items: center;
@@ -61,10 +69,23 @@
       align-items: center;
       gap: 5px;
     }
+    @media (max-width: 1100px) {
+      header {
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+      }
+      .toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+    }
+    #viewer-search-field { position: relative; }
     #viewer-search-input {
       width: min(250px, 24vw);
       min-width: 150px;
-      padding: 6px 9px;
+      padding: 6px 32px 6px 9px;
       border: 1px solid #6c757d;
       border-radius: 4px;
       background: #ffffff;
@@ -72,6 +93,30 @@
       font: inherit;
       font-size: 13px;
     }
+    #viewer-search-input::-webkit-search-cancel-button {
+      -webkit-appearance: none;
+      appearance: none;
+      display: none;
+    }
+    #viewer-search-clear {
+      position: absolute;
+      top: 50%;
+      right: 6px;
+      transform: translateY(-50%);
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      background: transparent;
+      color: #57606a;
+      font: inherit;
+      font-size: 18px;
+      line-height: 20px;
+      cursor: pointer;
+    }
+    #viewer-search-clear:hover { background: #eaeef2; color: #212529; }
+    #viewer-search-clear[hidden] { display: none; }
     .visually-hidden {
       position: absolute;
       width: 1px;
@@ -84,6 +129,7 @@
       border: 0;
     }
     #viewer-search-input:focus-visible,
+    #viewer-search-clear:focus-visible,
     .search-result-option:focus-visible,
     .search-result-reveal:focus-visible {
       outline: 2px solid #58a6ff;
@@ -92,7 +138,8 @@
     #viewer-search-dropdown {
       position: absolute;
       top: calc(100% + 8px);
-      right: 0;
+      left: 0;
+      right: auto;
       width: min(430px, calc(100vw - 32px));
       max-height: min(65vh, 520px);
       display: flex;
@@ -104,6 +151,7 @@
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
       z-index: 30;
     }
+    #fold-controls { display: none !important; }
     #viewer-search-dropdown[hidden] { display: none; }
     #viewer-search-status {
       padding: 9px 11px;
@@ -555,10 +603,12 @@
     <div class="toolbar" id="viewer-toolbar">
       <div id="viewer-search-controls">
         <label for="viewer-search-input" class="visually-hidden">Search current graph and folded components</label>
-        <input id="viewer-search-input" type="search" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" autocomplete="off"
-          aria-label="Search current graph and folded components"
-          aria-controls="viewer-search-results" aria-expanded="false" placeholder="Search graph…" />
-        <button class="btn" id="viewer-search-clear" type="button" aria-label="Clear graph search" title="Clear search">Clear</button>
+        <div id="viewer-search-field">
+          <input id="viewer-search-input" type="search" role="combobox" aria-autocomplete="list" aria-haspopup="listbox" autocomplete="off"
+            aria-label="Search current graph and folded components"
+            aria-controls="viewer-search-results" aria-expanded="false" placeholder="Search graph…" />
+          <button id="viewer-search-clear" type="button" aria-label="Clear graph search" title="Clear search" hidden>×</button>
+        </div>
         <div id="viewer-search-dropdown" hidden>
           <div id="viewer-search-status" role="status" aria-live="polite">Type to search current nodes and folded components.</div>
           <div id="viewer-search-results" role="listbox" aria-label="Graph search results"></div>
@@ -2447,23 +2497,28 @@
         if (isTransition || isComponent) openInspector(targetNode);
       });
 
+      function performComponentLocalUnfold(node) {
+        if (typeof foldEngine === 'undefined' || !foldEngine || !node) return false;
+        const viewportBefore = captureViewport(cy);
+        const result = foldEngine.executeComponentLocalUnfold(node);
+        if (!result || !result.success) return false;
+        if (typeof refreshCompoundDepthPresentation === 'function') refreshCompoundDepthPresentation(cy);
+        if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
+          cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
+        }
+        restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
+        if (typeof updateFoldableHighlights === 'function') updateFoldableHighlights();
+        if (typeof closeInspector === 'function') closeInspector();
+        if (typeof valSm !== 'undefined' && valSm && typeof foldEngine !== 'undefined' && foldEngine) {
+          valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+        }
+        return result;
+      }
+
       function handleRightClickUnfold(node) {
         if (typeof foldEngine === 'undefined' || !foldEngine || !node) return false;
         return performViewerAction('Component-local unfold', function() {
-          const viewportBefore = captureViewport(cy);
-          const res = foldEngine.executeComponentLocalUnfold(node);
-          if (!res || !res.success) return false;
-          if (typeof refreshCompoundDepthPresentation === 'function') refreshCompoundDepthPresentation(cy);
-          if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
-            cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
-          }
-          restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
-          if (typeof updateFoldableHighlights === 'function') updateFoldableHighlights();
-          if (typeof closeInspector === 'function') closeInspector();
-          if (typeof valSm !== 'undefined' && valSm && typeof foldEngine !== 'undefined' && foldEngine) {
-            valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
-          }
-          return true;
+          return performComponentLocalUnfold(node);
         });
       }
 
@@ -2509,7 +2564,11 @@
       const viewerSearchNext = document.getElementById('viewer-search-next');
       const viewerSearchPageLabel = document.getElementById('viewer-search-page-label');
       const VIEWER_SEARCH_PAGE_SIZE = 40;
-      const viewerGraphSearch = new ViewerGraphSearch({ cy: cy, engine: foldEngine });
+      const viewerGraphSearch = new ViewerGraphSearch({
+        cy: cy,
+        engine: foldEngine,
+        unfoldComponent: performComponentLocalUnfold
+      });
       let viewerSearchMatches = [];
       let viewerSearchActiveId = null;
       let viewerSearchPage = 0;
@@ -2632,7 +2691,10 @@
         }
         if (viewerSearchPrevious) viewerSearchPrevious.disabled = viewerSearchPage <= 0;
         if (viewerSearchNext) viewerSearchNext.disabled = viewerSearchPage >= pageCount - 1;
-        if (viewerSearchClear) viewerSearchClear.disabled = !query;
+        if (viewerSearchClear) {
+          viewerSearchClear.disabled = !query;
+          viewerSearchClear.hidden = !query;
+        }
         if (viewerSearchInput) {
           const activeIndex = viewerSearchMatches.findIndex(function(item) { return item.occurrenceId === viewerSearchActiveId; });
           if (activeIndex >= start && activeIndex < start + pageMatches.length) {

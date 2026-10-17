@@ -73,6 +73,7 @@
       }
       this.cy = opts.cy;
       this.engine = opts.engine || null;
+      this.unfoldComponent = typeof opts.unfoldComponent === 'function' ? opts.unfoldComponent : null;
     }
 
     _liveNode(id) {
@@ -367,9 +368,11 @@
         if (!ownerNode) throw new Error('Reveal owner ' + ownerId + ' was not restored from its parent Folded Component.');
         const record = restorationRecord(ownerNode.data());
         this._validateRestoration(record, ownerId);
-        const result = this.engine._unfoldSingleOpaqueTransition(ownerNode);
-        if (!result) throw new Error('Failed to restore Folded Component ' + ownerId + '.');
-        if (typeof this.engine._updateCollapsedCompoundStates === 'function') {
+        const result = this.unfoldComponent
+          ? this.unfoldComponent(ownerNode)
+          : this.engine._unfoldSingleOpaqueTransition(ownerNode);
+        if (!result || result.success === false) throw new Error('Failed to restore Folded Component ' + ownerId + '.');
+        if (!this.unfoldComponent && typeof this.engine._updateCollapsedCompoundStates === 'function') {
           this.engine._updateCollapsedCompoundStates();
         }
         this._validateRestoredContents(record, ownerId);

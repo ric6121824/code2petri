@@ -4,13 +4,14 @@
  */
 (function(root, factory) {
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require('./viewer_transient_classes.js'));
   } else if (root) {
-    Object.assign(root, factory());
+    Object.assign(root, factory(root));
   }
-})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function() {
+})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function(viewerClassUtils) {
   const DEFAULT_MAX_ACTIONS = 50;
   const DEFAULT_MAX_BYTES = 32 * 1024 * 1024;
+  const stripTransientSearchClasses = viewerClassUtils.stripTransientSearchClasses;
 
   function cloneJson(value) {
     if (value === undefined) return undefined;
@@ -37,9 +38,7 @@
     normalizeRestorationAliases(copy);
     if (copy && Object.prototype.hasOwnProperty.call(copy, 'selected')) delete copy.selected;
     if (copy && copy.group === 'nodes' && typeof copy.classes === 'string') {
-      copy.classes = copy.classes.split(/\s+/).filter(function(name) {
-        return name && name !== 'search-match' && name !== 'search-active';
-      }).join(' ');
+      copy.classes = stripTransientSearchClasses(copy.classes);
     }
     return copy;
   }

@@ -4,18 +4,19 @@
 
 (function(root, factory) {
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = factory(require('./viewport.js'));
+    module.exports = factory(require('./viewport.js'), require('./viewer_transient_classes.js'));
   } else {
-    const exports = factory(root);
+    const exports = factory(root, root);
     if (typeof window !== 'undefined') {
       Object.assign(window, exports);
     } else if (typeof globalThis !== 'undefined') {
       Object.assign(globalThis, exports);
     }
   }
-})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function(viewportModule) {
+})(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this), function(viewportModule, viewerClassUtils) {
   const SCHEMA_VERSION = 1;
   const SNAPSHOT_TYPE = 'code2petri-fold-state';
+  const stripTransientSearchClasses = viewerClassUtils.stripTransientSearchClasses;
 
   function _cloneJson(value) {
     if (value === undefined) return null;
@@ -35,9 +36,7 @@
     const clone = {};
     Object.keys(value).forEach(function(key) {
       if (isNodeRecord && key === 'classes' && typeof value.classes === 'string') {
-        clone.classes = value.classes.split(/\s+/).filter(function(name) {
-          return name && name !== 'search-match' && name !== 'search-active';
-        }).join(' ');
+        clone.classes = stripTransientSearchClasses(value.classes);
       } else if (hasRestoration && key === 'data') {
         const data = {};
         Object.keys(value.data).forEach(function(dataKey) {
