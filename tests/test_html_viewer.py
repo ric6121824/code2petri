@@ -7061,6 +7061,210 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+    def test_fused_function_entrance_loop_head_is_scoped_state_machine_and_reversible(self):
+        html = _read_template_html()
+        action_match = re.search(
+            r"function handleFoldEntireFunction\(compoundNode\) \{.*?"
+            r"if \(hudEls\.foldEntireFunctionBtnEl\) \{.*?\n      \}",
+            html,
+            re.DOTALL,
+        )
+        fold_helpers = re.search(
+            r"function refreshFoldActionView\(viewportBefore\) \{.*?"
+            r"function formatFoldActionResult\(result\) \{.*?\n      \}",
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(action_match, "Could not find the generated viewer's function fold action")
+        self.assertIsNotNone(fold_helpers, "Could not find the shared fold action helpers")
+
+        net = """{
+  compounds: [
+    { id: 'caller', label: 'caller()' },
+    { id: 'fn', label: 'isBoardFull()', function_name: 'isBoardFull', parent: 'caller' },
+    { id: 'sibling', label: 'sibling()', parent: 'caller' }
+  ],
+  places: [
+    { id: 'p80', label: 'caller boundary / loop head', parent: 'caller', initial_tokens: 1 },
+    { id: 'p2', label: 'loop body', parent: 'fn', initial_tokens: 0 },
+    { id: 'p85', label: 'caller exit', parent: 'caller', initial_tokens: 0 },
+    { id: 'q0', parent: 'sibling' }, { id: 'q1', parent: 'sibling' }, { id: 'q2', parent: 'sibling' }
+  ],
+  transitions: [
+    { id: 'merge_t93', label: 'caller merge', parent: 'caller', tau: 1 },
+    { id: 'for_cell', label: 'for cell', parent: 'fn', tau: 1 },
+    { id: 'else_loop', label: 'else / loop back', parent: 'fn', tau: 1 },
+    { id: 'c_137', label: 'check_space ; return False', parent: 'fn', tau: 2.5 },
+    { id: 'c_103', label: 'loop exit ; return True', parent: 'fn', tau: 1.5 },
+    { id: 'after', label: 'caller continuation', parent: 'caller', tau: 1 },
+    { id: 'sibling_before', parent: 'sibling', tau: 1 },
+    { id: 'sibling_middle', parent: 'sibling', tau: 1 },
+    { id: 'sibling_after', parent: 'sibling', tau: 1 }
+  ],
+  arcs: [
+    { id: 'caller_in', source: 'merge_t93', target: 'p80' },
+    { id: 'a_for_in', source: 'p80', target: 'for_cell' },
+    { id: 'a_for_out', source: 'for_cell', target: 'p2' },
+    { id: 'a_else_in', source: 'p2', target: 'else_loop' },
+    { id: 'a_else_back', source: 'else_loop', target: 'p80' },
+    { id: 'a_return_in', source: 'p2', target: 'c_137' },
+    { id: 'a_return_out', source: 'c_137', target: 'p85' },
+    { id: 'a_loop_exit_in', source: 'p80', target: 'c_103' },
+    { id: 'a_loop_exit_out', source: 'c_103', target: 'p85' },
+    { id: 'caller_out', source: 'p85', target: 'after' },
+    { id: 'sibling_0', source: 'q0', target: 'sibling_before' },
+    { id: 'sibling_1', source: 'sibling_before', target: 'q1' },
+    { id: 'sibling_2', source: 'q1', target: 'sibling_middle' },
+    { id: 'sibling_3', source: 'sibling_middle', target: 'q2' },
+    { id: 'sibling_4', source: 'q2', target: 'sibling_after' }
+  ]
+}"""
+        test_logic = f"""
+const {{ serializeFoldStateSnapshot, parseFoldStateSnapshot }} = require('./code2petri/viewer/engine/session_snapshot.js');
+const DAGRE_LAYOUT_OPTIONS = {{ name: 'dagre' }};
+const inspectorActionResult = {{ textContent: '' }};
+const hudBtnFoldEntireFunction = {{
+  style: {{ display: 'none' }},
+  listener: null,
+  addEventListener: function(name, listener) {{ this.listener = listener; }}
+}};
+const hudEls = {{ foldEntireFunctionBtnEl: hudBtnFoldEntireFunction }};
+let layoutCount = 0;
+cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
+{action_match.group(0)}
+{fold_helpers.group(0)}
+cy.zoom(1.35);
+cy.pan({{ x: 24, y: -17 }});
+['caller_in', 'a_for_in', 'a_for_out', 'a_else_in', 'a_else_back', 'a_return_in', 'a_return_out', 'a_loop_exit_in', 'a_loop_exit_out', 'caller_out']
+  .forEach(function(id, index) {{ cy.getElementById(id).data('weight', index + 1); }});
+
+function canonical(value) {{
+  if (Array.isArray(value)) return value.map(canonical);
+  if (!value || typeof value !== 'object') return value;
+  return Object.keys(value).sort().reduce(function(result, key) {{ result[key] = canonical(value[key]); return result; }}, {{}});
+}}
+function fingerprint(graph) {{
+  return JSON.stringify(graph.elements().map(function(element) {{
+    const data = Object.assign({{}}, element.data());
+    delete data.function_fold_scope;
+    const derivedTriggerClasses = new Set([
+      'contractible', 'contractible-sequence', 'contractible-choice', 'contractible-while',
+      'contractible-state-machine', 'contractible-well-structured', 'contractible-unstructured'
+    ]);
+    return canonical({{
+      id: element.id(),
+      group: element.isNode() ? 'nodes' : 'edges',
+      data: data,
+      classes: element.classes().filter(function(className) {{ return !derivedTriggerClasses.has(className); }}).join(' '),
+      position: element.isNode() ? element.position() : undefined
+    }});
+  }}).sort(function(left, right) {{ return left.id.localeCompare(right.id); }}));
+}}
+const before = fingerprint(cy);
+const originalSm = foldEngine.calculateSMScore();
+const candidates = foldEngine.getActiveStructuralCandidates('fn');
+const candidate = candidates.state_machine && candidates.state_machine[0];
+if (!candidate) throw new Error('Scoped discovery did not recognize the fused entrance/loop-head State Machine');
+if (candidate.tauSum !== 6 || candidate.tauNew !== 12 || candidate.omega !== 6) {{
+  throw new Error('Scoped State Machine candidate changed its existing weight calculation: ' + JSON.stringify(candidate));
+}}
+if (foldEngine.hasElementaryReductions('fn')) throw new Error('Fixture unexpectedly has an eligible elementary reduction');
+const expectedSm = Number((originalSm - candidate.tauSum + candidate.tauNew).toFixed(2));
+const trigger = cy.getElementById('p2');
+if (foldEngine.getFoldType(trigger, 'fn') !== 'state_machine' ||
+    !trigger.hasClass('contractible-state-machine') || trigger.data('function_fold_scope') !== 'fn') {{
+  throw new Error('Function-owned internal trigger did not expose the State Machine fold');
+}}
+if (!handleFoldReduction(trigger)) throw new Error('Generated viewer trigger did not execute the scoped reduction');
+const triggerComponent = cy.getElementById('c_01');
+if (!triggerComponent || triggerComponent.data('component_type') !== 'StateMachine') throw new Error('Trigger used a different structural class');
+const triggerUnfold = handleRightClickUnfold(cy.getElementById('fn'));
+if (!triggerUnfold || !triggerUnfold.success) throw new Error('Trigger fold could not be locally unfolded: ' + JSON.stringify({{ result: triggerUnfold, component: triggerComponent && triggerComponent.json() }}));
+if (fingerprint(cy) !== before) throw new Error('Trigger fold/unfold did not exactly restore graph elements');
+
+const callerIn = cy.getElementById('caller_in');
+const callerOut = cy.getElementById('caller_out');
+const functionNode = cy.getElementById('fn');
+const viewportBeforeFunctionFold = {{ zoom: cy.zoom(), pan: Object.assign({{}}, cy.pan()) }};
+openInspector(functionNode);
+if (!hudBtnFoldEntireFunction.listener || hudBtnFoldEntireFunction.style.display !== 'block') {{
+  throw new Error('Generated viewer did not expose the Fold Entire Function button');
+}}
+hudBtnFoldEntireFunction.listener({{ stopPropagation: function() {{}} }});
+if (!inspectorActionResult.textContent.includes('fully collapsed')) throw new Error('Function button did not report completion');
+if (!functionNode.hasClass('collapsed-compound')) throw new Error('Completed function did not enter collapsed state');
+if (cy.getElementById('p80').data('initial_tokens') !== 1 || cy.getElementById('p80').data('parent') !== 'caller' ||
+    !cy.getElementById('p85').length || callerIn.data('source') !== 'merge_t93' || callerIn.data('target') !== 'p80' ||
+    callerOut.data('source') !== 'p85' || callerOut.data('target') !== 'after') {{
+  throw new Error('Caller anchors, token, hierarchy, or caller arcs changed');
+}}
+if (!cy.getElementById('q1').length || !foldEngine.canSinglePlaceContract(cy.getElementById('q1')).ok) {{
+  throw new Error('Unrelated sibling content or its elementary fold changed');
+}}
+const foldedChild = cy.nodes().filter(function(node) {{ return node.data('parent') === 'fn'; }})[0];
+if (!foldedChild || foldedChild.data('component_type') !== 'StateMachine' ||
+    Math.abs(foldedChild.data('tau') - candidate.tauNew) > 1e-9 ||
+    Math.abs(foldEngine.calculateSMScore() - expectedSm) > 1e-9) {{
+  throw new Error('State Machine weight or Structuredness Metric calculation changed');
+}}
+if (hudBtnFoldEntireFunction.style.display !== 'none') throw new Error('Completed function button remained enabled');
+if (cy.zoom() !== viewportBeforeFunctionFold.zoom || cy.pan().x !== viewportBeforeFunctionFold.pan.x ||
+    cy.pan().y !== viewportBeforeFunctionFold.pan.y) throw new Error('Fold Entire Function changed the viewport');
+
+const documentContext = {{
+  title: 'isBoardFull', sourceFile: '/src/logic.py', filename: 'logic.py', functionName: 'isBoardFull', mode: 'fold',
+  originalNet: net, compounds: net.compounds, foldSteps: [], calleeNets: {{}}, expandedNodes: [],
+  playback: {{ currentStep: 0, totalSteps: 0 }}
+}};
+const saved = parseFoldStateSnapshot(serializeFoldStateSnapshot({{ cy, engine: foldEngine, document: documentContext }}));
+if (saved.viewport.zoom !== viewportBeforeFunctionFold.zoom || saved.viewport.pan.x !== viewportBeforeFunctionFold.pan.x ||
+    saved.viewport.pan.y !== viewportBeforeFunctionFold.pan.y) throw new Error('Saved session did not retain the viewport');
+const resumedCy = cytoscape({{ elements: saved.elements }});
+const resumedEngine = new LiveFoldReductionEngine(resumedCy);
+resumedEngine.cfg = saved.engine.cfg;
+resumedEngine.stepCounter = saved.engine.stepCounter;
+resumedEngine.rememberedCustomNames = new Map(saved.engine.rememberedCustomNames);
+if (!resumedCy.getElementById('fn').hasClass('collapsed-compound')) throw new Error('Saved function did not reopen collapsed');
+const resumedUnfold = resumedEngine.executeComponentLocalUnfold(resumedCy.getElementById('fn'));
+const resumedFingerprint = fingerprint(resumedCy);
+if (!resumedUnfold.success || resumedFingerprint !== before) {{
+  const expectedById = new Map(JSON.parse(before).map(function(item) {{ return [item.id, item]; }}));
+  const actualById = new Map(JSON.parse(resumedFingerprint).map(function(item) {{ return [item.id, item]; }}));
+  const differences = Array.from(new Set([...expectedById.keys(), ...actualById.keys()])).filter(function(id) {{
+    return JSON.stringify(expectedById.get(id)) !== JSON.stringify(actualById.get(id));
+  }}).slice(0, 8).map(function(id) {{ return {{ id: id, expected: expectedById.get(id), actual: actualById.get(id) }}; }});
+  throw new Error('Saved function local unfold did not exactly restore the original graph: ' + JSON.stringify(differences));
+}}
+if (resumedCy.getElementById('p80').data('initial_tokens') !== 1 || !resumedCy.getElementById('q1').length) {{
+  throw new Error('Save/open/unfold changed tokens or sibling hierarchy');
+}}
+const resumedFold = resumedEngine.executeFoldEntireFunction('fn');
+if (!resumedFold.complete || !resumedFold.folded.some(function(item) {{ return item.foldType === 'state_machine'; }})) {{
+  throw new Error('The reopened function could not continue folding');
+}}
+
+const leakyNet = JSON.parse(JSON.stringify(net));
+leakyNet.places.push({{ id: 'escape_sink', parent: 'caller' }});
+leakyNet.transitions.push({{ id: 'escape_to_caller', parent: 'caller' }});
+leakyNet.arcs.push(
+  {{ source: 'p2', target: 'escape_to_caller' }},
+  {{ source: 'escape_to_caller', target: 'escape_sink' }}
+);
+const leakyCy = cytoscape({{ elements: netToElements(leakyNet) }});
+const leakyEngine = new LiveFoldReductionEngine(leakyCy);
+if (leakyEngine.detectStateMachines('fn').length !== 0) throw new Error('Scoped discovery accepted a candidate with an interior crossing edge');
+const leakyBefore = fingerprint(leakyCy);
+const leakyResult = leakyEngine.executeFoldEntireFunction('fn');
+if (leakyResult.success || leakyResult.complete || fingerprint(leakyCy) !== leakyBefore) {{
+  throw new Error('An unsafe scope crossing was forced through a function fold');
+}}
+if (layoutCount < 2) throw new Error('Expected the generated trigger and Fold Entire Function layouts');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Fused entrance/loop-head fold failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
 
 class TestFoldStateSnapshotValidation(unittest.TestCase):
     def test_return_metadata_validation_accepts_old_records_and_rejects_malformed(self):

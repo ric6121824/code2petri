@@ -20,17 +20,19 @@
           this.cy = cy;
         }
 
-        _reachability(startNodeId, boundaryNodeId, getNeighbors) {
+        _reachability(startNodeId, boundaryNodeId, getNeighbors, allowedNodeIds = null, traverseBoundary = false) {
           const queue = [startNodeId];
           const nodes = new Set([startNodeId]);
-          if (boundaryNodeId !== null && boundaryNodeId !== undefined) {
+          if (!traverseBoundary && boundaryNodeId !== null && boundaryNodeId !== undefined) {
             nodes.add(boundaryNodeId);
           }
           while (queue.length > 0) {
             const currId = queue.shift();
+            if (!traverseBoundary && currId === boundaryNodeId) continue;
             const neighbors = getNeighbors(currId);
             for (let i = 0; i < neighbors.length; i++) {
               const neighborId = neighbors[i];
+              if (allowedNodeIds && !allowedNodeIds.has(neighborId)) continue;
               if (!nodes.has(neighborId)) {
                 nodes.add(neighborId);
                 queue.push(neighborId);
@@ -78,6 +80,20 @@
           }).has(sinkId);
         }
 
+        _matchingSESEReachability(forward, backward, minTransitions) {
+          if (forward.size !== backward.size) return null;
+          for (const nodeId of forward) {
+            if (!backward.has(nodeId)) return null;
+          }
+
+          let transitionCount = 0;
+          for (const nodeId of forward) {
+            const node = this.cy.getElementById(nodeId);
+            if (node && node.length > 0 && node.hasClass('transition')) transitionCount++;
+          }
+          return transitionCount >= minTransitions ? forward : null;
+        }
+
         findSESENodes(sourceId, sinkId, minTransitions = 2) {
           if (sourceId === sinkId) return null;
           const srcNode = this.cy.getElementById(sourceId);
@@ -92,24 +108,37 @@
 
           const fwd = this.forwardReachability(sourceId, sinkId);
           const bwd = this.backwardReachability(sinkId, sourceId);
+          return this._matchingSESEReachability(fwd, bwd, minTransitions);
+        }
 
-          if (fwd.size !== bwd.size) return null;
-          for (const nid of fwd) {
-            if (!bwd.has(nid)) return null;
+        findScopedSESENodes(sourceId, sinkId, allowedNodeIds, minTransitions = 2) {
+          if (sourceId === sinkId || !allowedNodeIds ||
+              !allowedNodeIds.has(sourceId) || !allowedNodeIds.has(sinkId)) {
+            return null;
           }
+          const srcNode = this.cy.getElementById(sourceId);
+          const snkNode = this.cy.getElementById(sinkId);
+          if (!srcNode || srcNode.length === 0 || !snkNode || snkNode.length === 0) return null;
 
-          let transCount = 0;
-          for (const nid of fwd) {
-            const n = this.cy.getElementById(nid);
-            if (n && n.length > 0 && n.hasClass('transition')) {
-              transCount++;
-            }
-          }
+          const forward = this._reachability(
+            sourceId,
+            sinkId,
+            this._forwardNeighbors.bind(this),
+            allowedNodeIds
+          );
+          if (!forward.has(sinkId)) return null;
 
-          if (transCount >= minTransitions) {
-            return fwd;
-          }
-          return null;
+          // Within a selected function, reverse reachability may pass through its
+          // entrance place to include a loop that returns to the shared boundary.
+          // The allowed-node set keeps this traversal out of caller transitions.
+          const backward = this._reachability(
+            sinkId,
+            sourceId,
+            this._backwardNeighbors.bind(this),
+            allowedNodeIds,
+            true
+          );
+          return this._matchingSESEReachability(forward, backward, minTransitions);
         }
 
         calculateSymmetryMultiplier(componentNodeIds, targetNodeIds = null, useSubnetDegrees = true) {
@@ -198,6 +227,23 @@
                   nodes: sese
                 });
               }
+            }
+          }
+          return results;
+        }
+
+        findAllScopedSESECandidates(boundaryIds, allowedNodeIds, minTransitions = 2) {
+          const candidates = Array.from(boundaryIds || []).filter(function(nodeId) {
+            return allowedNodeIds && allowedNodeIds.has(nodeId);
+          }).sort();
+          const results = [];
+          for (let i = 0; i < candidates.length; i++) {
+            for (let j = 0; j < candidates.length; j++) {
+              if (i === j) continue;
+              const sourceId = candidates[i];
+              const sinkId = candidates[j];
+              const nodes = this.findScopedSESENodes(sourceId, sinkId, allowedNodeIds, minTransitions);
+              if (nodes) results.push({ sourceId: sourceId, sinkId: sinkId, nodes: nodes });
             }
           }
           return results;
@@ -2104,16 +2150,53 @@
           return Boolean(candidate.triggerId);
         }
 
+        _getFunctionFoldReachabilityNodeIds(scopeId) {
+          const scope = this.cy.getElementById(scopeId);
+          if (!scope || scope.length === 0 || !scope.hasClass('compound')) return new Set();
+          const parentId = scope.data('parent') || null;
+          const allowed = new Set();
+          this.cy.nodes().forEach((node) => {
+            if (!node.hasClass('place') && !node.hasClass('transition')) return;
+            const isFunctionOwned = this._getNodeAncestors(node.id()).includes(scopeId);
+            const isDirectCallerPlace = node.hasClass('place') && (node.data('parent') || null) === parentId;
+            if (isFunctionOwned || isDirectCallerPlace) allowed.add(node.id());
+          });
+          return allowed;
+        }
+
+        _hasClosedConsumedInterior(candidate) {
+          const candidateNodeIds = candidate.nodes;
+          for (const nodeId of candidateNodeIds) {
+            if (nodeId === candidate.sourceId || nodeId === candidate.sinkId) continue;
+            const node = this.cy.getElementById(nodeId);
+            if (!node || node.length === 0) return false;
+            const hasCrossingEdge = node.connectedEdges().some(function(edge) {
+              return !candidateNodeIds.has(edge.source().id()) || !candidateNodeIds.has(edge.target().id());
+            });
+            if (hasCrossingEdge) return false;
+          }
+          return true;
+        }
+
         _discoverSESESubnets(options) {
           const boundaryElements = this.cy.nodes(options.boundarySelector);
           const boundaryIds = boundaryElements.map(function(n) { return n.id(); });
           boundaryIds.sort();
 
           const candidates = [];
-          const seseCandidates = this.sese.findAllSESECandidates(boundaryIds, 2);
+          const hasScopedStateMachineBoundaries = options.scopeId &&
+            options.boundarySelector === '.place' &&
+            options.componentType === 'StateMachine';
+          const allowedScopeNodeIds = hasScopedStateMachineBoundaries
+            ? this._getFunctionFoldReachabilityNodeIds(options.scopeId)
+            : null;
+          const seseCandidates = hasScopedStateMachineBoundaries
+            ? this.sese.findAllScopedSESECandidates(boundaryIds, allowedScopeNodeIds, 2)
+            : this.sese.findAllSESECandidates(boundaryIds, 2);
           const self = this;
 
           seseCandidates.forEach(function(cand) {
+            if (hasScopedStateMachineBoundaries && !self._hasClosedConsumedInterior(cand)) return;
             const consumedForScope = options.boundarySelector === '.place'
               ? new Set(Array.from(cand.nodes).filter(function(nodeId) {
                   return nodeId !== cand.sourceId && nodeId !== cand.sinkId;

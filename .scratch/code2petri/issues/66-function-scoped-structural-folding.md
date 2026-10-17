@@ -6,7 +6,7 @@
 
 **Status:** ready-for-human
 
-**Implementation:** complete (`3d54cbb`; scoped-candidate/containment fix in `96b6fb5`).
+**Implementation:** complete (`3d54cbb`; scoped-candidate/containment fix in `96b6fb5`; fused-boundary loop follow-up recorded below).
 
 **Verification:** full caller-context, browser/session, and invariance acceptance remains pending in the unchecked criteria below.
 
@@ -45,3 +45,9 @@ The final full suite ran 576 tests with 1 failure and 4 errors: the prototype ru
 The user confirmed implementation completion. Commit `96b6fb5` addresses the Round 01 candidate-discovery defect: the selected function may contribute a valid partial interior while caller/sibling and protected nested-container checks remain enforced. The [Round 02 review](../reviews/phase-2.10-tickets-65-67-round-02.md) explicitly records that finding as resolved, with regression coverage for unused children, retained anchors, unrelated siblings, and stale triggers; the discovery criterion above reflects that evidence.
 
 The [Phase 2.8 delivery record](../specs/phase-2.8-viewer-interactive-enhancements.md), README, and [grand plan](../grand_plan.md) now show the extension as implemented. Remaining acceptance requires both Dots & Boxes caller contexts, broader containment/weights/SM checks, actual viewer interactions, and session/unfold continuation. No tests, new code review, or browser checks were run for this documentation update.
+
+### 2026-10-17 — Fused entrance/loop-head follow-up
+
+Scoped structural discovery now supports the reported shared caller-entrance and loop-head topology through the existing validated State Machine reduction. Function-scoped reverse reachability may cross the selected source place while remaining inside the selected function's induced graph and direct caller-place anchors; global SESE traversal is unchanged. Before accepting a scoped candidate, every consumed interior node must have all incident arcs inside that candidate. This retains caller arcs and rejects hidden caller/sibling crossings without changing component classification or weight formulas.
+
+The new production-engine/generated-viewer regression in `tests.test_html_viewer.TestFoldEntireFunction.test_fused_function_entrance_loop_head_is_scoped_state_machine_and_reversible` exercises the internal trigger and Fold Entire Function button, State Machine weight and SM calculation, caller anchors/tokens/hierarchy, unrelated sibling eligibility, viewport, save/open continuation, exact local-unfold restoration, and rejection of an interior crossing edge. The saved Tic Tac Toe session and both Dots & Boxes caller contexts still need human acceptance; this headless regression does not claim those checks passed.

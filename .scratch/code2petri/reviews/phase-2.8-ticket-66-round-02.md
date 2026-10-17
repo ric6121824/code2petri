@@ -3,7 +3,7 @@
 **Verification date:** 2026-10-17  
 **Ticket:** [66 — Function-Scoped Structural Folding](../issues/66-function-scoped-structural-folding.md)  
 **Specification:** [Phase 2.8 — Viewer Interactive Enhancements](../specs/phase-2.8-viewer-interactive-enhancements.md)  
-**Result:** FAIL — the reported Tic Tac Toe `isBoardFull()` occurrence remains partially folded. Ticket 66's human acceptance has not passed for this scenario.  
+**Result:** FAIL at the original human verification — the reported Tic Tac Toe `isBoardFull()` occurrence remained partially folded. Engineering remediation is recorded below; the saved-session browser recheck is still pending.\
 **Source inspected/replayed:** working-tree reduction engine at HEAD `1885e6144e000f794f4b15ec645aac9da0f9c60a`; no engine changes were made during diagnosis.  
 **Method:** User-reported viewer failure, headless Node.js replay of the saved graph through the production Live Fold Reduction engine, minimized replay, and targeted reachability probes. This records the diagnosis from the same conversation; no new browser interaction or full test suite was run for this report.
 
@@ -99,4 +99,14 @@ Follow-up under Phase 2.8 / Ticket 66 should:
 - Recheck the internal trigger and Fold Entire Function, caller/sibling preservation, tokens and hierarchy, viewport, save/open continuation, and exact Component-Local Unfold restoration after any repair.
 - Retain Ticket 66's other pending acceptance cases, including both Dots & Boxes caller contexts; this Tic Tac Toe failure neither verifies nor invalidates those untested cases.
 
-**Disposition:** Human verification failed for the supplied Tic Tac Toe session; remediation and repeat acceptance remain outstanding. This report documents the finding only and does not claim a fix, new test coverage, or a passing browser/session check.
+**Disposition at original verification:** Human verification failed for the supplied Tic Tac Toe session. The follow-up below records subsequent engineering remediation; repeat acceptance remains outstanding.
+
+## Engineering remediation — 2026-10-17
+
+The shared entrance/loop-head topology is supported by the existing State Machine reduction. Function-scoped place-boundary discovery now computes exact forward/backward reachability inside the selected function's induced graph plus its direct caller-owned place anchors. Reverse traversal can continue through the selected source anchor to include an in-scope return loop; caller transitions remain outside the allowed graph. A scoped candidate is rejected if any consumed interior node has an incident edge outside that candidate. Global SESE traversal, class validation, containment checks, and existing transition-weight/penalty calculations remain unchanged. No synthetic routing transition or forced component classification is added.
+
+The self-contained regression at `tests.test_html_viewer.TestFoldEntireFunction.test_fused_function_entrance_loop_head_is_scoped_state_machine_and_reversible` exercises the generated viewer's internal trigger and Fold Entire Function button, retained caller arcs and tokens, sibling eligibility, State Machine weight/SM calculation, viewport preservation, save/open continuation, exact local-unfold restoration, and rejection of an interior crossing edge.
+
+**Headless verification:** the targeted regression passed. `python3 -m unittest -q tests.test_html_viewer` ran 169 tests and reported one pre-existing error in `test_javascript_assigned_functions_keep_owner_jsdoc_and_expression_text` (`PetriNet.initial_net` is missing). `node --check code2petri/viewer/engine/reduction_engine.js`, `python3 -m compileall -q code2petri tests`, and `git diff --check` passed.
+
+The original saved-session artifact still needs a human browser replay, and the two Dots & Boxes caller contexts and remaining Ticket 66 acceptance cases remain open. This remediation changes the original diagnosis disposition from an unsupported shape to a tested scoped reduction, but it does not claim those outstanding acceptance checks passed.
