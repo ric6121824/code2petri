@@ -101,12 +101,27 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     assert m_cxttap is not None, "Could not extract handleRightClickUnfold and cy.on('cxttap') from template.html"
     cxttap_handler_js = m_cxttap.group(0)
 
+    def extract_function(name, end_marker):
+        start = html.index(f"      function {name}(")
+        end = html.index(end_marker, start)
+        return html[start:end].rstrip()
+
+    fold_entire_function_js = extract_function(
+        "handleFoldEntireFunction", "\n\n      if (hudEls.foldEntireFunctionBtnEl)"
+    )
+    get_selected_place_ids_js = extract_function("getSelectedPlaceIds", "\n      function refreshFoldActionView(")
+    refresh_fold_action_view_js = extract_function("refreshFoldActionView", "\n      function formatFoldActionResult(")
+    format_fold_action_result_js = extract_function("formatFoldActionResult", "\n      function updateBatchPlaceFoldControls(")
+    update_batch_controls_js = extract_function("updateBatchPlaceFoldControls", "\n\n      function updateActionHistoryControls(")
+    batch_place_fold_js = extract_function("handleBatchPlaceFold", "\n\n      if (btnFoldSelectedPlaces)")
+
     m_pnml = re.search(r'function escapeXml\(unsafe\) \{.*?\n\s*const triggerClientSideExport = exportClientSidePnml;', html, re.DOTALL)
     assert m_pnml is not None, "Could not extract PNML export functions from template.html"
     pnml_js = m_pnml.group(0)
 
     return f"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+const {{ ViewerActionHistory }} = require('./code2petri/viewer/engine/action_history.js');
 const {{ captureViewport, computeAnchoredPan, restoreViewport }} = require('./code2petri/viewer/engine/viewport.js');
 global.captureViewport = captureViewport;
 global.computeAnchoredPan = computeAnchoredPan;
@@ -170,6 +185,8 @@ const inspectorType = {{ textContent: '' }};
 const inspectorTau = {{ textContent: '' }};
 const inspectorOmega = {{ textContent: '—' }};
 const inspectorLine = {{ textContent: '' }};
+const btnUndo = {{ disabled: true, addEventListener: function(name, listener) {{}} }};
+const btnRedo = {{ disabled: true, addEventListener: function(name, listener) {{}} }};
 const inspectorCloseBtn = {{
   addEventListener: function(evt, cb) {{
     if (evt === 'click') this.onclick = cb;
@@ -224,6 +241,7 @@ const hudBtnUnfold = {{
 let dockedSidebarVisible = true;
 
 const document = {{
+  addEventListener: function(name, listener) {{}},
   getElementById: function(id) {{
     if (id === 'inspector-panel') return inspectorPanel;
     if (id === 'inspector-empty') return inspectorEmpty;
@@ -295,7 +313,7 @@ const net = {net_json_literal};
 
 const expandedNodes = new Map();
 const calleeNetsMap = {{}};
-const currentStep = 0;
+let currentStep = 0;
 function renderStep() {{}}
 
 const cy = cytoscape({{
@@ -310,11 +328,58 @@ cy.on('tap', function(evt) {{
 }});
 
 const foldEngine = new LiveFoldReductionEngine(cy);
+viewerActionHistory = new ViewerActionHistory({{
+  cy,
+  captureContext: () => ({{
+    stepCounter: foldEngine.stepCounter,
+    cfg: foldEngine.cfg,
+    rememberedCustomNames: Array.from(foldEngine.rememberedCustomNames.entries()),
+    expandedNodes: Array.from(expandedNodes.entries()),
+    currentStep
+  }}),
+  restoreContext: state => {{
+    foldEngine.stepCounter = state.stepCounter;
+    foldEngine.cfg = state.cfg;
+    foldEngine.rememberedCustomNames = new Map(state.rememberedCustomNames);
+    expandedNodes.clear();
+    state.expandedNodes.forEach(entry => expandedNodes.set(entry[0], entry[1]));
+    currentStep = state.currentStep;
+  }},
+  captureUi: () => ({{
+    selectionIds: cy.nodes(':selected').map(node => node.id()),
+    inspectorId: selectedInspectorNode && selectedInspectorNode.inside() ? selectedInspectorNode.id() : null,
+    draft: inspectorInput.value,
+    draftDirty: selectedInspectorNode && selectedInspectorNode.inside()
+      ? inspectorInput.value !== String(selectedInspectorNode.data('label') || '') : false
+  }}),
+  restoreUi: state => {{
+    cy.nodes(':selected').unselect();
+    (state.selectionIds || []).forEach(id => {{
+      const selectedNode = cy.getElementById(id);
+      if (selectedNode.length) selectedNode.select();
+    }});
+    const inspected = state.inspectorId ? cy.getElementById(state.inspectorId) : null;
+    if (inspected && inspected.length) {{
+      openInspector(inspected);
+      if (state.draftDirty) inspectorInput.value = state.draft || '';
+    }}
+    else closeInspector();
+  }},
+  afterRestore: () => updateFoldableHighlights()
+}});
 
 {update_highlights_js}
 updateFoldableHighlights();
 
 {fold_reduce_js}
+
+{fold_entire_function_js}
+
+{get_selected_place_ids_js}
+{refresh_fold_action_view_js}
+{format_fold_action_result_js}
+{update_batch_controls_js}
+{batch_place_fold_js}
 
 let hasDragged = false;
 
@@ -1066,16 +1131,30 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
     def test_headless_tap_handler_ignores_preassembled_compounds(self):
-        """Simulates tap event on preassembled compound and verifies renderStep is not called."""
-        import subprocess
-
-        template_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "template.html")
-        )
-        with open(template_path, "r", encoding="utf-8") as f:
-            html = f.read()
-
-        self.assertIn("targetNode.data('composite_preassembled') === true", html)
+        """A preassembled function container opens inspection without expanding or rendering."""
+        html = _read_template_html()
+        match = re.search(r"cy\.on\('tap', 'node', function\(evt\) \{.*?\n      \}\);", html, re.DOTALL)
+        self.assertIsNotNone(match)
+        script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+{_extract_template_net_to_elements()}
+const payload = {{}};
+const expandedNodes = new Map();
+const calleeNetsMap = {{ helper: {{ places: [], transitions: [], arcs: [] }} }};
+let currentStep = 0, renderCalls = 0, inspectCalls = 0;
+function renderStep() {{ renderCalls += 1; }}
+function openInspector() {{ inspectCalls += 1; }}
+function performViewerAction(label, operation) {{ return operation(); }}
+const net = {{ compounds: [{{ id: 'preassembled', function_name: 'helper', label: 'helper()' }}], places: [], transitions: [], arcs: [] }};
+const cy = cytoscape({{ elements: netToElements(net) }});
+{match.group(0)}
+cy.getElementById('preassembled').emit('tap');
+if (renderCalls !== 0 || inspectCalls !== 1 || expandedNodes.size !== 0) {{
+  throw new Error('Preassembled compound was expanded instead of inspected');
+}}
+"""
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
 
     def test_nested_compound_nodes_hierarchy_and_depth_classes(self):
         """Validates that netToElements sorts compounds topologically, assigns depth and depth classes."""
@@ -7131,6 +7210,7 @@ let invalidSnapshot = JSON.stringify({
 });
 let activeGraph = 'previous-session';
 let restoreCalls = 0;
+let historyClearCalls = 0;
 let shownError = '';
 const btnOpenSession = { listeners: {}, addEventListener: function(name, callback) { this.listeners[name] = callback; }, click: function() {} };
 const inputOpenSession = {
@@ -7142,10 +7222,11 @@ global.FileReader = function() {
 };
 global.alert = function(message) { shownError = message; };
 const parseFoldStateSnapshot = parseSnapshot;
-const restoreFoldStateSnapshot = () => { restoreCalls++; activeGraph = 'replacement'; };
+const viewerActionHistory = { clear: () => { historyClearCalls++; } };
+const restoreFoldStateSnapshot = () => { restoreCalls++; activeGraph = 'replacement'; viewerActionHistory.clear(); };
 __OPEN_HANDLER__
 inputOpenSession.listeners.change();
-if (restoreCalls !== 0 || activeGraph !== 'previous-session') throw new Error('Invalid session replaced the active graph');
+if (restoreCalls !== 0 || activeGraph !== 'previous-session' || historyClearCalls !== 0) throw new Error('Invalid session replaced the active graph or cleared history');
 if (!shownError.includes('Invalid Fold State Snapshot')) throw new Error('Invalid session error was not shown');
 const invalidNetSnapshot = JSON.parse(invalidSnapshot);
 invalidNetSnapshot.document.foldSteps = [];
@@ -7154,14 +7235,14 @@ invalidNetSnapshot.document.originalNet.transitions = [null];
 invalidSnapshot = JSON.stringify(invalidNetSnapshot);
 shownError = '';
 inputOpenSession.listeners.change();
-if (restoreCalls !== 0 || activeGraph !== 'previous-session') throw new Error('Invalid net entry replaced the active graph');
+if (restoreCalls !== 0 || activeGraph !== 'previous-session' || historyClearCalls !== 0) throw new Error('Invalid net entry replaced the active graph or cleared history');
 if (!shownError.includes('Invalid Fold State Snapshot')) throw new Error('Invalid net entry error was not shown');
 invalidNetSnapshot.document.originalNet.transitions = [];
 invalidNetSnapshot.document.sidebarVisible = 'hidden';
 invalidSnapshot = JSON.stringify(invalidNetSnapshot);
 shownError = '';
 inputOpenSession.listeners.change();
-if (restoreCalls !== 0 || activeGraph !== 'previous-session') throw new Error('Invalid sidebar state replaced the active graph');
+if (restoreCalls !== 0 || activeGraph !== 'previous-session' || historyClearCalls !== 0) throw new Error('Invalid sidebar state replaced the active graph or cleared history');
 if (!shownError.includes('document.sidebarVisible')) throw new Error('Invalid sidebar state error was not shown');
 console.log('PASS');
 """.replace('__OPEN_HANDLER__', open_handler.group(0))
@@ -7240,6 +7321,8 @@ let initialSm = 0;
 let isFoldMode = false;
 let restoredSidebarVisible = null;
 const setDockedSidebarVisible = (visible) => { restoreSequence.push('sidebar'); restoredSidebarVisible = visible; };
+let historyClearCalls = 0;
+const viewerActionHistory = { clear: () => { historyClearCalls += 1; } };
 const calleeNetsMap = {};
 const expandedNodes = new Map();
 const foldEngine = { cfg: {}, stepCounter: 0, rememberedCustomNames: new Map(), calculateSMScore: () => 3.6 };
@@ -7259,6 +7342,7 @@ if (restoredSidebarVisible !== true || restoreSequence.join(',') !== 'sidebar,vi
 if (payload.title !== 'Restored Doc' || global.document.title !== 'Restored Doc - code2petri Viewer') throw new Error('Document identity was not restored');
 if (foldEngine.stepCounter !== 5 || foldEngine.cfg.choice !== 2 || !foldEngine.rememberedCustomNames.has('c_05')) throw new Error('Engine state was not restored');
 if (initialNet.places[0].id !== 'start' || !calleeNetsMap.helper || closedInspector !== 1) throw new Error('Document context or inspector state was not restored');
+if (historyClearCalls !== 1) throw new Error('Successful Open Session did not clear viewer action history');
 console.log('PASS');
 """.replace('__RESTORE_FUNCTION__', restore_match.group(0))
         proc = _run_node_script(script)

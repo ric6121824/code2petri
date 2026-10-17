@@ -428,6 +428,10 @@
     </div>
 
     <div class="toolbar" id="viewer-toolbar">
+      <div class="controls" id="action-history-controls" aria-label="Viewer action history">
+        <button class="btn" id="btn-undo" type="button" title="Undo the last graph edit" aria-label="Undo" disabled>Undo</button>
+        <button class="btn" id="btn-redo" type="button" title="Redo the last undone graph edit" aria-label="Redo" disabled>Redo</button>
+      </div>
       <div class="controls" id="fold-controls" style="display: none;">
         <button class="btn" id="btn-reset" title="Reset to initial un-folded net">Reset</button>
         <button class="btn" id="btn-unfold" title="Step backward (unfold last component)">◀ Unfold</button>
@@ -1893,6 +1897,12 @@
       }
 
       var selectedInspectorNode = null;
+      let viewerActionHistory = null;
+
+      function performViewerAction(label, operation, shouldCommit) {
+        if (!viewerActionHistory) return operation();
+        return viewerActionHistory.perform(label, operation, shouldCommit);
+      }
 
       function _resolveHudElements() {
         const doc = typeof document !== 'undefined' ? document : null;
@@ -1918,20 +1928,22 @@
       }
 
       function applyComponentNodeRename(newName) {
-        if (!selectedInspectorNode || !selectedInspectorNode.inside()) return false;
-        const els = _resolveHudElements();
-        const val = (newName !== undefined ? newName : (els.inputEl ? (els.inputEl.value || els.inputEl.textContent) : '')).trim();
-        if (!val) return false;
-        if (typeof foldEngine !== 'undefined' && foldEngine && typeof foldEngine.renameNode === 'function') {
-          foldEngine.renameNode(selectedInspectorNode, val);
-        } else if (typeof selectedInspectorNode.data === 'function') {
-          selectedInspectorNode.data('label', val);
-          selectedInspectorNode.data('raw_label', val);
-          selectedInspectorNode.data('custom_name', val);
-        }
-        if (els.labelEl) els.labelEl.textContent = val;
-        if (els.inputEl) els.inputEl.value = val;
-        return true;
+        return performViewerAction('Rename component', function() {
+          if (!selectedInspectorNode || !selectedInspectorNode.inside()) return false;
+          const els = _resolveHudElements();
+          const val = (newName !== undefined ? newName : (els.inputEl ? (els.inputEl.value || els.inputEl.textContent) : '')).trim();
+          if (!val) return false;
+          if (typeof foldEngine !== 'undefined' && foldEngine && typeof foldEngine.renameNode === 'function') {
+            foldEngine.renameNode(selectedInspectorNode, val);
+          } else if (typeof selectedInspectorNode.data === 'function') {
+            selectedInspectorNode.data('label', val);
+            selectedInspectorNode.data('raw_label', val);
+            selectedInspectorNode.data('custom_name', val);
+          }
+          if (els.labelEl) els.labelEl.textContent = val;
+          if (els.inputEl) els.inputEl.value = val;
+          return true;
+        });
       }
       const saveInspectorName = applyComponentNodeRename;
 
@@ -2055,17 +2067,17 @@
 
       function handleFoldEntireFunction(compoundNode) {
         if (!foldEngine || !compoundNode || !compoundNode.inside()) return null;
-        const viewportBefore = captureViewport(cy);
-        const result = foldEngine.executeFoldEntireFunction(compoundNode);
-        if (result.success) {
-          refreshFoldActionView(viewportBefore);
-          openInspector(compoundNode);
-        }
-        const els = _resolveHudElements();
-        if (els.actionResultEl) {
-          els.actionResultEl.textContent = formatFoldActionResult(result);
-        }
-        return result;
+        return performViewerAction('Fold entire function', function() {
+          const viewportBefore = captureViewport(cy);
+          const result = foldEngine.executeFoldEntireFunction(compoundNode);
+          if (result.success) {
+            refreshFoldActionView(viewportBefore);
+            openInspector(compoundNode);
+          }
+          const els = _resolveHudElements();
+          if (els.actionResultEl) els.actionResultEl.textContent = formatFoldActionResult(result);
+          return result;
+        }, function(result) { return Boolean(result && result.success); });
       }
 
       if (hudEls.foldEntireFunctionBtnEl) {
@@ -2186,31 +2198,25 @@
         const meta = LiveFoldReductionEngine.FOLD_TYPE_REGISTRY[foldType];
         if (!meta || typeof meta.execute !== 'function') return false;
 
-        const viewportBefore = captureViewport(cy);
-        const preFoldPlacePos = (node && typeof node.position === 'function' && node.position()) ? Object.assign({}, node.position()) : null;
+        return performViewerAction('Fold component', function() {
+          const viewportBefore = captureViewport(cy);
+          const preFoldPlacePos = (node && typeof node.position === 'function' && node.position()) ? Object.assign({}, node.position()) : null;
+          const res = meta.execute(foldEngine, node, scopeId);
+          if (!res || !res.success) return false;
 
-        const res = meta.execute(foldEngine, node, scopeId);
-        if (res && res.success) {
           if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
             cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
           }
-
           const postFoldTransitionPos = (res.node && typeof res.node.position === 'function') ? res.node.position() : null;
           const targetPan = computeAnchoredPan(viewportBefore.pan, preFoldPlacePos, postFoldTransitionPos, viewportBefore.zoom);
           restoreViewport(cy, viewportBefore.zoom, targetPan);
-
-          if (typeof updateFoldableHighlights === 'function') {
-            updateFoldableHighlights();
-          }
-          if (res.node && typeof openInspector === 'function') {
-            openInspector(res.node);
-          }
+          if (typeof updateFoldableHighlights === 'function') updateFoldableHighlights();
+          if (res.node && typeof openInspector === 'function') openInspector(res.node);
           if (typeof valSm !== 'undefined' && valSm && typeof foldEngine !== 'undefined' && foldEngine) {
             valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
           }
           return true;
-        }
-        return false;
+        });
       }
 
       // Cursor feedback on hover
@@ -2240,31 +2246,21 @@
           return;
         }
 
-        // 2. Left-clicking a transition or component node strictly opens inspector panel (P3)
-        const isTransition = targetNode.hasClass('transition') || targetNode.data('type') === 'Transition' || targetNode.data('type') === 'Opaque Transition';
-        const isComponent = targetNode.hasClass('compound') || targetNode.data('is_compound') === true || targetNode.data('is_opaque') === true;
-
-        if (isTransition || isComponent) {
-          openInspector(targetNode);
-          return;
-        }
-
-        if (targetNode.data('composite_preassembled') === true) return;
-
-        // 3. (Single-function mode only) If clicked node is an expanded compound node, collapse it
-        if (!targetNode.hasClass('collapsed-compound') && (expandedNodes.has(targetId) || targetNode.hasClass('compound'))) {
-          const prefix = targetId + '__';
-          Array.from(expandedNodes.keys()).forEach(function(id) {
-            if (id.startsWith(prefix)) {
-              expandedNodes.delete(id);
-            }
+        // An expanded call remains a resolved transition, so handle its graph action before inspection.
+        if (!targetNode.hasClass('collapsed-compound') && expandedNodes.has(targetId)) {
+          performViewerAction('Collapse function call', function() {
+            const prefix = targetId + '__';
+            Array.from(expandedNodes.keys()).forEach(function(id) {
+              if (id.startsWith(prefix)) expandedNodes.delete(id);
+            });
+            expandedNodes.delete(targetId);
+            renderStep(currentStep, true);
+            return true;
           });
-          expandedNodes.delete(targetId);
-          renderStep(currentStep, true);
           return;
         }
 
-        // 4. (Single-function mode only) If clicked node is a resolved call transition, expand it
+        // Resolved calls expand before the generic transition inspector handler.
         if (targetNode.data('resolved') === true) {
           const resolvedTo = targetNode.data('resolved_to');
           const rawLabel = targetNode.data('raw_label');
@@ -2279,36 +2275,39 @@
           }
 
           if (calleeName && calleeNetsMap[calleeName]) {
-            expandedNodes.set(targetId, { calleeName: calleeName });
-            renderStep(currentStep, true);
+            performViewerAction('Expand function call', function() {
+              expandedNodes.set(targetId, { calleeName: calleeName });
+              renderStep(currentStep, true);
+              return true;
+            });
             return;
           }
         }
+
+        // Transitions and components without an available expansion open the inspector.
+        const isTransition = targetNode.hasClass('transition') || targetNode.data('type') === 'Transition' || targetNode.data('type') === 'Opaque Transition';
+        const isComponent = targetNode.hasClass('compound') || targetNode.data('is_compound') === true || targetNode.data('is_opaque') === true;
+        if (isTransition || isComponent) openInspector(targetNode);
       });
 
       function handleRightClickUnfold(node) {
         if (typeof foldEngine === 'undefined' || !foldEngine || !node) return false;
-        const viewportBefore = captureViewport(cy);
-
-        const res = foldEngine.executeComponentLocalUnfold(node);
-        if (res && res.success) {
+        return performViewerAction('Component-local unfold', function() {
+          const viewportBefore = captureViewport(cy);
+          const res = foldEngine.executeComponentLocalUnfold(node);
+          if (!res || !res.success) return false;
           if (typeof refreshCompoundDepthPresentation === 'function') refreshCompoundDepthPresentation(cy);
           if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
             cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
           }
           restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
-          if (typeof updateFoldableHighlights === 'function') {
-            updateFoldableHighlights();
-          }
-          if (typeof closeInspector === 'function') {
-            closeInspector();
-          }
+          if (typeof updateFoldableHighlights === 'function') updateFoldableHighlights();
+          if (typeof closeInspector === 'function') closeInspector();
           if (typeof valSm !== 'undefined' && valSm && typeof foldEngine !== 'undefined' && foldEngine) {
             valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
           }
           return true;
-        }
-        return false;
+        });
       }
 
       // 5. Right-clicking an opaque transition or collapsed compound triggers Component-Local Unfold
@@ -2331,6 +2330,8 @@
       const btnFold = document.getElementById('btn-fold');
       const btnUnfold = document.getElementById('btn-unfold');
       const btnReset = document.getElementById('btn-reset');
+      const btnUndo = document.getElementById('btn-undo');
+      const btnRedo = document.getElementById('btn-redo');
       const btnOpenSession = document.getElementById('btn-open-session');
       const inputOpenSession = document.getElementById('input-open-session');
       const btnSaveSession = document.getElementById('btn-save-session');
@@ -2429,7 +2430,10 @@
       if (btnFold) {
         btnFold.addEventListener('click', function() {
           if (currentStep < totalSteps) {
-            renderStep(currentStep + 1);
+            performViewerAction('Fold playback step', function() {
+              renderStep(currentStep + 1);
+              return true;
+            });
           }
         });
       }
@@ -2437,14 +2441,20 @@
       if (btnUnfold) {
         btnUnfold.addEventListener('click', function() {
           if (currentStep > 0) {
-            renderStep(currentStep - 1);
+            performViewerAction('Unfold playback step', function() {
+              renderStep(currentStep - 1);
+              return true;
+            });
           }
         });
       }
 
       if (btnReset) {
         btnReset.addEventListener('click', function() {
-          renderStep(0);
+          performViewerAction('Reset graph', function() {
+            renderStep(0);
+            return true;
+          });
         });
       }
 
@@ -2477,25 +2487,153 @@
           : 'Fold Selected Places';
       }
 
+      function updateActionHistoryControls() {
+        if (btnUndo) btnUndo.disabled = !viewerActionHistory || !viewerActionHistory.canUndo;
+        if (btnRedo) btnRedo.disabled = !viewerActionHistory || !viewerActionHistory.canRedo;
+      }
+
+      function captureHistoryUi() {
+        const hud = _resolveHudElements();
+        const currentLabel = selectedInspectorNode && selectedInspectorNode.inside()
+          ? String(selectedInspectorNode.data('label') || '') : null;
+        return {
+          selectionIds: cy.nodes(':selected').map(function(node) { return node.id(); }),
+          inspectorId: selectedInspectorNode && selectedInspectorNode.inside() ? selectedInspectorNode.id() : null,
+          draft: hud.inputEl ? hud.inputEl.value : '',
+          draftDirty: Boolean(hud.inputEl && currentLabel !== null && hud.inputEl.value !== currentLabel)
+        };
+      }
+
+      function restoreHistoryUi(state) {
+        const ui = state || {};
+        cy.nodes(':selected').unselect();
+        (Array.isArray(ui.selectionIds) ? ui.selectionIds : []).forEach(function(id) {
+          const node = cy.getElementById(id);
+          if (node && node.length > 0) node.select();
+        });
+        const inspectorNode = ui.inspectorId ? cy.getElementById(ui.inspectorId) : null;
+        if (inspectorNode && inspectorNode.length > 0 && inspectorNode.inside()) {
+          openInspector(inspectorNode);
+          const hud = _resolveHudElements();
+          if (hud.inputEl && ui.draftDirty && typeof ui.draft === 'string') hud.inputEl.value = ui.draft;
+        } else {
+          closeInspector();
+        }
+      }
+
+      viewerActionHistory = new ViewerActionHistory({
+        cy: cy,
+        captureContext: function() {
+          return {
+            stepCounter: foldEngine.stepCounter,
+            cfg: foldEngine.cfg,
+            rememberedCustomNames: Array.from(foldEngine.rememberedCustomNames.entries()),
+            expandedNodes: Array.from(expandedNodes.entries()),
+            currentStep: currentStep
+          };
+        },
+        restoreContext: function(state) {
+          foldEngine.stepCounter = state.stepCounter;
+          foldEngine.cfg = Object.assign({}, state.cfg);
+          foldEngine.rememberedCustomNames = new Map(state.rememberedCustomNames);
+          expandedNodes.clear();
+          state.expandedNodes.forEach(function(entry) { expandedNodes.set(entry[0], entry[1]); });
+          currentStep = state.currentStep;
+        },
+        captureUi: captureHistoryUi,
+        restoreUi: restoreHistoryUi,
+        afterRestore: function() {
+          updateFoldableHighlights();
+          if (isFoldMode) updateUI();
+          if (valSm) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+          updateBatchPlaceFoldControls();
+          updateActionHistoryControls();
+        },
+        onChange: updateActionHistoryControls
+      });
+      updateActionHistoryControls();
+
+      function runHistoryCommand(command) {
+        try {
+          return viewerActionHistory && viewerActionHistory[command]();
+        } catch (error) {
+          alert('Could not ' + command + ' viewer action: ' + (error && error.message ? error.message : 'Unknown error'));
+          return false;
+        }
+      }
+
+      if (btnUndo) btnUndo.addEventListener('click', function() { runHistoryCommand('undo'); });
+      if (btnRedo) btnRedo.addEventListener('click', function() { runHistoryCommand('redo'); });
+
+      document.addEventListener('keydown', function(event) {
+        if (!event || event.isComposing || event.keyCode === 229) return;
+        const target = event.target;
+        const editingTarget = target && (
+          /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName || '') ||
+          target.isContentEditable === true ||
+          (typeof target.closest === 'function' && target.closest('[contenteditable]:not([contenteditable="false"])'))
+        );
+        if (editingTarget) return;
+        const key = String(event.key || '').toLowerCase();
+        const primary = Boolean(event.metaKey || event.ctrlKey);
+        if (!primary) return;
+        if (key === 'z') {
+          const command = event.shiftKey ? 'redo' : 'undo';
+          if (viewerActionHistory && viewerActionHistory[command] &&
+              ((command === 'undo' && viewerActionHistory.canUndo) || (command === 'redo' && viewerActionHistory.canRedo))) {
+            event.preventDefault();
+            runHistoryCommand(command);
+          }
+        } else if (key === 'y' && event.ctrlKey && !event.metaKey && viewerActionHistory && viewerActionHistory.canRedo) {
+          event.preventDefault();
+          runHistoryCommand('redo');
+        }
+      });
+
+      let moveGesture = null;
+      const grabbedNodeIds = new Set();
+      cy.on('grab', 'node', function(event) {
+        if (isPanningDrag || !viewerActionHistory) return;
+        if (!moveGesture) moveGesture = viewerActionHistory.beginGesture('Move nodes');
+        grabbedNodeIds.add(event.target.id());
+      });
+      cy.on('free', 'node', function(event) {
+        if (!moveGesture || !grabbedNodeIds.has(event.target.id())) return;
+        grabbedNodeIds.delete(event.target.id());
+        if (grabbedNodeIds.size !== 0) return;
+        const completedGesture = moveGesture;
+        setTimeout(function() {
+          if (moveGesture !== completedGesture || grabbedNodeIds.size !== 0) return;
+          moveGesture = null;
+          try {
+            viewerActionHistory.commitGesture(completedGesture, true);
+          } catch (error) {
+            try { viewerActionHistory.cancelGesture(completedGesture); } catch (_) { /* Preserve the original error. */ }
+            alert('Could not record node move: ' + (error && error.message ? error.message : 'Unknown error'));
+          }
+        }, 0);
+      });
+
       function handleBatchPlaceFold() {
         const selectedPlaceIds = getSelectedPlaceIds();
         if (selectedPlaceIds.length < 2) return;
 
-        const viewportBefore = captureViewport(cy);
-        const result = foldEngine.executeBatchFold(selectedPlaceIds);
-        if (result.folded.length > 0) {
-          refreshFoldActionView(viewportBefore);
-          if (selectedInspectorNode && selectedInspectorNode.inside()) {
-            openInspector(selectedInspectorNode);
-          } else {
-            closeInspector();
+        return performViewerAction('Batch place fold', function() {
+          const viewportBefore = captureViewport(cy);
+          const result = foldEngine.executeBatchFold(selectedPlaceIds);
+          if (result.folded.length > 0) {
+            refreshFoldActionView(viewportBefore);
+            if (selectedInspectorNode && selectedInspectorNode.inside()) {
+              openInspector(selectedInspectorNode);
+            } else {
+              closeInspector();
+            }
           }
-        }
 
-        if (batchFoldResult) {
-          batchFoldResult.textContent = formatFoldActionResult(result);
-        }
-        updateBatchPlaceFoldControls();
+          if (batchFoldResult) batchFoldResult.textContent = formatFoldActionResult(result);
+          updateBatchPlaceFoldControls();
+          return result;
+        }, function(result) { return Boolean(result && result.folded && result.folded.length > 0); });
       }
 
       if (btnFoldSelectedPlaces) {
@@ -2630,6 +2768,7 @@
         updateFoldableHighlights();
         updateBatchPlaceFoldControls();
         restoreViewport(cy, snapshot.viewport.zoom, snapshot.viewport.pan);
+        if (viewerActionHistory) viewerActionHistory.clear();
       }
 
       if (btnOpenSession && inputOpenSession) {

@@ -45,6 +45,7 @@ def _load_engine_scripts() -> str:
     engine_path = os.path.join(engine_dir, "reduction_engine.js")
     viewport_path = os.path.join(engine_dir, "viewport.js")
     session_snapshot_path = os.path.join(engine_dir, "session_snapshot.js")
+    action_history_path = os.path.join(engine_dir, "action_history.js")
     with open(pnml_path, "r", encoding="utf-8") as f:
         pnml_content = f.read()
     with open(engine_path, "r", encoding="utf-8") as f:
@@ -53,9 +54,11 @@ def _load_engine_scripts() -> str:
         viewport_content = f.read()
     with open(session_snapshot_path, "r", encoding="utf-8") as f:
         session_snapshot_content = f.read()
+    with open(action_history_path, "r", encoding="utf-8") as f:
+        action_history_content = f.read()
     return (
         f"{pnml_content}\n\n{engine_content}\n\n{viewport_content}"
-        f"\n\n{session_snapshot_content}"
+        f"\n\n{session_snapshot_content}\n\n{action_history_content}"
     )
 
 
