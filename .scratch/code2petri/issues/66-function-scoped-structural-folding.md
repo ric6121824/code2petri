@@ -6,8 +6,12 @@
 
 **Status:** ready-for-human
 
+**Implementation:** complete (`3d54cbb`; scoped-candidate/containment fix in `96b6fb5`).
+
+**Verification:** full caller-context, browser/session, and invariance acceptance remains pending in the unchecked criteria below.
+
 - [x] Apply elementary-before-structural priority within the selected Function Fold Scope, including eligible descendants. Unrelated elementary reductions elsewhere do not block a valid scoped structural fold; whole-net priority remains unchanged.
-- [ ] Discover and select structural candidates within that scope so a larger candidate crossing caller/sibling ownership cannot hide an eligible contained component. Retain existing class precedence, maximal/minimal selection rules, SESE reachability, validators, penalties, and transition-weight calculations within the scope.
+- [x] Discover and select structural candidates within that scope so a larger candidate crossing caller/sibling ownership cannot hide an eligible contained component. Retain existing class precedence, maximal/minimal selection rules, SESE reachability, validators, penalties, and transition-weight calculations within the scope.
 - [x] Allow caller-owned entrance and exit places as retained anchors. Validate containment using the actually consumed interior; do not consume the anchors or unrelated caller/sibling nodes, or partially consume a protected nested container.
 - [x] Expose a function-owned internal place trigger identifying the actual reduction type, using existing type-specific fold styling. Structural eligibility must not be mislabeled as green Sequence eligibility.
 - [x] Make that trigger and Fold Entire Function expose the same safe candidate and revalidate immediately before mutation. Preserve containment and stale-target safety in individual/batch interactions involving the trigger.
@@ -35,3 +39,9 @@ See the [Phase 2.8 specification](../specs/phase-2.8-viewer-interactive-enhancem
 Implemented scope-aware elementary gating, structural discovery and containment, retained caller anchors, internal place triggers, stale-trigger revalidation, and the existing Fold Entire Function action. Focused headless tests cover unrelated sibling elementary work, retained anchors, a validated state-machine fold, and a stale trigger. Full Dots & Boxes caller-context, nested-container, weights/SM, session/unfold, and generated-browser interaction verification remain pending; keep this ticket ready for human verification.
 
 The final full suite ran 576 tests with 1 failure and 4 errors: the prototype runner could not bind its test port; optional `pygraphviz` and `pytest` dependencies are unavailable; and two pre-existing integration expectations disagree with current return shapes (`PetriNet.initial_net` and two-value `WalkerProtocol` unpacking). Focused regression suites and `compileall` passed.
+
+### 2026-10-16 — Review disposition and delivery documentation
+
+The user confirmed implementation completion. Commit `96b6fb5` addresses the Round 01 candidate-discovery defect: the selected function may contribute a valid partial interior while caller/sibling and protected nested-container checks remain enforced. The [Round 02 review](../reviews/phase-2.10-tickets-65-67-round-02.md) explicitly records that finding as resolved, with regression coverage for unused children, retained anchors, unrelated siblings, and stale triggers; the discovery criterion above reflects that evidence.
+
+The [Phase 2.8 delivery record](../specs/phase-2.8-viewer-interactive-enhancements.md), README, and [grand plan](../grand_plan.md) now show the extension as implemented. Remaining acceptance requires both Dots & Boxes caller contexts, broader containment/weights/SM checks, actual viewer interactions, and session/unfold continuation. No tests, new code review, or browser checks were run for this documentation update.
