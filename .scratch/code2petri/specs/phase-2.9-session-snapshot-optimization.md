@@ -1,6 +1,10 @@
 # Phase 2.9: Compact and Reliable Fold State Snapshots
 
-Status: ready-for-agent
+Status: ready-for-human
+
+Implementation: complete (Tickets 51–52; updated 2026-10-16).
+
+Ticket 51 is resolved. Ticket 52's download lifecycle is implemented and remains ready for human verification of completed downloads in Safari, Chrome, and Firefox. The problem statements below record the pre-implementation behavior, not a claim that the old serialization path is still active.
 
 ## Problem Statement
 
@@ -110,6 +114,12 @@ The synthetic production save took approximately 720 ms in the local Node measur
 ### Relationship to existing work
 
 - [Phase 2.8](./phase-2.8-viewer-interactive-enhancements.md) delivered the session workflow. Phase 2.9 optimizes and hardens that contract.
-- [Ticket 51: Compact, lossless Fold State Snapshot saves](../issues/51-safari-large-session-download.md) replaces the earlier Safari-only draft and covers canonical, compact, lossless session data. [Ticket 52: Reliable large Save Session downloads across browsers](../issues/52-reliable-save-session-downloads.md) covers the download lifecycle and browser acceptance after Ticket 51. Both are `ready-for-agent`.
+- [Ticket 51: Compact, lossless Fold State Snapshot saves](../issues/51-safari-large-session-download.md) is resolved and delivers canonical, compact, lossless session data. [Ticket 52: Reliable large Save Session downloads across browsers](../issues/52-reliable-save-session-downloads.md) implements independent download lifetimes and remains `ready-for-human` for browser acceptance. Ticket 51's prerequisite is satisfied.
 - Reuse the snapshot and generated-viewer testing prior art in [the viewer tests](../../../tests/test_html_viewer.py). The current capture/download implementation is in [the session snapshot module](../../../code2petri/viewer/engine/session_snapshot.js), with restoration records created by [the reduction engine](../../../code2petri/viewer/engine/reduction_engine.js).
 - Preserve [the domain glossary](../../../GLOSSARY.md), [boundary place unification](../../../docs/adr/0002-boundary-place-unification.md), and [the adopted reduction algorithm](../../../docs/adr/0003-adopt-prom-local-reduction-algorithm.md). This phase changes persistence representation and resource handling, not the Petri net semantics.
+
+## Delivery Record
+
+- Canonical detached capture writes each nested restoration record once, accepts legacy aliases, and produces compact version-1 snapshots without discarding unfold history.
+- The download helper keeps each Blob URL independently for a bounded 30-second grace period, removes temporary anchors, and cleans up detectable initiation failures. This timer does not prove file completion. Ticket 52 records 11 focused tests and 134 viewer tests passing at implementation time; those historical results were not rerun here.
+- 2026-10-16: The user confirmed implementation completion. Completed-file checks in Safari 18.6, Chrome, and Firefox, including browser versions and small/large/deep sessions, remain unperformed in the recorded evidence. The original Safari/Firefox failure cause remains provisional. No browser-specific reliability claim is added by this documentation update.
