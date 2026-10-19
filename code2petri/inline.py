@@ -117,6 +117,15 @@ def _splice_callee_net(
         a.target for a in caller_net.arcs
         if a.source.id == call_transition.id and isinstance(a.target, Place)
     ]
+    exception_alternatives = [
+        transition for transition in caller_net.transitions
+        if transition.metadata
+        and transition.metadata.get("exception_alternative_of") == call_transition.id
+    ]
+    exception_postset_places = [
+        arc.target for arc in caller_net.arcs
+        if arc.source in exception_alternatives and isinstance(arc.target, Place)
+    ]
 
     if not preset_places or not postset_places:
         return
@@ -128,12 +137,23 @@ def _splice_callee_net(
     # the callee's boundary places are merged into caller preset and postset places, and caller arcs
     # connect directly between caller places and callee internal transitions.
     callee_source_place, callee_sink_place = callee_net.find_boundary_places()
+    callee_exception_sink = callee_net.find_exception_boundary_place()
     if (
         callee_source_place is None
         or callee_sink_place is None
         or callee_source_place.id == callee_sink_place.id
     ):
         return
+
+    if callee_exception_sink is not None and not exception_postset_places:
+        caller_exception_sink = caller_net.find_exception_boundary_place()
+        if caller_exception_sink is None:
+            caller_exception_sink = caller_net.ensure_exception_boundary_place()
+        exception_postset_places = [caller_exception_sink]
+    fuse_exception_sink = callee_exception_sink is not None and bool(exception_postset_places)
+    sink_postsets = {callee_sink_place.id: postset_places}
+    if fuse_exception_sink:
+        sink_postsets[callee_exception_sink.id] = exception_postset_places
 
     base_prefix = f"inline_{callee_id}__"
     if base_prefix not in used_prefixes:
@@ -203,6 +223,9 @@ def _splice_callee_net(
                 {**record, "transition_id": new_id} if isinstance(record, dict) else record
                 for record in call_results
             ]
+        exception_owner_id = new_meta.get("exception_alternative_of")
+        if exception_owner_id:
+            new_meta["exception_alternative_of"] = f"{prefix}{exception_owner_id}"
         _decorate_node_hierarchy(new_meta, compound_id, fn_name, prefix)
 
         cloned_t = caller_net.add_transition(
@@ -217,6 +240,8 @@ def _splice_callee_net(
     cloned_places: Dict[str, Place] = {}
     for cp in callee_net.places:
         if cp.id in (callee_source_place.id, callee_sink_place.id):
+            continue
+        if fuse_exception_sink and cp.id == callee_exception_sink.id:
             continue
         new_id = f"{prefix}{cp.id}"
         new_meta = dict(cp.metadata) if cp.metadata is not None else {}
@@ -245,15 +270,15 @@ def _splice_callee_net(
             if source_t is not None:
                 for p_in in preset_places:
                     caller_net.add_arc(source=source_t, target=p_in, weight=a.weight)
-        elif a.target.id == callee_sink_place.id:
+        elif isinstance(a.target, Place) and a.target.id in sink_postsets:
             source_t = cloned_transitions.get(a.source.id)
             if source_t is not None:
-                for p_out in postset_places:
+                for p_out in sink_postsets[a.target.id]:
                     caller_net.add_arc(source=source_t, target=p_out, weight=a.weight)
-        elif a.source.id == callee_sink_place.id:
+        elif isinstance(a.source, Place) and a.source.id in sink_postsets:
             target_t = cloned_transitions.get(a.target.id)
             if target_t is not None:
-                for p_out in postset_places:
+                for p_out in sink_postsets[a.source.id]:
                     caller_net.add_arc(source=p_out, target=target_t, weight=a.weight)
         elif isinstance(a.source, Place) and isinstance(a.target, Transition):
             source_p = cloned_places.get(a.source.id)
@@ -266,7 +291,10 @@ def _splice_callee_net(
             if source_t is not None and target_p is not None:
                 caller_net.add_arc(source=source_t, target=target_p, weight=a.weight)
 
-    caller_net.remove_nodes({call_transition.id})
+    nodes_to_remove = {call_transition.id}
+    if fuse_exception_sink:
+        nodes_to_remove.update(transition.id for transition in exception_alternatives)
+    caller_net.remove_nodes(nodes_to_remove)
 
 
 def _is_self_referencing_loop(

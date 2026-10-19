@@ -1618,7 +1618,15 @@
 
           const complete = compound.inside() && this.isFunctionFoldedIntoSingleComponent(compound);
           const success = folded.length > 0;
-          const rejectionReason = rejectionReasons[0] || null;
+          const concreteSafetyRejection = rejectionReasons.find(function(reason) {
+            return reason.includes('token-bearing interior place')
+              || reason.includes('partially consumes protected nested function')
+              || reason.includes('has an edge to') && reason.includes('outside the candidate');
+          });
+          const rejectionReason = concreteSafetyRejection
+            || this._getFunctionScopeMultipleExitReason(compound)
+            || rejectionReasons[0]
+            || null;
           return {
             success: success,
             complete: complete,
@@ -2195,6 +2203,37 @@
             if (isFunctionOwned || isDirectCallerPlace) allowed.add(node.id());
           });
           return allowed;
+        }
+
+        _getFunctionScopeCallerExitPlaces(scopeId) {
+          const scope = this.cy.getElementById(scopeId);
+          if (!scope || scope.length === 0 || !scope.hasClass('compound')) return [];
+          const parentId = scope.data('parent') || null;
+          const ownedIds = new Set(scope.descendants().filter(function(node) {
+            return node.hasClass('place') || node.hasClass('transition');
+          }).map(function(node) { return node.id(); }));
+          const exits = new Map();
+          this.cy.edges().forEach(function(edge) {
+            const source = edge.source();
+            const target = edge.target();
+            if (!ownedIds.has(source.id()) || !target.hasClass('place')) return;
+            if ((target.data('parent') || null) !== parentId) return;
+            exits.set(target.id(), target);
+          });
+          return Array.from(exits.values()).sort(function(left, right) {
+            return left.id().localeCompare(right.id());
+          });
+        }
+
+        _getFunctionScopeMultipleExitReason(scope) {
+          const exits = this._getFunctionScopeCallerExitPlaces(scope.id());
+          if (exits.length < 2) return null;
+          const name = scope.data('function_name') || scope.data('label') || scope.id();
+          const continuations = exits.map(function(place) {
+            const label = place.data('label') || place.id();
+            return `${label} (${place.id()})`;
+          }).join(', ');
+          return `Function '${name}' has multiple caller continuations (${continuations}); no single-exit SESE region can safely consume this interface.`;
         }
 
         _getConsumedInteriorIssue(candidate) {

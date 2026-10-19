@@ -1,0 +1,306 @@
+{
+  "sourceArtifactSha256": "3fefd65c1af8836000e1034833c6c2b5890e95801476ee5c6985dab0a0be3711",
+  "scopeId": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+  "parentId": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+  "description": "Reduced historical interface fixture: all direct scope children and their incident arcs, caller places p1/p3/p4, plus unrelated c_80 boundary evidence. The original session save is not modified.",
+  "compounds": [
+    {
+      "id": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "label": "GameState._edge_for_move()",
+      "function_name": "GameState._edge_for_move",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move"
+    },
+    {
+      "id": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "label": "GameState.apply_move()",
+      "function_name": "GameState.apply_move",
+      "parent": "inline_main__compound_DotsAndBoxesGame_handle_event"
+    },
+    {
+      "id": "inline_main__compound_DotsAndBoxesGame_draw",
+      "label": "DotsAndBoxesGame.draw (c_80)",
+      "function_name": "DotsAndBoxesGame.draw",
+      "parent": "compound_main"
+    }
+  ],
+  "places": [
+    {
+      "id": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p1",
+      "label": "merge_t1",
+      "raw_label": "merge_t1",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "type": "Place",
+      "tokens": 0,
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p1",
+      "label": "merge_t1",
+      "raw_label": "merge_t1",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "type": "Place",
+      "tokens": 0,
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p3",
+      "label": "except_entry",
+      "raw_label": "except_entry",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "type": "Place",
+      "tokens": 0,
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p4",
+      "label": "try_exit",
+      "raw_label": "try_exit",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "type": "Place",
+      "tokens": 0,
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_main__p12",
+      "label": "p12",
+      "raw_label": "p12",
+      "parent": "compound_main",
+      "type": "Place",
+      "tokens": 0,
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_main__p13",
+      "label": "p13",
+      "raw_label": "p13",
+      "parent": "compound_main",
+      "type": "Place",
+      "tokens": 0,
+      "initial_tokens": 0
+    }
+  ],
+  "transitions": [
+    {
+      "id": "c_07",
+      "label": "c_07",
+      "raw_label": "if not isinstance(row, int) or not isinstance(col, int) ; raise TypeError('box coordinates must be integers')",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "type": "Opaque Transition",
+      "component_type": "Sequence",
+      "opaque": true,
+      "is_opaque": true,
+      "tau": 2,
+      "omega": 0,
+      "source_line": "143–144",
+      "line_number": "143"
+    },
+    {
+      "id": "c_11",
+      "label": "c_11",
+      "raw_label": "else ; WellStructured(merge_t4..p5) ; points = {Direction.UP: ((row, col), (row, col + 1)), Direction.RIGHT: ((row, col + 1), (row + 1, col + 1)), Direction.DOWN: ((row + 1, col), (row + 1, col + 1)), Direction.LEFT: ((row, col), (row + 1, col))} ; (first, second) = call: sorted() ; return (first, second)",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "type": "Opaque Transition",
+      "component_type": "Sequence",
+      "opaque": true,
+      "is_opaque": true,
+      "tau": 70,
+      "omega": 0,
+      "source_line": null,
+      "line_number": null
+    },
+    {
+      "id": "c_09",
+      "label": "c_09",
+      "raw_label": "if not (0 <= row < self.rows and 0 <= col < self.cols) ; raise ValueError('box coordinates are outside the board')",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "type": "Opaque Transition",
+      "component_type": "Sequence",
+      "opaque": true,
+      "is_opaque": true,
+      "tau": 2,
+      "omega": 0,
+      "source_line": "145–146",
+      "line_number": "145"
+    },
+    {
+      "id": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t2",
+      "label": "else (line 143)",
+      "raw_label": "else",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "type": "Transition",
+      "is_opaque": false,
+      "tau": 1,
+      "line_number": 143
+    },
+    {
+      "id": "c_80",
+      "label": "",
+      "raw_label": "StateMachine(p12..p13)",
+      "parent": "inline_main__compound_DotsAndBoxesGame_draw",
+      "type": "Opaque Transition",
+      "component_type": "StateMachine",
+      "opaque": true,
+      "is_opaque": true,
+      "tau": 144.5,
+      "omega": 72.25,
+      "source_line": "186–207",
+      "line_number": "186"
+    },
+    {
+      "id": "c_39",
+      "label": "c_39",
+      "raw_label": "while (for box in claimed ; self._claimed_boxes[box] = self._active_player ; self._scores[self._active_player] += 1) ; else ⊕ if not turn_retained ; self._active_player = self.players[(self.players.index(self._active_player) + 1) % len(self.players)] ; self._game_over = len(self._claimed_boxes) == self.rows * self.cols ; return MoveResult(accepted=True, claimed_boxes=claimed, scores=self.scores, active_player=self._active_player, turn_retained=turn_retained, game_over=self._game_over)",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "type": "Opaque Transition",
+      "component_type": "Sequence",
+      "opaque": true,
+      "is_opaque": true,
+      "tau": 128.5,
+      "omega": 0,
+      "source_line": "115",
+      "line_number": "115"
+    },
+    {
+      "id": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__t2",
+      "label": "else (line 92)",
+      "raw_label": "else",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "type": "Transition",
+      "is_opaque": false,
+      "tau": 1,
+      "line_number": 92
+    },
+    {
+      "id": "c_26",
+      "label": "c_26",
+      "raw_label": "except (TypeError, ValueError, KeyError) ; return MoveResult(accepted=False, claimed_boxes=(), scores=self.scores, active_player=self._active_player, turn_retained=False, game_over=self._game_over, reason=reason)",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "type": "Opaque Transition",
+      "component_type": "Sequence",
+      "opaque": true,
+      "is_opaque": true,
+      "tau": 2,
+      "omega": 0,
+      "source_line": "97–130",
+      "line_number": "97"
+    },
+    {
+      "id": "c_28",
+      "label": "c_28",
+      "raw_label": "if edge in self._edges ; return MoveResult(accepted=False, claimed_boxes=(), scores=self.scores, active_player=self._active_player, turn_retained=False, game_over=self._game_over, reason=reason)",
+      "parent": "inline_main__inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "type": "Opaque Transition",
+      "component_type": "Sequence",
+      "opaque": true,
+      "is_opaque": true,
+      "tau": 2,
+      "omega": 0,
+      "source_line": "100–130",
+      "line_number": "100"
+    }
+  ],
+  "arcs": [
+    {
+      "id": "arc_sm_in_c_80",
+      "source": "inline_main__p12",
+      "target": "c_80",
+      "weight": 1
+    },
+    {
+      "id": "arc_out_c_11_1",
+      "source": "c_11",
+      "target": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p4",
+      "weight": 1
+    },
+    {
+      "id": "arc_in_c_07_0",
+      "source": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p1",
+      "target": "c_07",
+      "weight": 1
+    },
+    {
+      "id": "arc_in_c_39_0",
+      "source": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p4",
+      "target": "c_39",
+      "weight": 1
+    },
+    {
+      "id": "arc_sm_out_c_80",
+      "source": "c_80",
+      "target": "inline_main__p13",
+      "weight": 1
+    },
+    {
+      "id": "arc_129_inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__t2_inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p1",
+      "source": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__t2",
+      "target": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p1",
+      "weight": 1
+    },
+    {
+      "id": "arc_out_c_07_1",
+      "source": "c_07",
+      "target": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p4",
+      "weight": 1
+    },
+    {
+      "id": "arc_163_inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p1_inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t2",
+      "source": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p1",
+      "target": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t2",
+      "weight": 1
+    },
+    {
+      "id": "arc_in_c_26_0",
+      "source": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p3",
+      "target": "c_26",
+      "weight": 1
+    },
+    {
+      "id": "arc_out_c_07_0",
+      "source": "c_07",
+      "target": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p3",
+      "weight": 1
+    },
+    {
+      "id": "arc_out_c_09_1",
+      "source": "c_09",
+      "target": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p4",
+      "weight": 1
+    },
+    {
+      "id": "arc_in_c_09_0",
+      "source": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p1",
+      "target": "c_09",
+      "weight": 1
+    },
+    {
+      "id": "arc_in_c_11_0",
+      "source": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p1",
+      "target": "c_11",
+      "weight": 1
+    },
+    {
+      "id": "arc_in_c_28_0",
+      "source": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p4",
+      "target": "c_28",
+      "weight": 1
+    },
+    {
+      "id": "arc_out_c_11_0",
+      "source": "c_11",
+      "target": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p3",
+      "weight": 1
+    },
+    {
+      "id": "arc_out_c_09_0",
+      "source": "c_09",
+      "target": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p3",
+      "weight": 1
+    },
+    {
+      "id": "arc_168_inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t2_inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p1",
+      "source": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t2",
+      "target": "inline_main__inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p1",
+      "weight": 1
+    }
+  ]
+}

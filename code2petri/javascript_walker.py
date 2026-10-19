@@ -1111,6 +1111,7 @@ class _JavascriptControlFlowWalker:
             current_place=ctx.current_place,
             label=self._format_statement_label(stmt),
             line_number=ctx.lineno,
+            hook_exception=stmt.get("argument") is not None,
         )
         self._record_calls_in_node(stmt.get("argument"), trans.id, ctx.lineno or 0)
         return None
@@ -1191,6 +1192,7 @@ class _JavascriptControlFlowWalker:
         exit_trans = self.builder.new_transition(
             label="exit",
             line_number=ctx.lineno,
+            hook_exception=False,
         )
         loop_exit = ctx.target_exit if ctx.is_last else self.builder.new_place(label=f"exit_{loop_trans.id}", line_number=ctx.lineno)
 
@@ -1253,7 +1255,11 @@ class _JavascriptControlFlowWalker:
         has_default = any(case.get("test") is None for case in cases)
 
         if not cases:
-            default_trans = self.builder.new_transition(label="default", line_number=ctx.lineno)
+            default_trans = self.builder.new_transition(
+                label="default",
+                line_number=ctx.lineno,
+                hook_exception=False,
+            )
             self.builder.add_arc(source=decision_place, target=default_trans)
             self.builder.add_arc(source=default_trans, target=switch_exit)
             self.builder.pop_loop()
@@ -1279,7 +1285,11 @@ class _JavascriptControlFlowWalker:
             self.builder.add_arc(source=case_trans, target=case_entry)
 
         if not has_default:
-            default_trans = self.builder.new_transition(label="default", line_number=ctx.lineno)
+            default_trans = self.builder.new_transition(
+                label="default",
+                line_number=ctx.lineno,
+                hook_exception=False,
+            )
             self.builder.add_arc(source=decision_place, target=default_trans)
             self.builder.add_arc(source=default_trans, target=switch_exit)
 
@@ -1289,7 +1299,11 @@ class _JavascriptControlFlowWalker:
             next_target = case_entry_places[i + 1] if i + 1 < len(cases) else switch_exit
 
             if not case_body:
-                pass_trans = self.builder.new_transition(label="fallthrough", line_number=case_lineno)
+                pass_trans = self.builder.new_transition(
+                    label="fallthrough",
+                    line_number=case_lineno,
+                    hook_exception=False,
+                )
                 self.builder.add_arc(source=case_entry, target=pass_trans)
                 self.builder.add_arc(source=pass_trans, target=next_target)
             else:
@@ -1325,7 +1339,11 @@ class _JavascriptControlFlowWalker:
         self.builder.add_arc(source=check_place, target=cond_trans)
         self.builder.add_arc(source=cond_trans, target=body_head)
 
-        exit_trans = self.builder.new_transition(label="exit", line_number=test_lineno)
+        exit_trans = self.builder.new_transition(
+            label="exit",
+            line_number=test_lineno,
+            hook_exception=False,
+        )
         self.builder.add_arc(source=check_place, target=exit_trans)
         self.builder.add_arc(source=exit_trans, target=loop_exit)
 
@@ -1714,7 +1732,6 @@ class JavascriptWalker(WalkerProtocol):
             line_number=None,
             initial_tokens=0,
         )
-
         # Extract statement block
         body_node = func_node.get("body", {})
         if body_node.get("type") == "BlockStatement":

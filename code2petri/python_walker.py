@@ -1348,7 +1348,12 @@ class _PythonControlFlowWalker:
             self.call_sites.append(cs)
 
     def _walk_return(self, stmt: ast.Return, ctx: StatementContext) -> Optional[Place]:
-        trans = self.builder.wire_return(ctx.current_place, _format_statement_label(stmt), stmt.lineno)
+        trans = self.builder.wire_return(
+            ctx.current_place,
+            _format_statement_label(stmt),
+            stmt.lineno,
+            hook_exception=stmt.value is not None,
+        )
         evidence = self.return_evidence.get((stmt.lineno, stmt.col_offset))
         if evidence is not None:
             if trans.metadata is None:
@@ -1399,6 +1404,7 @@ class _PythonControlFlowWalker:
         exit_trans = self.builder.new_transition(
             label=exit_label,
             line_number=else_lineno,
+            hook_exception=False,
         )
 
         loop_exit = ctx.target_exit if ctx.is_last else self.builder.new_place(
@@ -1661,7 +1667,6 @@ class PythonWalker(WalkerProtocol):
             line_number=None,
             initial_tokens=0,
         )
-
         builder = ControlFlowBuilder(net=net, end_place=end_place)
         walker = _PythonControlFlowWalker(
             builder=builder,

@@ -138,9 +138,17 @@ class TestControlFlowBuilder(unittest.TestCase):
         self.builder.try_stack.append(TryContext(except_entry=exc_entry))
 
         t2 = self.builder.new_transition("op_in_try", line_number=6, hook_exception=True)
-        # Should create an arc from t2 to exc_entry
-        exc_arcs = [a for a in self.net.arcs if a.source == t2 and a.target == exc_entry]
-        self.assertEqual(len(exc_arcs), 1)
+        exception_trans = next(
+            transition for transition in self.net.transitions
+            if transition.metadata and transition.metadata.get("exception_alternative_of") == t2.id
+        )
+        input_place = self.builder.new_place("operation_input")
+        self.builder.add_arc(input_place, t2)
+
+        self.assertFalse(any(a.source == t2 and a.target == exc_entry for a in self.net.arcs))
+        self.assertTrue(any(a.source == exception_trans and a.target == exc_entry for a in self.net.arcs))
+        self.assertTrue(any(a.source == input_place and a.target == t2 for a in self.net.arcs))
+        self.assertTrue(any(a.source == input_place and a.target == exception_trans for a in self.net.arcs))
 
         t3 = self.builder.new_transition("no_hook", line_number=7, hook_exception=False)
         no_hook_arcs = [a for a in self.net.arcs if a.source == t3]

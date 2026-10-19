@@ -1,0 +1,980 @@
+{
+  "sourceArtifactSha256": "1a4aee112ebe6b9c0d0e6cee13289e15b5013ff487eef67fb1b1a2b05cc24c14",
+  "scopeId": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+  "parentId": "inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+  "description": "Reduced fresh-export interface fixture: all selected function descendants, all incident arcs, and directly connected caller places.",
+  "compounds": [
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "label": "GameState.apply_move()",
+      "function_name": "GameState.apply_move",
+      "file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+      "parent": "compound_DotsAndBoxesGame_handle_event",
+      "function_ref": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState.apply_move@89:4"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "label": "GameState._edge_for_move()",
+      "function_name": "GameState._edge_for_move",
+      "file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+      "parent": "inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "function_ref": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._edge_for_move@140:4"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "label": "GameState._coerce_direction()",
+      "function_name": "GameState._coerce_direction",
+      "file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "function_ref": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._coerce_direction@157:4"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__canonical_edge",
+      "label": "GameState._canonical_edge()",
+      "function_name": "GameState._canonical_edge",
+      "file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "function_ref": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._canonical_edge@171:4"
+    }
+  ],
+  "places": [
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p1",
+      "label": "merge_t1",
+      "line_number": 92,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+        "enclosing_function": "GameState.apply_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "enclosing_function": "GameState.apply_move",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p3",
+      "label": "except_entry",
+      "line_number": 95,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+        "enclosing_function": "GameState.apply_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "enclosing_function": "GameState.apply_move",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p4",
+      "label": "try_exit",
+      "line_number": 95,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+        "enclosing_function": "GameState.apply_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__compound_GameState_apply_move",
+      "enclosing_function": "GameState.apply_move",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p1",
+      "label": "merge_t1",
+      "line_number": 143,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p2",
+      "label": "p2",
+      "line_number": 143,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p3",
+      "label": "merge_t4",
+      "line_number": 145,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p4",
+      "label": "p4",
+      "line_number": 145,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p5",
+      "label": "p5",
+      "line_number": 147,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p6",
+      "label": "p6",
+      "line_number": 148,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p1",
+      "label": "merge_t1",
+      "line_number": 158,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p2",
+      "label": "p2",
+      "line_number": 158,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p3",
+      "label": "merge_t4",
+      "line_number": 160,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p4",
+      "label": "p4",
+      "line_number": 160,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p5",
+      "label": "except_entry",
+      "line_number": 161,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p6",
+      "label": "p6",
+      "line_number": 163,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p7",
+      "label": "except_entry",
+      "line_number": 164,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p8",
+      "label": "p8",
+      "line_number": 166,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "initial_tokens": 0
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__p1",
+      "label": "p1",
+      "line_number": 172,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__canonical_edge",
+        "enclosing_function": "GameState._canonical_edge",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__canonical_edge",
+      "enclosing_function": "GameState._canonical_edge",
+      "initial_tokens": 0
+    }
+  ],
+  "transitions": [
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t1",
+      "label": "if not isinstance(row, int) or not isinstance(col, int)",
+      "line_number": 143,
+      "metadata": {
+        "call_results": [
+          {
+            "expression": "isinstance(row, int)",
+            "source_location": {
+              "line": 143,
+              "column": 15
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t1",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._edge_for_move@143:15",
+            "caller_function": "GameState._edge_for_move",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "unsupported_builtin"
+          },
+          {
+            "expression": "isinstance(col, int)",
+            "source_location": {
+              "line": 143,
+              "column": 43
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t1",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._edge_for_move@143:43",
+            "caller_function": "GameState._edge_for_move",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "unsupported_builtin"
+          }
+        ],
+        "resolved": false,
+        "status": "[unresolved]",
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move",
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t2",
+      "label": "else",
+      "line_number": 143,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t3",
+      "label": "raise TypeError('box coordinates must be integers')",
+      "line_number": 144,
+      "metadata": {
+        "call_results": [
+          {
+            "expression": "TypeError('box coordinates must be integers')",
+            "source_location": {
+              "line": 144,
+              "column": 18
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t3",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._edge_for_move@144:18",
+            "caller_function": "GameState._edge_for_move",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "unsupported_builtin"
+          }
+        ],
+        "resolved": false,
+        "status": "[unresolved]",
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move",
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t4",
+      "label": "if not (0 <= row < self.rows and 0 <= col < self.cols)",
+      "line_number": 145,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t5",
+      "label": "else",
+      "line_number": 145,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t6",
+      "label": "raise ValueError('box coordinates are outside the board')",
+      "line_number": 146,
+      "metadata": {
+        "call_results": [
+          {
+            "expression": "ValueError('box coordinates are outside the board')",
+            "source_location": {
+              "line": 146,
+              "column": 18
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t6",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._edge_for_move@146:18",
+            "caller_function": "GameState._edge_for_move",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "unsupported_builtin"
+          }
+        ],
+        "resolved": false,
+        "status": "[unresolved]",
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move",
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t8",
+      "label": "points = {Direction.UP: ((row, col), (row, col + 1)), Direction.RIGHT: ((row, col + 1), (row + 1, col + 1)), Direction.DOWN: ((row + 1, col), (row + 1, col + 1)), Direction.LEFT: ((row, col), (row + 1, col))}",
+      "line_number": 148,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+        "enclosing_function": "GameState._edge_for_move",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__compound_GameState__edge_for_move",
+      "enclosing_function": "GameState._edge_for_move"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t1",
+      "label": "if isinstance(direction, Direction)",
+      "line_number": 158,
+      "metadata": {
+        "call_results": [
+          {
+            "expression": "isinstance(direction, Direction)",
+            "source_location": {
+              "line": 158,
+              "column": 11
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t1",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._coerce_direction@158:11",
+            "caller_function": "GameState._coerce_direction",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "unsupported_builtin"
+          }
+        ],
+        "resolved": false,
+        "status": "[unresolved]",
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t2",
+      "label": "else",
+      "line_number": 158,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t3",
+      "label": "return direction",
+      "line_number": 159,
+      "metadata": {
+        "function_return_evidence": {
+          "expression": "direction",
+          "type": "unknown",
+          "provenance": "expression_inference",
+          "role": "call_result",
+          "source_location": {
+            "line": 159,
+            "column": 12
+          },
+          "expression_location": {
+            "line": 159,
+            "column": 19
+          },
+          "evidence": []
+        },
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t4",
+      "label": "if isinstance(direction, str)",
+      "line_number": 160,
+      "metadata": {
+        "call_results": [
+          {
+            "expression": "isinstance(direction, str)",
+            "source_location": {
+              "line": 160,
+              "column": 11
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t4",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._coerce_direction@160:11",
+            "caller_function": "GameState._coerce_direction",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "unsupported_builtin"
+          }
+        ],
+        "resolved": false,
+        "status": "[unresolved]",
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t5",
+      "label": "else",
+      "line_number": 160,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t6",
+      "label": "return Direction(direction.lower())",
+      "line_number": 162,
+      "metadata": {
+        "call_results": [
+          {
+            "expression": "Direction(direction.lower())",
+            "source_location": {
+              "line": 162,
+              "column": 23
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t6",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._coerce_direction@162:23",
+            "caller_function": "GameState._coerce_direction",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "shadowed_or_uncertain_binding"
+          },
+          {
+            "expression": "direction.lower()",
+            "source_location": {
+              "line": 162,
+              "column": 33
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t6",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._coerce_direction@162:33",
+            "caller_function": "GameState._coerce_direction",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "shadowed_or_uncertain_binding"
+          }
+        ],
+        "resolved": false,
+        "status": "[unresolved]",
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t7",
+      "label": "except ValueError",
+      "line_number": 163,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t8",
+      "label": "return Direction[direction.upper()]",
+      "line_number": 165,
+      "metadata": {
+        "call_results": [
+          {
+            "expression": "direction.upper()",
+            "source_location": {
+              "line": 165,
+              "column": 37
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t8",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._coerce_direction@165:37",
+            "caller_function": "GameState._coerce_direction",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "shadowed_or_uncertain_binding"
+          }
+        ],
+        "resolved": false,
+        "status": "[unresolved]",
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t9",
+      "label": "except KeyError",
+      "line_number": 166,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t10",
+      "label": "pass",
+      "line_number": 167,
+      "metadata": {
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t11",
+      "label": "raise ValueError('unsupported direction')",
+      "line_number": 168,
+      "metadata": {
+        "call_results": [
+          {
+            "expression": "ValueError('unsupported direction')",
+            "source_location": {
+              "line": 168,
+              "column": 14
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t11",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._coerce_direction@168:14",
+            "caller_function": "GameState._coerce_direction",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "unsupported_builtin"
+          }
+        ],
+        "resolved": false,
+        "status": "[unresolved]",
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+        "enclosing_function": "GameState._coerce_direction",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__coerce_direction",
+      "enclosing_function": "GameState._coerce_direction",
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__t1",
+      "label": "(first, second) = call: sorted()",
+      "line_number": 172,
+      "metadata": {
+        "call_results": [
+          {
+            "expression": "sorted(points)",
+            "source_location": {
+              "line": 172,
+              "column": 24
+            },
+            "transition_id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__t1",
+            "call_site_id": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py::GameState._canonical_edge@172:24",
+            "caller_function": "GameState._canonical_edge",
+            "caller_file": "/Volumes/SharedDrive/Documents/GitHub/Python-Games/Dots & Boxes/rules.py",
+            "state": "unknown",
+            "type": "unknown",
+            "canonical_builtin": null,
+            "provenance": null,
+            "unknown_reason": "unsupported_builtin"
+          }
+        ],
+        "resolved": false,
+        "status": "[unresolved]",
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__canonical_edge",
+        "enclosing_function": "GameState._canonical_edge",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__canonical_edge",
+      "enclosing_function": "GameState._canonical_edge",
+      "resolved": false,
+      "status": "[unresolved]"
+    },
+    {
+      "id": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__t2",
+      "label": "return (first, second)",
+      "line_number": 173,
+      "metadata": {
+        "function_return_evidence": {
+          "expression": "(first, second)",
+          "type": "tuple",
+          "provenance": "expression_inference",
+          "role": "call_result",
+          "source_location": {
+            "line": 173,
+            "column": 8
+          },
+          "expression_location": {
+            "line": 173,
+            "column": 15
+          },
+          "evidence": []
+        },
+        "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__canonical_edge",
+        "enclosing_function": "GameState._canonical_edge",
+        "inline_expansion": true
+      },
+      "parent": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__compound_GameState__canonical_edge",
+      "enclosing_function": "GameState._canonical_edge"
+    }
+  ],
+  "arcs": [
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t1",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t2",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p2",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p2",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t3",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t3",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p3",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t2",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p1",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t4",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t5",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t4",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p4",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p4",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t6",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t6",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p3",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t5",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p3",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p5",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t8",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__t8",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p6",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p3",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t1",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p3",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t2",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p2",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p2",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t3",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t3",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p5",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t2",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p1",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t4",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t5",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t4",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p4",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p4",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t6",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t6",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p5",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p5",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t7",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t7",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p6",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p6",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t8",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t8",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p5",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p7",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t9",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t9",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p8",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p8",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t10",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t10",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p3",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t5",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p3",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__p3",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t11",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._coerce_direction__t11",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p3",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__p6",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__t1",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__t1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__p1",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__p1",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__t2",
+      "weight": 1
+    },
+    {
+      "source": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__inline_GameState._edge_for_move__inline_GameState._canonical_edge__t2",
+      "target": "inline_DotsAndBoxesGame.handle_event__inline_GameState.apply_move__p4",
+      "weight": 1
+    }
+  ]
+}

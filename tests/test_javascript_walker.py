@@ -557,7 +557,12 @@ class TestJavascriptTryCatch(unittest.TestCase):
         risky_trans = next(t for t in net.transitions if "riskyOperation" in t.label)
         catch_trans = next(t for t in net.transitions if "catch" in t.label)
         except_entry = next(a.source for a in net.arcs if a.target == catch_trans)
-        exc_arc = next(a for a in net.arcs if a.source == risky_trans and a.target == except_entry)
+        exception_alt = next(
+            transition for transition in net.transitions
+            if transition.metadata
+            and transition.metadata.get("exception_alternative_of") == risky_trans.id
+        )
+        exc_arc = next(a for a in net.arcs if a.source == exception_alt and a.target == except_entry)
         self.assertIsNotNone(exc_arc)
 
         # Both try normal exit and catch handler exit converge on the same try_exit place
@@ -820,10 +825,13 @@ class TestJavascriptThrow(unittest.TestCase):
         assert_bipartite(self, net)
 
         throw_trans = next(t for t in net.transitions if "throw" in t.label)
-        _, end_place = assert_has_start_and_end(self, net)
+        end_place = next(place for place in net.places if place.label == "end")
+        exception_end = net.find_exception_boundary_place()
 
-        # Unhandled throw terminates function directly at end_place
-        self.assertTrue(any(a.source == throw_trans and a.target == end_place for a in net.arcs))
+        # Unhandled throw terminates at a distinct exceptional function exit.
+        self.assertIsNotNone(exception_end)
+        self.assertFalse(any(a.source == throw_trans and a.target == end_place for a in net.arcs))
+        self.assertTrue(any(a.source == throw_trans and a.target == exception_end for a in net.arcs))
 
     def test_throw_in_try(self):
         tree = self.walker.parse_file(os.path.join(self.fixtures_dir, "throw_exception.js"))

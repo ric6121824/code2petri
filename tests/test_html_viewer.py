@@ -7516,6 +7516,98 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
 
+    def test_multiple_caller_continuations_explain_selected_function_scope(self):
+        fixture_path = os.path.join(
+            os.path.dirname(__file__),
+            "fixtures",
+            "dots_and_boxes_edge_for_move_scope.json",
+        )
+        with open(fixture_path, "r", encoding="utf-8") as fixture_file:
+            fixture = json.load(fixture_file)
+        net = json.dumps(fixture)
+        test_logic = r"""
+const first = foldEngine.executeFoldEntireFunction(net.scopeId);
+if (first.success || first.complete) throw new Error('Unsupported two-exit interface was forced through a fold: ' + JSON.stringify(first));
+if (!first.message.includes('multiple caller continuations') ||
+    !first.message.includes('except_entry') || !first.message.includes('try_exit')) {
+  throw new Error('Function result did not explain its own two-exit interface: ' + first.message);
+}
+if (first.message.includes('c_80')) throw new Error('Unrelated sibling candidate became the function explanation: ' + first.message);
+
+const reordered = JSON.parse(JSON.stringify(net));
+reordered.arcs.reverse();
+reordered.transitions.reverse();
+const reorderedCy = cytoscape({ elements: netToElements(reordered) });
+const reorderedEngine = new LiveFoldReductionEngine(reorderedCy);
+const second = reorderedEngine.executeFoldEntireFunction(net.scopeId);
+if (second.message !== first.message) throw new Error('Candidate ordering changed the function-scope explanation: ' + second.message);
+reorderedCy.destroy();
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Multiple-exit function scope report failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_fresh_export_preserves_exception_alternatives_and_reports_scope_exits(self):
+        fixture_path = os.path.join(
+            os.path.dirname(__file__),
+            "fixtures",
+            "dots_and_boxes_edge_for_move_fresh.json",
+        )
+        with open(fixture_path, "r", encoding="utf-8") as fixture_file:
+            fixture = json.load(fixture_file)
+
+        place_by_id = {place["id"]: place for place in fixture["places"]}
+        transition_by_id = {transition["id"]: transition for transition in fixture["transitions"]}
+        exception_exit = next(place for place in place_by_id.values() if place.get("label") == "except_entry")
+        normal_exit = next(place for place in place_by_id.values() if place.get("label") == "try_exit")
+        outgoing = {}
+        for arc in fixture["arcs"]:
+            if arc["source"] in transition_by_id:
+                outgoing.setdefault(arc["source"], set()).add(arc["target"])
+
+        exception_sources = {
+            transition_id
+            for transition_id, targets in outgoing.items()
+            if exception_exit["id"] in targets
+        }
+        normal_sources = {
+            transition_id
+            for transition_id, targets in outgoing.items()
+            if normal_exit["id"] in targets
+        }
+        self.assertTrue(exception_sources, "Fresh inlining lost the caller exception continuation")
+        self.assertTrue(normal_sources, "Fresh inlining lost the caller normal continuation")
+        self.assertFalse(
+            exception_sources & normal_sources,
+            "A single fresh-export transition activates both caller continuations",
+        )
+
+        net = json.dumps(fixture)
+        test_logic = r"""
+const first = foldEngine.executeFoldEntireFunction(net.scopeId);
+if (!first.success || first.complete || first.folded.length === 0) {
+  throw new Error('Fresh export did not retain safe internal progress while stopping at its two-exit boundary: ' + JSON.stringify(first));
+}
+if (!first.message.includes('multiple caller continuations') ||
+    !first.message.includes('except_entry') || !first.message.includes('try_exit')) {
+  throw new Error('Fresh export result did not explain its own caller interface: ' + first.message);
+}
+const reordered = JSON.parse(JSON.stringify(net));
+reordered.arcs.reverse();
+reordered.transitions.reverse();
+const reorderedCy = cytoscape({ elements: netToElements(reordered) });
+const reorderedEngine = new LiveFoldReductionEngine(reorderedCy);
+const second = reorderedEngine.executeFoldEntireFunction(net.scopeId);
+if (second.message !== first.message) throw new Error('Fresh export candidate order changed its explanation: ' + second.message);
+reorderedCy.destroy();
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Fresh export scope action failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+
 class TestFoldStateSnapshotValidation(unittest.TestCase):
     def test_return_metadata_validation_accepts_old_records_and_rejects_malformed(self):
         script = r"""

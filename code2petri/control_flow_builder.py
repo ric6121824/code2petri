@@ -47,10 +47,12 @@ class ControlFlowBuilder:
     ) -> None:
         self.net = net if net is not None else PetriNet()
         self.end_place = end_place
+        self.exception_end_place: Optional[Place] = None
         self.place_counter = 0
         self.trans_counter = 0
         self.loop_stack: List[LoopContext] = []
         self.try_stack: List[TryContext] = []
+        self.exception_alternatives: Dict[str, Transition] = {}
 
     def new_place(
         self,
@@ -76,7 +78,7 @@ class ControlFlowBuilder:
         metadata: Optional[Dict[str, Any]] = None,
         resolution: Optional[CallResolution] = None,
     ) -> Transition:
-        """Creates and registers a new Transition with auto-incremented ID, hooking into try_stack if active."""
+        """Creates a transition and, when requested, a competing exceptional outcome."""
         self.trans_counter += 1
         t_id = f"t{self.trans_counter}"
         trans = self.net.add_transition(
@@ -87,16 +89,37 @@ class ControlFlowBuilder:
             resolution=resolution,
         )
         if hook_exception and self.try_stack:
-            self.net.add_arc(source=trans, target=self.try_stack[-1].except_entry)
+            exception_trans = self.net.add_transition(
+                id_=f"{t_id}__exception",
+                label=f"exception: {label}",
+                line_number=line_number,
+                metadata={
+                    "exception_alternative": True,
+                    "exception_alternative_of": t_id,
+                },
+            )
+            self.exception_alternatives[t_id] = exception_trans
+            self.net.add_arc(source=exception_trans, target=self.try_stack[-1].except_entry)
         return trans
+
+    def _ensure_exception_end_place(self) -> Place:
+        if self.exception_end_place is not None:
+            return self.exception_end_place
+        self.exception_end_place = self.net.ensure_exception_boundary_place()
+        return self.exception_end_place
 
     def add_arc(
         self,
         source: Union[Place, Transition],
         target: Union[Place, Transition],
     ) -> Arc:
-        """Adds an arc between a place and transition."""
-        return self.net.add_arc(source=source, target=target)
+        """Adds an arc and mirrors operation inputs to their exception alternatives."""
+        arc = self.net.add_arc(source=source, target=target)
+        if isinstance(source, Place) and isinstance(target, Transition):
+            exception_trans = self.exception_alternatives.get(target.id)
+            if exception_trans is not None:
+                self.net.add_arc(source=source, target=exception_trans, weight=arc.weight)
+        return arc
 
     def push_try(self, try_context: TryContext) -> None:
         """Pushes a try context onto the try stack."""
@@ -131,10 +154,10 @@ class ControlFlowBuilder:
         If statements is empty/None, connects source_transition directly to target_exit and returns target_exit.
         """
         if not statements:
-            self.net.add_arc(source=source_transition, target=target_exit)
+            self.add_arc(source=source_transition, target=target_exit)
             return target_exit
         entry_place = self.new_place(line_number=line_number)
-        self.net.add_arc(source=source_transition, target=entry_place)
+        self.add_arc(source=source_transition, target=entry_place)
         return walk_block_fn(statements, current_place=entry_place, target_exit=target_exit)
 
     def get_active_finally(self) -> Optional[Place]:
@@ -160,8 +183,8 @@ class ControlFlowBuilder:
         lineno: Optional[int] = None,
     ) -> None:
         """Wires standard loop head, body branch with back-arc, and exit transition."""
-        self.net.add_arc(source=routing.head, target=routing.loop_trans)
-        self.net.add_arc(source=routing.head, target=routing.exit_trans)
+        self.add_arc(source=routing.head, target=routing.loop_trans)
+        self.add_arc(source=routing.head, target=routing.exit_trans)
 
         self.loop_stack.append(LoopContext(head=routing.head, exit=routing.exit_place))
         self.walk_branch(body_stmts, routing.loop_trans, routing.head, walk_block_fn, lineno)
@@ -181,8 +204,8 @@ class ControlFlowBuilder:
         trans = self.new_transition(label=label, line_number=lineno)
         if on_trans is not None:
             on_trans(trans)
-        self.net.add_arc(source=current_place, target=trans)
-        self.net.add_arc(source=trans, target=next_place)
+        self.add_arc(source=current_place, target=trans)
+        self.add_arc(source=trans, target=next_place)
         return next_place
 
     def wire_if_split(
@@ -208,6 +231,7 @@ class ControlFlowBuilder:
         false_trans = self.new_transition(
             label=false_label,
             line_number=false_lineno,
+            hook_exception=False,
         )
         self.add_arc(source=ctx.current_place, target=false_trans)
 
@@ -309,13 +333,14 @@ class ControlFlowBuilder:
         current_place: Place,
         label: str,
         line_number: Optional[int] = None,
+        hook_exception: bool = False,
     ) -> Transition:
         """Wires a return transition arcing to active finally block or end_place."""
-        trans = self.new_transition(label=label, line_number=line_number)
-        self.net.add_arc(source=current_place, target=trans)
+        trans = self.new_transition(label=label, line_number=line_number, hook_exception=hook_exception)
+        self.add_arc(source=current_place, target=trans)
         target = self.get_active_finally() or self.end_place
         if target is not None:
-            self.net.add_arc(source=trans, target=target)
+            self.add_arc(source=trans, target=target)
         return trans
 
     def wire_break(
@@ -329,9 +354,9 @@ class ControlFlowBuilder:
             raise SyntaxError(f"'break' outside loop at line {line_number}")
         loop_ctx = self.loop_stack[-1]
         target = self.get_active_finally_for_loop() or loop_ctx.exit
-        trans = self.new_transition(label=label, line_number=line_number)
-        self.net.add_arc(source=current_place, target=trans)
-        self.net.add_arc(source=trans, target=target)
+        trans = self.new_transition(label=label, line_number=line_number, hook_exception=False)
+        self.add_arc(source=current_place, target=trans)
+        self.add_arc(source=trans, target=target)
         return trans
 
     def wire_continue(
@@ -351,9 +376,9 @@ class ControlFlowBuilder:
                     break
         if target is None:
             raise SyntaxError(f"'continue' outside loop at line {line_number}")
-        trans = self.new_transition(label=label, line_number=line_number)
-        self.net.add_arc(source=current_place, target=trans)
-        self.net.add_arc(source=trans, target=target)
+        trans = self.new_transition(label=label, line_number=line_number, hook_exception=False)
+        self.add_arc(source=current_place, target=trans)
+        self.add_arc(source=trans, target=target)
         return trans
 
     def wire_terminal_exception(
@@ -362,16 +387,15 @@ class ControlFlowBuilder:
         label: str,
         line_number: Optional[int] = None,
     ) -> Transition:
-        """Wires a terminal exception (raise/throw) transition.
-
-        Connects current_place to the transition. If outside any try block,
-        arcs directly to self.end_place. Inside a try block, new_transition adds exception arcs.
-        """
-        trans = self.new_transition(label=label, line_number=line_number)
-        self.net.add_arc(source=current_place, target=trans)
-        if not self.try_stack:
-            target = self.end_place
-            if target is not None:
-                self.net.add_arc(source=trans, target=target)
+        """Wires a terminal exception (raise/throw) to the active handler or exceptional exit."""
+        trans = self.new_transition(
+            label=label,
+            line_number=line_number,
+            hook_exception=False,
+        )
+        self.add_arc(source=current_place, target=trans)
+        target = self.try_stack[-1].except_entry if self.try_stack else self._ensure_exception_end_place()
+        if target is not None:
+            self.add_arc(source=trans, target=target)
         return trans
 

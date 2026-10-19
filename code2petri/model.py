@@ -175,6 +175,11 @@ class Place(NodeBase):
         """Returns True if this place functions as an end/sink place."""
         return self.label == "end"
 
+    @property
+    def is_exception_end(self) -> bool:
+        """Returns True if this place is the exceptional function exit."""
+        return self.label == "exception_end"
+
 
 
 @dataclass(frozen=True)
@@ -679,5 +684,27 @@ class PetriNet:
         sink_place = end_places[0] if end_places else (self.places[-1] if self.places else None)
 
         return source_place, sink_place
+
+    def find_exception_boundary_place(self) -> Optional[Place]:
+        """Returns the exceptional function exit when the net models one."""
+        return next((place for place in self.places if place.is_exception_end), None)
+
+    def ensure_exception_boundary_place(self) -> Place:
+        """Returns the exceptional exit, creating one when an exceptional path first appears."""
+        existing = self.find_exception_boundary_place()
+        if existing is not None:
+            return existing
+        exception_id = "p_exception_end"
+        existing_ids = {place.id for place in self.places}
+        suffix = 2
+        while exception_id in existing_ids:
+            exception_id = f"p_exception_end_{suffix}"
+            suffix += 1
+        return self.add_place(
+            id_=exception_id,
+            label="exception_end",
+            line_number=None,
+            initial_tokens=0,
+        )
 
 

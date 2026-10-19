@@ -64,12 +64,12 @@ class TestInlineExpansionEngine(unittest.TestCase):
         self.assertNotIn(call_trans_id, trans_ids)
 
         # 3. Node count check:
-        # Places: caller places + callee places - 2 (source and sink merged)
-        expected_place_count = len(caller_net.places) + len(callee_net.places) - 2
+        boundary_places_fused = 3 if callee_net.find_exception_boundary_place() else 2
+        expected_place_count = len(caller_net.places) + len(callee_net.places) - boundary_places_fused
         self.assertEqual(len(composite_net.places), expected_place_count)
 
-        # Transitions: caller transitions - 1 (call removed) + callee transitions
-        expected_trans_count = len(caller_net.transitions) - 1 + len(callee_net.transitions)
+        call_transitions_removed = 2 if callee_net.find_exception_boundary_place() else 1
+        expected_trans_count = len(caller_net.transitions) - call_transitions_removed + len(callee_net.transitions)
         self.assertEqual(len(composite_net.transitions), expected_trans_count)
 
         # 4. Callee nodes exist with namespace prefix
@@ -474,6 +474,7 @@ class TestInlineExpansionEngine(unittest.TestCase):
         nested_call_transitions = [
             trans for trans in composite_net.transitions
             if "inline_worker_func__" in trans.id and "leaf_func" in trans.label
+            and not (trans.metadata or {}).get("exception_alternative")
         ]
         self.assertEqual(len(nested_call_transitions), 1, "Expected exactly 1 leaf_func opaque transition")
         call_trans = nested_call_transitions[0]
@@ -508,6 +509,7 @@ class TestInlineExpansionEngine(unittest.TestCase):
         nested_call_transitions = [
             trans for trans in composite_net.transitions
             if "inline_worker_func__" in trans.id and "undefined_helper" in trans.label
+            and not (trans.metadata or {}).get("exception_alternative")
         ]
         self.assertEqual(len(nested_call_transitions), 1)
         call_trans = nested_call_transitions[0]

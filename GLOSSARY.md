@@ -36,6 +36,10 @@ _Avoid_: Merged graph, global net
 The principle of modeling the exact control flow present in the source AST, including dead ends and infinite loops, without attempting to sanitize or fix broken logic.
 _Avoid_: Normalization, cleanup
 
+**Exception Outcome**:
+One of the alternative control-flow results of an operation that may complete normally or transfer to an exception handler or exceptional function exit. The alternatives share the operation's input so one firing cannot activate both outcomes; handler type matching is not inferred.
+_Avoid_: Exception output token, implicit parallel completion
+
 **Call Site**:
 A structured metadata record capturing the callee name, resolved owner, line number, and transition ID for a function call within a Petri net.
 _Avoid_: Call transition info, call point

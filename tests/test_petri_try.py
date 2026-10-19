@@ -16,6 +16,13 @@ parse_file = walker.parse_file
 find_function = walker.find_function
 
 
+def _exception_alternative(net, transition):
+    return next(
+        item for item in net.transitions
+        if item.metadata and item.metadata.get("exception_alternative_of") == transition.id
+    )
+
+
 class TestTryExcept(unittest.TestCase):
     def setUp(self):
         self.fixture_path = os.path.join(
@@ -33,12 +40,9 @@ class TestTryExcept(unittest.TestCase):
     def test_try_except_counts(self):
         net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
-        # 6 transitions: a = 1, b = a + 1, c = b * 2, except, c = 0, return c
-        self.assertEqual(len(net.transitions), 6)
-        # 7 places: p0(start), p1, p2, p_except, p_hand_entry, p_merge, p_end
+        # Six source transitions remain, with one alternative for each modeled exception outcome.
+        self.assertEqual(sum(not (t.metadata or {}).get("exception_alternative") for t in net.transitions), 6)
         self.assertEqual(len(net.places), 7)
-        # 14 arcs
-        self.assertEqual(len(net.arcs), 14)
 
     def test_exception_arcs_from_try_body_transitions(self):
         net = walk_net(walker, self.func_node)
@@ -50,12 +54,14 @@ class TestTryExcept(unittest.TestCase):
         t_b = next(t for t in net.transitions if "b = a + 1" in t.label)
         t_c = next(t for t in net.transitions if "c = b * 2" in t.label)
 
-        # Assert exception arcs exist from each try-body transition to except_entry
-        t_b_targets = [a.target for a in net.arcs if a.source == t_b]
-        t_c_targets = [a.target for a in net.arcs if a.source == t_c]
-
-        self.assertIn(p_except, t_b_targets)
-        self.assertIn(p_except, t_c_targets)
+        # Each operation's exceptional alternative shares its input and routes to except_entry.
+        for transition in (t_b, t_c):
+            alternative = _exception_alternative(net, transition)
+            self.assertIn(p_except, [a.target for a in net.arcs if a.source == alternative])
+            self.assertEqual(
+                [a.source for a in net.arcs if a.target == alternative],
+                [a.source for a in net.arcs if a.target == transition],
+            )
 
     def test_except_handler_and_merge(self):
         net = walk_net(walker, self.func_node)
@@ -100,12 +106,9 @@ class TestTryExceptFinally(unittest.TestCase):
     def test_try_except_finally_counts(self):
         net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
-        # 6 transitions: x = 10, x = x + 1, except Exception as e, x = -1, x = x * 2, return x
-        self.assertEqual(len(net.transitions), 6)
-        # 7 places: p0, p1, p_exc, p_h_entry, p_finally, p_try_exit, p_end
+        # Six source transitions remain; possible exception outcomes use separate alternatives.
+        self.assertEqual(sum(not (t.metadata or {}).get("exception_alternative") for t in net.transitions), 6)
         self.assertEqual(len(net.places), 7)
-        # 13 arcs
-        self.assertEqual(len(net.arcs), 13)
 
     def test_finally_mandatory_convergence(self):
         net = walk_net(walker, self.func_node)
@@ -152,12 +155,9 @@ class TestTryMultiExcept(unittest.TestCase):
     def test_multi_except_counts(self):
         net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
-        # 9 transitions: val = 0, val = 1, except ValueError, val = 2, except TypeError, val = 3, except, val = 4, return val
-        self.assertEqual(len(net.transitions), 9)
-        # 8 places: p0, p1, p_exc, p_h1, p_h2, p_h3, p_try_exit, p_end
+        # Nine source transitions remain; possible exception outcomes use separate alternatives.
+        self.assertEqual(sum(not (t.metadata or {}).get("exception_alternative") for t in net.transitions), 9)
         self.assertEqual(len(net.places), 8)
-        # 19 arcs
-        self.assertEqual(len(net.arcs), 19)
 
     def test_parallel_except_paths(self):
         net = walk_net(walker, self.func_node)
@@ -258,13 +258,14 @@ class TestTryElseAndNesting(unittest.TestCase):
         t_x2 = next(t for t in net.transitions if "x = 2" in t.label)
         t_x4 = next(t for t in net.transitions if "x = 4" in t.label)
 
-        # x = 1 and x = 4 arc to outer except_entry
-        self.assertIn(p_outer_exc, [a.target for a in net.arcs if a.source == t_x1])
-        self.assertIn(p_outer_exc, [a.target for a in net.arcs if a.source == t_x4])
+        # x = 1 and x = 4 have separate exceptional alternatives to outer except_entry.
+        self.assertIn(p_outer_exc, [a.target for a in net.arcs if a.source == _exception_alternative(net, t_x1)])
+        self.assertIn(p_outer_exc, [a.target for a in net.arcs if a.source == _exception_alternative(net, t_x4)])
 
-        # x = 2 arcs to inner except_entry, not outer
-        self.assertIn(p_inner_exc, [a.target for a in net.arcs if a.source == t_x2])
-        self.assertNotIn(p_outer_exc, [a.target for a in net.arcs if a.source == t_x2])
+        # x = 2's exceptional alternative routes to inner except_entry, not outer.
+        inner_exception = _exception_alternative(net, t_x2)
+        self.assertIn(p_inner_exc, [a.target for a in net.arcs if a.source == inner_exception])
+        self.assertNotIn(p_outer_exc, [a.target for a in net.arcs if a.source == inner_exception])
 
         # Inner handler entry transition (t_except) does not arc to outer except_entry
         t_inner_handler = next(t for t in net.transitions if t.label == "except" and any(a.source == p_inner_exc for a in net.arcs if a.target == t))

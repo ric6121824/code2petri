@@ -556,13 +556,17 @@ class TestPythonWalkerEdgeCases(unittest.TestCase):
         tree = ast.parse(code)
         func_node = find_function(tree, "func_with_raise")
         net = walk_net(walker, func_node)
-        assert_valid_petri_net(self, net)
-        start_p, end_p = assert_has_start_and_end(self, net)
+        assert_bipartite(self, net)
+        start_p = next(place for place in net.places if place.label == "start")
+        end_p = next(place for place in net.places if place.label == "end")
+        exception_end = net.find_exception_boundary_place()
+        self.assertEqual(start_p.initial_tokens, 1)
 
         raise_trans = next(t for t in net.transitions if "raise" in t.label)
         self.assertIsNotNone(raise_trans)
-        # Unhandled raise arcs to end_place
-        self.assertTrue(any(a.source == raise_trans and a.target == end_p for a in net.arcs))
+        self.assertFalse(any(a.source == raise_trans and a.target == end_p for a in net.arcs))
+        self.assertIsNotNone(exception_end)
+        self.assertTrue(any(a.source == raise_trans and a.target == exception_end for a in net.arcs))
         # Dead statement after raise is not present in net
         self.assertFalse(any("y = 2" in t.label for t in net.transitions))
 
