@@ -4,7 +4,8 @@ To comply with the project architecture rule ('Avoid: walker base class'), langu
 walkers compose this builder internally rather than inheriting from a walker base class.
 """
 
-from typing import Optional, List, NamedTuple, Any, Union, Tuple, Dict, Callable
+from contextlib import contextmanager
+from typing import Optional, List, NamedTuple, Any, Union, Tuple, Dict, Callable, Iterator
 from code2petri.model import PetriNet, Place, Transition, Arc, CallResolution
 
 
@@ -152,6 +153,15 @@ class ControlFlowBuilder:
     def pop_try(self) -> Optional[TryContext]:
         """Pops and returns the innermost try context, or None if empty."""
         return self.try_stack.pop() if self.try_stack else None
+
+    @contextmanager
+    def _using_try_context(self, try_context: TryContext) -> Iterator[None]:
+        """Temporarily makes a try-routing context active while walking a body."""
+        self.push_try(try_context)
+        try:
+            yield
+        finally:
+            self.pop_try()
 
     def push_loop(self, head: Optional[Place], exit: Place) -> None:
         """Pushes a loop context onto the loop stack."""
@@ -317,24 +327,29 @@ class ControlFlowBuilder:
             else_entry = None
             try_normal_exit = finally_target
 
-        self.push_try(TryContext(
+        with self._using_try_context(TryContext(
             except_entry=except_entry,
             finally_entry=finally_entry,
             loop_depth=len(self.loop_stack),
-        ))
-        walk_block_fn(try_body, current_place=ctx.current_place, target_exit=try_normal_exit)
-        self.pop_try()
+        )):
+            walk_block_fn(try_body, current_place=ctx.current_place, target_exit=try_normal_exit)
+
+        finally_exception_context = (
+            TryContext(
+                except_entry=finally_exception_entry,
+                finally_entry=finally_entry,
+                loop_depth=len(self.loop_stack),
+            )
+            if finally_exception_entry is not None
+            else None
+        )
 
         if else_stmts and else_entry is not None:
-            if finally_exception_entry is not None:
-                self.push_try(TryContext(
-                    except_entry=finally_exception_entry,
-                    finally_entry=finally_entry,
-                    loop_depth=len(self.loop_stack),
-                ))
-            walk_block_fn(else_stmts, current_place=else_entry, target_exit=finally_target)
-            if finally_exception_entry is not None:
-                self.pop_try()
+            if finally_exception_context is not None:
+                with self._using_try_context(finally_exception_context):
+                    walk_block_fn(else_stmts, current_place=else_entry, target_exit=finally_target)
+            else:
+                walk_block_fn(else_stmts, current_place=else_entry, target_exit=finally_target)
 
         if handlers:
             for h_label, h_lineno, h_body in handlers:
@@ -344,21 +359,23 @@ class ControlFlowBuilder:
                     hook_exception=False,
                 )
                 self.add_arc(source=except_entry, target=h_trans)
-                if finally_exception_entry is not None:
-                    self.push_try(TryContext(
-                        except_entry=finally_exception_entry,
-                        finally_entry=finally_entry,
-                        loop_depth=len(self.loop_stack),
-                    ))
-                self.walk_branch(
-                    h_body,
-                    source_transition=h_trans,
-                    target_exit=finally_target,
-                    walk_block_fn=walk_block_fn,
-                    line_number=h_lineno,
-                )
-                if finally_exception_entry is not None:
-                    self.pop_try()
+                if finally_exception_context is not None:
+                    with self._using_try_context(finally_exception_context):
+                        self.walk_branch(
+                            h_body,
+                            source_transition=h_trans,
+                            target_exit=finally_target,
+                            walk_block_fn=walk_block_fn,
+                            line_number=h_lineno,
+                        )
+                else:
+                    self.walk_branch(
+                        h_body,
+                        source_transition=h_trans,
+                        target_exit=finally_target,
+                        walk_block_fn=walk_block_fn,
+                        line_number=h_lineno,
+                    )
         else:
             self._wire_exception_relay(
                 source=except_entry,
@@ -376,19 +393,16 @@ class ControlFlowBuilder:
                 if self.try_stack
                 else self._ensure_exception_end_place()
             )
-            self.push_try(TryContext(
+            with self._using_try_context(TryContext(
                 except_entry=cleanup_exception_target,
                 loop_depth=len(self.loop_stack),
-            ))
-            try:
+            )):
                 walk_block_fn(finally_stmts, current_place=finally_entry, target_exit=try_exit)
                 exception_cleanup_result = walk_block_fn(
                     finally_stmts,
                     current_place=finally_exception_entry,
                     target_exit=exception_cleanup_exit,
                 )
-            finally:
-                self.pop_try()
             if exception_cleanup_result is not None:
                 self._wire_exception_relay(
                     source=exception_cleanup_exit,

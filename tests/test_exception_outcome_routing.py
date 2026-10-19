@@ -9,16 +9,41 @@ from code2petri.python_walker import PythonWalker
 from code2petri.symbol_table import SymbolTable
 
 
-def reachable_markings(net, max_steps=30):
-    """Return bounded Petri-net markings reachable from the net's initial tokens."""
+def _firing_index(net):
+    """Index Petri-net arcs for the two reachability views below."""
     places = {place.id: place for place in net.places}
     inputs = {transition.id: [] for transition in net.transitions}
     outputs = {transition.id: [] for transition in net.transitions}
+    transitions = {transition.id: transition for transition in net.transitions}
     for arc in net.arcs:
         if arc.target.id in inputs and arc.source.id in places:
             inputs[arc.target.id].append((arc.source.id, arc.weight))
         elif arc.source.id in outputs and arc.target.id in places:
             outputs[arc.source.id].append((arc.target.id, arc.weight))
+    return inputs, outputs, transitions
+
+
+def _enabled_successors(marking, inputs, outputs):
+    """Yield each enabled transition and its resulting marking state."""
+    for transition_id, required in inputs.items():
+        if not all(marking.get(place_id, 0) >= weight for place_id, weight in required):
+            continue
+        next_marking = dict(marking)
+        for place_id, weight in required:
+            next_marking[place_id] -= weight
+        for place_id, weight in outputs[transition_id]:
+            next_marking[place_id] = next_marking.get(place_id, 0) + weight
+        next_state = tuple(sorted(
+            (place_id, count)
+            for place_id, count in next_marking.items()
+            if count
+        ))
+        yield transition_id, next_state
+
+
+def reachable_markings(net, max_steps=30):
+    """Return bounded Petri-net markings reachable from the net's initial tokens."""
+    inputs, outputs, _ = _firing_index(net)
 
     initial = tuple(sorted(
         (place.id, place.initial_tokens)
@@ -32,20 +57,7 @@ def reachable_markings(net, max_steps=30):
         if depth >= max_steps:
             continue
         marking = dict(state)
-        for transition in net.transitions:
-            required = inputs[transition.id]
-            if not all(marking.get(place_id, 0) >= weight for place_id, weight in required):
-                continue
-            next_marking = dict(marking)
-            for place_id, weight in required:
-                next_marking[place_id] -= weight
-            for place_id, weight in outputs[transition.id]:
-                next_marking[place_id] = next_marking.get(place_id, 0) + weight
-            next_state = tuple(sorted(
-                (place_id, count)
-                for place_id, count in next_marking.items()
-                if count
-            ))
+        for _, next_state in _enabled_successors(marking, inputs, outputs):
             if next_state not in seen:
                 seen.add(next_state)
                 frontier.append((next_state, depth + 1))
@@ -54,15 +66,7 @@ def reachable_markings(net, max_steps=30):
 
 def reachable_completion_traces(net, max_steps=50):
     """Return simple transition traces ending at normal or exceptional boundaries."""
-    places = {place.id: place for place in net.places}
-    inputs = {transition.id: [] for transition in net.transitions}
-    outputs = {transition.id: [] for transition in net.transitions}
-    transitions = {transition.id: transition for transition in net.transitions}
-    for arc in net.arcs:
-        if arc.target.id in inputs and arc.source.id in places:
-            inputs[arc.target.id].append((arc.source.id, arc.weight))
-        elif arc.source.id in outputs and arc.target.id in places:
-            outputs[arc.source.id].append((arc.target.id, arc.weight))
+    inputs, outputs, transitions = _firing_index(net)
 
     initial = tuple(sorted(
         (place.id, place.initial_tokens)
@@ -83,19 +87,7 @@ def reachable_completion_traces(net, max_steps=50):
             continue
         if len(trace) >= max_steps:
             continue
-        for transition_id, required in inputs.items():
-            if not all(marking.get(place_id, 0) >= weight for place_id, weight in required):
-                continue
-            next_marking = dict(marking)
-            for place_id, weight in required:
-                next_marking[place_id] -= weight
-            for place_id, weight in outputs[transition_id]:
-                next_marking[place_id] = next_marking.get(place_id, 0) + weight
-            next_state = tuple(sorted(
-                (place_id, count)
-                for place_id, count in next_marking.items()
-                if count
-            ))
+        for transition_id, next_state in _enabled_successors(marking, inputs, outputs):
             if next_state in path_states:
                 continue
             frontier.append((next_state, trace + (transition_id,), path_states | {next_state}))
@@ -474,7 +466,7 @@ class TestExceptionOutcomeRouting(unittest.TestCase):
         self.assertTrue(all("call: handled()" in labels for labels in handled))
         self.assertTrue(all("call: cleanup()" in labels for labels in handled))
 
-    def test_javascript_raise_in_finally_remains_exceptional(self):
+    def test_javascript_throw_in_finally_remains_exceptional(self):
         net = self._walk_javascript_source(
             "function sample() {\n"
             "  try { work(); } finally { throw new Error(); }\n"
