@@ -114,3 +114,28 @@ The new Python production-walker regressions failed before the repair: the uncau
 The regression paths cover uncaught Python raise, following-statement suppression, normal completion and handled raise controls, nested cleanup order, cleanup raise, JavaScript throw/finally, and Inline Expansion into a catching caller. The inlined caller trace runs cleanup before its handler, skips the in-try continuation, and completes the handler's following statement. The test also verifies that the two cloned cleanup call sites have distinct transition IDs, retain matching call-result owner IDs after Inline Expansion, and start at transition weight `1.0`.
 
 The first focused command passed: `python3 -m unittest tests.test_exception_outcome_routing tests.test_petri_try tests.test_javascript_walker tests.test_python_walker tests.test_inline_expansion -q` — **170 tests, OK**. The Spec review identified two remaining evidence gaps: JavaScript controls for normal/handled/cleanup-raise outcomes, and a direct cleanup-before-handler order assertion in the inlined trace. Both are now covered in `tests.test_exception_outcome_routing`. The updated exception-routing module passes **19 tests**, including the additional JavaScript controls and explicit order check. `compileall` for the changed Python modules and `git diff --check` also passed. The full-suite result and final implementation commit are recorded below after the final verification pass.
+
+### Final implementation verification — 2026-10-20
+
+The final focused suite passed after the review fixes:
+
+```text
+python3 -m unittest tests.test_exception_outcome_routing tests.test_petri_try tests.test_javascript_walker tests.test_python_walker tests.test_inline_expansion -q
+Ran 172 tests — OK
+```
+
+The full suite was run once with `python3 -m unittest discover -q`:
+
+```text
+Ran 627 tests in 46.795s
+FAILED (failures=1, errors=4)
+```
+
+The failure was `tests.test_live_fold_prototype.TestLiveFoldPrototype.test_prototype_runner_check`, whose prototype runner reported that it could not bind a test port. The four errors were: missing optional `pygraphviz` while importing `tests.test_graphs`; missing `pytest` while importing `tests.test_interface`; `PetriNet` lacking the `initial_net` attribute expected by `test_javascript_assigned_functions_keep_owner_jsdoc_and_expression_text`; and `test_walk_result_namedtuple` expecting two-value unpacking from a three-value result. These failures are outside the changed finally-routing paths. The focused changed-area suite passed.
+
+Both required code-review axes were rerun against `e401ee5...2f5c492` after the review fixes:
+
+- **Standards:** 0 findings. The earlier duplicate try-context and firing-helper concerns were addressed.
+- **Spec:** 0 findings. Python/JavaScript outcomes, nested cleanup, cleanup exceptions, and Inline Expansion caller propagation match the Round 06 implementation criteria.
+
+The implementation commits are `6a1e97f` (`fix: preserve exceptions through finally`), `b5ea509` (`test: cover JavaScript finally outcomes`), `4cf6ea4` (`refactor: share exception routing helpers`), and `2f5c492` (`refactor: simplify optional finally context`). Browser/session save-edit-unfold acceptance remains open in Ticket 66; the user-confirmed newest-export open pass is recorded above.
