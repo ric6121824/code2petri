@@ -4,7 +4,7 @@ To comply with the project architecture rule ('Avoid: walker base class'), langu
 walkers compose this builder internally rather than inheriting from a walker base class.
 """
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Optional, List, NamedTuple, Any, Union, Tuple, Dict, Callable, Iterator
 from code2petri.model import PetriNet, Place, Transition, Arc, CallResolution
 
@@ -345,10 +345,12 @@ class ControlFlowBuilder:
         )
 
         if else_stmts and else_entry is not None:
-            if finally_exception_context is not None:
-                with self._using_try_context(finally_exception_context):
-                    walk_block_fn(else_stmts, current_place=else_entry, target_exit=finally_target)
-            else:
+            else_context = (
+                self._using_try_context(finally_exception_context)
+                if finally_exception_context is not None
+                else nullcontext()
+            )
+            with else_context:
                 walk_block_fn(else_stmts, current_place=else_entry, target_exit=finally_target)
 
         if handlers:
@@ -359,16 +361,12 @@ class ControlFlowBuilder:
                     hook_exception=False,
                 )
                 self.add_arc(source=except_entry, target=h_trans)
-                if finally_exception_context is not None:
-                    with self._using_try_context(finally_exception_context):
-                        self.walk_branch(
-                            h_body,
-                            source_transition=h_trans,
-                            target_exit=finally_target,
-                            walk_block_fn=walk_block_fn,
-                            line_number=h_lineno,
-                        )
-                else:
+                handler_context = (
+                    self._using_try_context(finally_exception_context)
+                    if finally_exception_context is not None
+                    else nullcontext()
+                )
+                with handler_context:
                     self.walk_branch(
                         h_body,
                         source_transition=h_trans,
