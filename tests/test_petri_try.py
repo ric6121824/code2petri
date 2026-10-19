@@ -106,9 +106,9 @@ class TestTryExceptFinally(unittest.TestCase):
     def test_try_except_finally_counts(self):
         net = walk_net(walker, self.func_node)
         self.assertIsInstance(net, PetriNet)
-        # Six source transitions remain; possible exception outcomes use separate alternatives.
-        self.assertEqual(sum(not (t.metadata or {}).get("exception_alternative") for t in net.transitions), 6)
-        self.assertEqual(len(net.places), 7)
+        # The finally body is represented on normal and pending-exception paths.
+        self.assertEqual(sum(not (t.metadata or {}).get("exception_alternative") for t in net.transitions), 8)
+        self.assertEqual(len(net.places), 10)
 
     def test_finally_mandatory_convergence(self):
         net = walk_net(walker, self.func_node)
@@ -286,11 +286,12 @@ class TestTryElseAndNesting(unittest.TestCase):
 
         p_except = next(p for p in net.places if p.label == "except_entry")
         p_finally = next(p for p in net.places if p.label == "finally_entry")
+        p_exception_finally = next(p for p in net.places if p.label == "finally_exception_entry")
 
-        # Unhandled exception flows via 'exception' transition to finally_entry
+        # Unhandled exceptions enter the exceptional cleanup copy.
         t_exc = next(t for t in net.transitions if t.label == "exception")
         self.assertIn(t_exc, [a.target for a in net.arcs if a.source == p_except])
-        self.assertIn(p_finally, [a.target for a in net.arcs if a.source == t_exc])
+        self.assertIn(p_exception_finally, [a.target for a in net.arcs if a.source == t_exc])
 
     def test_try_finally_return_routes_to_finally(self):
         code = (

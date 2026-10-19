@@ -108,6 +108,30 @@ class ControlFlowBuilder:
         self.exception_end_place = self.net.ensure_exception_boundary_place()
         return self.exception_end_place
 
+    def _wire_exception_relay(
+        self,
+        source: Place,
+        label: str = "exception",
+        line_number: Optional[int] = None,
+        target: Optional[Place] = None,
+    ) -> Transition:
+        """Sends an exception token to an explicit destination or the enclosing boundary."""
+        trans = self.new_transition(
+            label=label,
+            line_number=line_number,
+            hook_exception=False,
+        )
+        self.add_arc(source=source, target=trans)
+        destination = target
+        if destination is None:
+            destination = (
+                self.try_stack[-1].except_entry
+                if self.try_stack
+                else self._ensure_exception_end_place()
+            )
+        self.add_arc(source=trans, target=destination)
+        return trans
+
     def add_arc(
         self,
         source: Union[Place, Transition],
@@ -270,15 +294,20 @@ class ControlFlowBuilder:
         else_stmts: Optional[Any] = None,
         else_lineno: Optional[int] = None,
     ) -> Place:
-        """Wires try/catch/else/finally exception handling constructs."""
+        """Wires try/catch/else/finally while retaining exceptional completion through cleanup."""
         except_entry = self.new_place(label="except_entry", line_number=ctx.lineno)
         try_exit = ctx.target_exit if ctx.is_last else self.new_place(label="try_exit", line_number=ctx.lineno)
 
         if finally_stmts:
             finally_entry = self.new_place(label="finally_entry", line_number=finally_lineno)
+            finally_exception_entry = self.new_place(
+                label="finally_exception_entry",
+                line_number=finally_lineno,
+            )
             finally_target = finally_entry
         else:
             finally_entry = None
+            finally_exception_entry = None
             finally_target = try_exit
 
         if else_stmts:
@@ -297,7 +326,15 @@ class ControlFlowBuilder:
         self.pop_try()
 
         if else_stmts and else_entry is not None:
+            if finally_exception_entry is not None:
+                self.push_try(TryContext(
+                    except_entry=finally_exception_entry,
+                    finally_entry=finally_entry,
+                    loop_depth=len(self.loop_stack),
+                ))
             walk_block_fn(else_stmts, current_place=else_entry, target_exit=finally_target)
+            if finally_exception_entry is not None:
+                self.pop_try()
 
         if handlers:
             for h_label, h_lineno, h_body in handlers:
@@ -307,6 +344,12 @@ class ControlFlowBuilder:
                     hook_exception=False,
                 )
                 self.add_arc(source=except_entry, target=h_trans)
+                if finally_exception_entry is not None:
+                    self.push_try(TryContext(
+                        except_entry=finally_exception_entry,
+                        finally_entry=finally_entry,
+                        loop_depth=len(self.loop_stack),
+                    ))
                 self.walk_branch(
                     h_body,
                     source_transition=h_trans,
@@ -314,17 +357,44 @@ class ControlFlowBuilder:
                     walk_block_fn=walk_block_fn,
                     line_number=h_lineno,
                 )
-        elif finally_stmts:
-            exc_trans = self.new_transition(
-                label="exception",
+                if finally_exception_entry is not None:
+                    self.pop_try()
+        else:
+            self._wire_exception_relay(
+                source=except_entry,
                 line_number=ctx.lineno,
-                hook_exception=False,
+                target=finally_exception_entry,
             )
-            self.add_arc(source=except_entry, target=exc_trans)
-            self.add_arc(source=exc_trans, target=finally_target)
 
         if finally_stmts and finally_entry is not None:
-            walk_block_fn(finally_stmts, current_place=finally_entry, target_exit=try_exit)
+            exception_cleanup_exit = self.new_place(
+                label="finally_exception_exit",
+                line_number=finally_lineno,
+            )
+            cleanup_exception_target = (
+                self.try_stack[-1].except_entry
+                if self.try_stack
+                else self._ensure_exception_end_place()
+            )
+            self.push_try(TryContext(
+                except_entry=cleanup_exception_target,
+                loop_depth=len(self.loop_stack),
+            ))
+            try:
+                walk_block_fn(finally_stmts, current_place=finally_entry, target_exit=try_exit)
+                exception_cleanup_result = walk_block_fn(
+                    finally_stmts,
+                    current_place=finally_exception_entry,
+                    target_exit=exception_cleanup_exit,
+                )
+            finally:
+                self.pop_try()
+            if exception_cleanup_result is not None:
+                self._wire_exception_relay(
+                    source=exception_cleanup_exit,
+                    label="exception_after_finally",
+                    line_number=finally_lineno,
+                )
 
         return try_exit
 

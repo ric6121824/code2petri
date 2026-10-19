@@ -597,11 +597,15 @@ class TestJavascriptTryCatch(unittest.TestCase):
         assert_bipartite(self, net)
 
         cleanup_trans = next(t for t in net.transitions if "cleanup" in t.label)
-        finally_entry = next(a.source for a in net.arcs if a.target == cleanup_trans)
+        normal_finally_entry = next(a.source for a in net.arcs if a.target == cleanup_trans)
         exc_trans = next(t for t in net.transitions if t.label == "exception")
+        exceptional_finally_entry = next(
+            place for place in net.places if place.label == "finally_exception_entry"
+        )
 
-        # Unhandled exception flows into finally_entry
-        self.assertTrue(any(a.source == exc_trans and a.target == finally_entry for a in net.arcs))
+        # Unhandled exception flows into the exceptional cleanup copy.
+        self.assertTrue(any(a.source == exc_trans and a.target == exceptional_finally_entry for a in net.arcs))
+        self.assertNotEqual(normal_finally_entry, exceptional_finally_entry)
 
     def test_try_finally_return_routes_through_finally(self):
         code = (
