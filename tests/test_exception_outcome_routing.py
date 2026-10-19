@@ -440,6 +440,59 @@ class TestExceptionOutcomeRouting(unittest.TestCase):
             for _, labels in exceptional
         ))
 
+    def test_javascript_normal_and_handled_outcomes_complete_through_finally(self):
+        normal_net = self._walk_javascript_source(
+            "function sample() {\n"
+            "  try { work(); } finally { cleanup(); }\n"
+            "}\n",
+            "sample",
+        )
+        normal_traces = reachable_completion_traces(normal_net)
+        normal_end = next(place for place in normal_net.places if place.label == "end")
+        normal = [
+            labels for marking, labels, _ in normal_traces
+            if marking.get(normal_end.id, 0)
+        ]
+        self.assertTrue(normal)
+        self.assertTrue(all("call: cleanup()" in labels for labels in normal))
+
+        handled_net = self._walk_javascript_source(
+            "function sample() {\n"
+            "  try { throw new Error(); }\n"
+            "  catch (error) { handled(); }\n"
+            "  finally { cleanup(); }\n"
+            "}\n",
+            "sample",
+        )
+        handled_traces = reachable_completion_traces(handled_net)
+        handled_end = next(place for place in handled_net.places if place.label == "end")
+        handled = [
+            labels for marking, labels, _ in handled_traces
+            if marking.get(handled_end.id, 0)
+        ]
+        self.assertTrue(handled)
+        self.assertTrue(all("call: handled()" in labels for labels in handled))
+        self.assertTrue(all("call: cleanup()" in labels for labels in handled))
+
+    def test_javascript_raise_in_finally_remains_exceptional(self):
+        net = self._walk_javascript_source(
+            "function sample() {\n"
+            "  try { work(); } finally { throw new Error(); }\n"
+            "}\n",
+            "sample",
+        )
+        traces = reachable_completion_traces(net)
+        exception_end = net.find_exception_boundary_place()
+        normal_end = next(place for place in net.places if place.label == "end")
+        exceptional = [
+            (marking, labels) for marking, labels, _ in traces
+            if exception_end is not None and marking.get(exception_end.id, 0)
+        ]
+
+        self.assertTrue(exceptional)
+        self.assertFalse(any(marking.get(normal_end.id, 0) for marking, _, _ in traces))
+        self.assertTrue(all(any("throw" in label for label in labels) for _, labels in exceptional))
+
     def test_inlined_finally_exception_runs_cleanup_before_caller_handler(self):
         source = (
             "def worker():\n"
@@ -486,6 +539,12 @@ class TestExceptionOutcomeRouting(unittest.TestCase):
         self.assertTrue(all("call: recovered()" in labels for _, labels, _ in normal))
         self.assertTrue(all("call: after_catch()" in labels for _, labels, _ in normal))
         self.assertTrue(all("call: after_in_try()" not in labels for _, labels, _ in normal))
+        for _, labels, _ in normal:
+            cleanup_index = next(
+                i for i, label in enumerate(labels)
+                if label in {"call: cleanup()", "exception: call: cleanup()"}
+            )
+            self.assertLess(cleanup_index, labels.index("call: recovered()"))
 
         cleanup_calls = [t for t in composite.transitions if t.label == "call: cleanup()"]
         self.assertEqual(len(cleanup_calls), 2)
