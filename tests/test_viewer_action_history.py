@@ -533,7 +533,6 @@ if (result.reductionOutcome !== 'incomplete' || result.finalSmAvailable !== fals
 if (reductionOutcome !== 'incomplete' || payload.final_sm !== null || payload.final_sm_available !== false) {
   throw new Error('refolded call claimed an unvalidated final SM');
 }
-const laterIncompleteReason = payload.incomplete_reason;
 if (inspectorSm.textContent !== 'Unavailable') throw new Error('inspector presented a numeric final SM for the refolded call');
 if (expandedNodes.has('t_call')) throw new Error('refold left the call marked as expanded');
 if (cy.getElementById('t_call').data('is_expansion_container') === true) throw new Error('refold left the presentation container expanded');
@@ -593,14 +592,6 @@ if (!lastCreatedBlob || !lastCreatedBlob.content.includes('id="t_call"') ||
     lastCreatedBlob.content.includes('name="final_sm" value=')) {
   throw new Error('the production export action did not export the live refolded graph with unavailable score metadata');
 }
-const legacyRestoration = JSON.parse(JSON.stringify(cy.getElementById('t_call').data('function_restoration')));
-if (Object.prototype.hasOwnProperty.call(legacyRestoration, 'analysis')) {
-  throw new Error('call-local restoration persisted document-wide analysis state');
-}
-legacyRestoration.analysis = {
-  reductionOutcome: 'completed_structured', incompleteReason: null, finalSm: 3, finalSmAvailable: true
-};
-cy.getElementById('t_call').data('function_restoration', legacyRestoration);
 const laterUnrelatedPosition = { x: 654, y: 987 };
 cy.getElementById('unrelated').position(laterUnrelatedPosition);
 const expectedUnfoldElements = JSON.parse(beforeRefold);
@@ -631,16 +622,76 @@ if (unrelatedPosition.x !== laterUnrelatedPosition.x || unrelatedPosition.y !== 
   throw new Error('local Unfold changed an unrelated node position made later in the session');
 }
 if (componentLocalLayoutRuns !== 0) throw new Error('Component-Local Unfold ran a graph-wide layout for function restoration');
-if (reductionOutcome !== 'incomplete' || payload.reduction_outcome !== 'incomplete' ||
-    payload.final_sm !== null || payload.final_sm_available !== false ||
-    payload.incomplete_reason !== laterIncompleteReason) {
-  throw new Error('local Unfold reverted the current document-wide incomplete analysis state');
-}
 if (!viewerActionHistory.undo() || expandedNodes.has('t_call')) throw new Error('Undo did not restore the refolded call');
 if (!viewerActionHistory.redo() || !expandedNodes.has('t_call')) throw new Error('Redo did not restore local Unfold from the recorded state');
 """
         script = _setup_live_fold_test_harness(net_literal, logic)
         result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_local_unfold_preserves_newer_incomplete_score_state(self):
+        net_literal = """{
+  places: [{ id: 'p_in', label: 'in', initial_tokens: 1 }, { id: 'p_out', label: 'out' }, { id: 'p_error', label: 'error' }],
+  transitions: [
+    { id: 't_call', label: 'helper()' },
+    { id: 't_call_error', label: 'exception: helper()', metadata: { exception_alternative: true, exception_alternative_of: 't_call' } }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_call' }, { source: 't_call', target: 'p_out' },
+    { source: 'p_in', target: 't_call_error' }, { source: 't_call_error', target: 'p_error' }
+  ]
+}"""
+        logic = r"""
+global.trackScoreState = true;
+global.reductionOutcome = 'completed_structured';
+global.payload = { final_sm: 3, final_sm_available: true, incomplete_reason: null };
+const call = cy.getElementById('t_call');
+call.data('resolved', true);
+call.data('resolved_to', 'helper');
+call.data('raw_label', 'helper()');
+calleeNetsMap.helper = {
+  places: [
+    { id: 'helper_start', label: 'start', metadata: { boundary_role: 'source' } },
+    { id: 'helper_return_end', label: 'end', metadata: { boundary_role: 'normal_exit' } },
+    { id: 'helper_exception_end', label: 'exception_end', metadata: { boundary_role: 'exceptional_exit' } }
+  ],
+  transitions: [{ id: 'helper_return', label: 'return' }, { id: 'helper_raise', label: 'raise' }],
+  arcs: [
+    { source: 'helper_start', target: 'helper_return' }, { source: 'helper_return', target: 'helper_return_end' },
+    { source: 'helper_start', target: 'helper_raise' }, { source: 'helper_raise', target: 'helper_exception_end' }
+  ]
+};
+call.emit('tap');
+if (!expandedNodes.has('t_call')) throw new Error('setup failed to expand the two-outcome call');
+const actualFoldEntireFunction = handleFoldEntireFunction;
+let foldResult = null;
+handleFoldEntireFunction = function(node) {
+  foldResult = actualFoldEntireFunction(node);
+  return foldResult;
+};
+hudBtnFoldEntireFunction.click();
+if (!foldResult || !foldResult.success || reductionOutcome !== 'incomplete' ||
+    payload.final_sm !== null || payload.final_sm_available !== false) {
+  throw new Error('the production call refold did not establish the later incomplete document state');
+}
+const laterIncompleteReason = payload.incomplete_reason;
+const callNode = cy.getElementById('t_call');
+const restoration = JSON.parse(JSON.stringify(callNode.data('function_restoration')));
+if (Object.prototype.hasOwnProperty.call(restoration, 'analysis')) {
+  throw new Error('call-local restoration persisted document-wide analysis state');
+}
+restoration.analysis = {
+  reductionOutcome: 'completed_structured', incompleteReason: null, finalSm: 3, finalSmAvailable: true
+};
+callNode.data('function_restoration', restoration);
+if (!handleRightClickUnfold(callNode)) throw new Error('production Component-Local Unfold failed');
+if (reductionOutcome !== 'incomplete' || payload.reduction_outcome !== 'incomplete' ||
+    payload.final_sm !== null || payload.final_sm_available !== false ||
+    payload.incomplete_reason !== laterIncompleteReason) {
+  throw new Error('local Unfold reverted the current document-wide incomplete analysis state');
+}
+"""
+        result = self.run_node(_setup_live_fold_test_harness(net_literal, logic))
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_production_fold_entire_function_refolds_backend_inlined_occurrence(self):
