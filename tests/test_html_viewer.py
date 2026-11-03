@@ -63,7 +63,7 @@ def _extract_template_net_to_elements() -> str:
     """Helper to extract the depth presentation helper and element builder from template.html."""
     html = _read_template_html()
     depth_match = re.search(r'function getCompoundDepthPresentation\(compoundId, getParentId\) \{.*?\n      \}', html, re.DOTALL)
-    match = re.search(r'function netToElements\(net\) \{(.*?)\n      \}', html, re.DOTALL)
+    match = re.search(r'function netToElements\(net(?:, expansionIds)?\) \{(.*?)\n      \}', html, re.DOTALL)
     if not depth_match or not match:
         raise ValueError("Could not extract netToElements from template.html")
     return depth_match.group(0) + "\n" + match.group(0)
@@ -111,6 +111,13 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     fold_entire_function_js = extract_function(
         "handleFoldEntireFunction", "\n\n      if (hudEls.foldEntireFunctionBtnEl)"
     )
+    current_graph_expansion_js = "\n".join([
+        extract_function("findBoundaryPlaces", "\n\n      // Convert PetriNet dict to Cytoscape elements"),
+        extract_function("currentGraphToNet", "\n      function buildCurrentGraphWithExpandedCall("),
+        extract_function("buildCurrentGraphWithExpandedCall", "\n      function collapseCallExpansion("),
+        extract_function("collapseCallExpansion", "\n      function renderGraphElements("),
+    ])
+    render_graph_js = extract_function("renderGraphElements", "\n      function renderStep(")
     get_selected_place_ids_js = extract_function("getSelectedPlaceIds", "\n      function refreshFoldActionView(")
     refresh_fold_action_view_js = extract_function("refreshFoldActionView", "\n      function formatFoldActionResult(")
     format_fold_action_result_js = extract_function("formatFoldActionResult", "\n      function updateBatchPlaceFoldControls(")
@@ -128,6 +135,7 @@ const {{ captureViewport, computeAnchoredPan, restoreViewport }} = require('./co
 global.captureViewport = captureViewport;
 global.computeAnchoredPan = computeAnchoredPan;
 global.restoreViewport = restoreViewport;
+global.alert = function(message) {{ throw new Error(message); }};
 
 {net_to_elements_js}
 {sese_js}
@@ -290,6 +298,10 @@ const document = {{
 
 {inspector_js}
 
+let layoutShiftHook = null;
+function applyLayout() {{ if (layoutShiftHook) layoutShiftHook(); }}
+function updateUI() {{}}
+
 if (inspectorSaveBtn) {{
   inspectorSaveBtn.addEventListener('click', function(e) {{
     applyComponentNodeRename();
@@ -383,6 +395,8 @@ updateFoldableHighlights();
 {format_fold_action_result_js}
 {update_batch_controls_js}
 {batch_place_fold_js}
+{current_graph_expansion_js}
+{render_graph_js}
 
 let hasDragged = false;
 
