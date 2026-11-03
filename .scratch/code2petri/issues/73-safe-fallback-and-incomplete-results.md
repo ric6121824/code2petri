@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately).
 
-**Status:** ready-for-agent
+**Status:** ready-for-human
 
 - [ ] Reconstruct the state immediately before the invalid final fold in the retained standalone Dots & Boxes session. Refuse the fallback that selects the normal sink and consumes the exceptional exit: both exits survive, and running weight 22 is not transformed into the invalid apparent final score 2200.
 - [ ] Validate distinct justified source and sink boundaries, applicable single-entry/single-exit structure, complete source-to-sink coverage, consumed-place markings, incident/crossing interfaces, and relevant arc weights. Multiple exits, disconnected remainders, missing exits, identical source/sink, or unsupported interfaces cannot be repaired by choosing an arbitrary boundary.
@@ -34,3 +34,7 @@ Published after the user approved the three-ticket breakdown, scopes, and blocki
 ### 2026-11-03 — Implementation progress
 
 Implemented in the Ticket 73 work branch: Python fallback validation and incomplete `ReductionOutcome` reporting, browser Unstructured candidate revalidation, preserved-result HTML/PNML export metadata, and snapshot outcome validation. Focused API, CLI, Python export, headless viewer, PNML, and session tests pass. The regenerated Dots & Boxes browser check (refusal, preserved exits, save/reopen, and continued editing) was not performed in this worktree; keep this ticket open for that acceptance and the remaining integration review.
+
+### 2026-11-03 — Integrated review and validation
+
+Integrated into `codex/phase-2.8.2-call-refolding` at candidate commit `10c7553b1c8459e0777ee2790a076123de88c0f7` before this tracking update. Final Spec review found no remaining code violations; final Standards review found no documented-standard breaches. The 62 focused viewer action, expansion, and reduction tests pass; `compileall` and `git diff --check` pass. Actual regenerated Dots & Boxes browser acceptance remains unperformed. The original retained standalone session needed to reproduce the historical final-fold refusal was not available as a browser artifact in this integration worktree, so do not count the current regenerated graphs as that specific acceptance. Keep the ticket open for the human browser check.

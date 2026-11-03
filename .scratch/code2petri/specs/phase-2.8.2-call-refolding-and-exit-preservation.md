@@ -1,6 +1,6 @@
 # Phase 2.8.2 — Call Refolding and Exit Preservation
 
-**Status:** ready-for-agent
+**Status:** needs-info
 
 **Published:** 2026-11-03
 
@@ -10,7 +10,7 @@
 
 **Research:** [Primary-source reading note](../research/phase-2.8.2-function-refolding-papers.md).
 
-**Readiness:** Tickets 72 and 73 have no remaining product questions. Ticket 71 includes a required engineering validation of its scoring representation; no untested normalization or penalty formula is approved.
+**Readiness:** Implementation and focused review are integrated. Tickets 72 and 73 are ready for actual Dots & Boxes browser acceptance. Ticket 71 also requires a scoring-scope decision: the tested exit-place projection defines an outcome-erased metric and has not been approved as the unchanged SM of the visible multi-outcome net. No normalization or penalty formula is currently approved.
 
 ## Problem Statement
 
@@ -165,4 +165,14 @@ The audit found one open product decision for Ticket 73. On 2026-11-03 the user 
 
 The audit confirmed that the existing Python completion flag records whether Unstructured reduction occurred, while the final-score path can select the first remaining transition even after no-progress. The new observable completion contract must therefore reach the consumers as well as the fallback detector. Legacy tests that expect a numeric fallback for non-WF shapes need revised behavioral expectations, not protection of their old scores.
 
-This document specifies required behavior and validation. No implementation, new passing test, repaired historical session, or browser acceptance is claimed by its publication.
+At publication this document specified required behavior and validation without claiming implementation, new passing tests, a repaired historical session, or browser acceptance. The current integration and open acceptance gates are recorded below.
+
+## Comments
+
+### 2026-11-03 — Integrated implementation and acceptance state
+
+Implementation is integrated on `codex/phase-2.8.2-call-refolding`. The final two-axis code review found no remaining Spec violations and no documented Standards breaches. Review regressions for Component-Local Unfold position preservation and document-wide status preservation are fixed. Sixty-two focused viewer action, expansion, and reduction tests pass; compileall and `git diff --check` pass. Other focused parser suites had Acorn parse errors on JavaScript fixtures before assertions; those are recorded in the relevant ticket comments and are not reported as passing.
+
+Actual Dots & Boxes browser acceptance remains open for Tickets 71–73. Fresh browser-expanded and backend-inlined artifacts, source/generator identities, and hashes are recorded in Ticket 71. Ticket 73's historical retained standalone session is not available in this integration worktree as a browser artifact.
+
+The scoring projection evidence is recorded in [the validation note](../research/phase-2.8.2-scoring-projection-validation.md). It mechanically reproduces expected single-exit controls and derives representative conditional-return/error and nested-handler scores, but it collapses the normal/exception distinction in a disposable scoring copy. It therefore establishes a possible `SM(exit-quotiented function net)`, not invariance of the existing SM for the visible multi-outcome graph. The user has not approved that metric scope or an ADR amendment, so Ticket 71 remains incomplete and final SM is withheld for the multi-outcome case.

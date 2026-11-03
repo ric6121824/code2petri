@@ -37,3 +37,9 @@ Implemented Ticket 72 on the generated viewer. Production-action tests cover nor
 **Agent-run:** `python3 -m unittest tests.test_interactive_expansion.TestCytoscapeClientSideExpansion tests.test_viewer_action_history -v` passes after the integration merge. A full `tests.test_html_viewer` run executed 179 tests; 10 fail because the installed Acorn environment cannot parse existing JavaScript fixtures. Focused changed production action, session, and export tests pass.
 
 **Unperformed:** actual browser acceptance on the regenerated Dots & Boxes HTML, including the retained direction-coercion occurrences, save/reopen in the browser, and visual inspection. Keep this ticket open until that check is recorded.
+
+### 2026-11-03 — Integrated review and fresh browser artifacts
+
+Integrated into `codex/phase-2.8.2-call-refolding` at candidate commit `10c7553b1c8459e0777ee2790a076123de88c0f7` before this tracking update. Final Spec review found no remaining code violations; final Standards review found no documented-standard breaches. The 62 focused viewer action, expansion, and reduction tests pass; `compileall` and `git diff --check` pass.
+
+Fresh acceptance files were generated from Dots & Boxes source commit `3ea8f5ea8b8514dca03e706c45b6cd7e8ca5672c` using generator commit `10c7553b1c8459e0777ee2790a076123de88c0f7`. `/private/tmp/code2petri-phase-2.8.2/browser-call-expansion.html` targets `GameState.apply_move` without backend inline expansion (SHA-256 `d396b1be7214adcd0efcf8252ce404f0ba4675697fbec0f56f28c45617af0746`). `/private/tmp/code2petri-phase-2.8.2/backend-inlined.html` targets the same method with backend inline expansion (SHA-256 `d30dd0dc91d63986df1b092bed10a26253f6ad3467389213f70d72d70659d170`). The browser check, including normal/exception routing and save/reopen, has not been performed.
