@@ -147,14 +147,222 @@ def _get_viewer_functions() -> str:
 
     m1 = re.search(r"(function findBoundaryPlaces\(calleeNet\) \{[\s\S]*?\n      \})", html)
     m2 = re.search(r"(function getCompoundDepthPresentation\(compoundId, getParentId\) \{[\s\S]*?\n      \})", html)
-    m3 = re.search(r"(function netToElements\(net\) \{[\s\S]*?\n      \})", html)
+    m3 = re.search(r"(function netToElements\(net(?:, expansionIds)?\) \{[\s\S]*?\n      \})", html)
     if not m1 or not m2 or not m3:
         raise ValueError("Could not extract findBoundaryPlaces or netToElements from template.html")
     return f"{m1.group(1)}\n{m2.group(1)}\n{m3.group(1)}\n"
 
 
+def _get_current_graph_expansion_functions() -> str:
+    import re
+
+    template_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "code2petri", "viewer", "template.html")
+    )
+    with open(template_path, "r", encoding="utf-8") as template_file:
+        html = template_file.read()
+    patterns = [
+        r"(function currentGraphToNet\(\) \{[\s\S]*?\n      \})",
+        r"(function buildCurrentGraphWithExpandedCall\(parentId, calleeName\) \{[\s\S]*?\n      \})",
+        r"(function collapseCallExpansion\(elements, parentId, expansionState\) \{[\s\S]*?\n      \})",
+    ]
+    matches = [re.search(pattern, html) for pattern in patterns]
+    if any(match is None for match in matches):
+        raise ValueError("Could not extract current graph expansion and restoration functions")
+    return "\n".join(match.group(1) for match in matches if match is not None)
+
+
 class TestCytoscapeClientSideExpansion(unittest.TestCase):
     """Verifies Cytoscape compound node expansion, rewiring, and collapse via Node.js."""
+
+    def test_expanding_and_collapsing_preserves_current_graph_edits(self):
+        viewer_fns = _get_viewer_functions()
+        current_graph_fns = _get_current_graph_expansion_functions()
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{viewer_fns}
+{current_graph_fns}
+
+const initialNet = {{
+  places: [
+    {{ id: 'caller_start', label: 'start', initial_tokens: 1 }},
+    {{ id: 'normal_after', label: 'after call' }},
+    {{ id: 'caught', label: 'except_entry' }},
+    {{ id: 'unrelated_start', label: 'unrelated start', parent: 'unrelated_compound' }},
+    {{ id: 'unrelated_end', label: 'unrelated end' }}
+  ],
+  transitions: [
+    {{ id: 'call', label: 'worker()', resolved: true, resolved_to: 'worker', metadata: {{ tau: 1.0 }} }},
+    {{ id: 'call__exception', label: 'exception: worker()', metadata: {{ exception_alternative: true, exception_alternative_of: 'call' }} }},
+    {{ id: 'unrelated_one', label: 'first unrelated step' }},
+    {{ id: 'unrelated_two', label: 'second unrelated step' }}
+  ],
+  compounds: [{{ id: 'unrelated_compound', label: 'Unrelated Scope', function_name: 'unrelated_scope', file: 'scope.py', function_ref: 'scope-ref' }}],
+  arcs: [
+    {{ id: 'call_in', source: 'caller_start', target: 'call', weight: 1 }},
+    {{ id: 'call_out', source: 'call', target: 'normal_after', weight: 1 }},
+    {{ id: 'call_exception_in', source: 'caller_start', target: 'call__exception', weight: 1 }},
+    {{ id: 'call_exception_out', source: 'call__exception', target: 'caught', weight: 1 }},
+    {{ id: 'unrelated_in', source: 'unrelated_start', target: 'unrelated_one', weight: 2 }},
+    {{ id: 'unrelated_middle', source: 'unrelated_one', target: 'unrelated_two', weight: 2 }},
+    {{ id: 'unrelated_out', source: 'unrelated_two', target: 'unrelated_end', weight: 2 }}
+  ]
+}};
+const calleeNetsMap = {{ worker: {{
+  places: [{{ id: 'worker_start', label: 'start' }}, {{ id: 'worker_end', label: 'end' }}],
+  transitions: [{{ id: 'return', label: 'return' }}],
+  arcs: [{{ source: 'worker_start', target: 'return', weight: 1 }}, {{ source: 'return', target: 'worker_end', weight: 1 }}]
+}} }};
+const expandedNodes = new Map();
+const cy = cytoscape({{ headless: true, elements: netToElements(initialNet) }});
+cy.getElementById('unrelated_one').remove();
+cy.getElementById('unrelated_two').remove();
+cy.add({{ group: 'nodes', data: {{ id: 't_C7', label: 'kept manual fold', raw_label: 'kept manual fold', type: 'Opaque Transition', is_opaque: true, tau: 7, metadata: {{ opaque: true, tau: 7, component_type: 'sequence' }} }}, classes: 'transition opaque component', position: {{ x: 321, y: 123 }} }});
+cy.add([
+  {{ group: 'edges', data: {{ id: 'manual_fold_in', source: 'unrelated_start', target: 't_C7', weight: 4 }}, classes: 'arc' }},
+  {{ group: 'edges', data: {{ id: 'manual_fold_out', source: 't_C7', target: 'unrelated_end', weight: 5 }}, classes: 'arc' }}
+]);
+cy.getElementById('unrelated_start').data('raw_label', 'renamed by user');
+cy.getElementById('unrelated_start').data('custom_name', 'renamed by user');
+cy.getElementById('unrelated_start').data('metadata', {{ user_tag: 'keep-me' }});
+const expandedElements = buildCurrentGraphWithExpandedCall('call', 'worker');
+cy.elements().remove();
+cy.add(expandedElements);
+const expandedCy = cy;
+if (!expandedCy.getElementById('t_C7').length || expandedCy.getElementById('unrelated_one').length) throw new Error('Expansion replaced or resurrected an unrelated live fold');
+if (expandedCy.getElementById('t_C7').data('tau') !== 7 || expandedCy.getElementById('t_C7').position().x !== 321) throw new Error('Expansion changed an unrelated fold weight or position');
+if (expandedCy.getElementById('unrelated_start').data('custom_name') !== 'renamed by user' || expandedCy.getElementById('unrelated_start').data('metadata').user_tag !== 'keep-me') throw new Error('Expansion discarded an unrelated name or metadata edit');
+if (!expandedCy.getElementById('unrelated_compound').hasClass('compound') ||
+    expandedCy.getElementById('unrelated_compound').data('function_ref') !== 'scope-ref' ||
+    expandedCy.getElementById('unrelated_start').data('parent') !== 'unrelated_compound') {{
+  throw new Error('Expansion changed an unrelated compound container or its hierarchy');
+}}
+if (expandedCy.edges().filter(function(edge) {{ return edge.id() === 'manual_fold_in'; }}).data('weight') !== 4) throw new Error('Expansion discarded an unrelated live arc weight');
+const collapsedElements = collapseCallExpansion(expandedCy.elements().jsons(), 'call', expandedNodes.get('call'));
+if (!collapsedElements) throw new Error('Expansion did not retain local collapse restoration data');
+expandedCy.elements().remove();
+expandedCy.add(collapsedElements);
+const collapsedCy = expandedCy;
+if (collapsedCy.getElementById('call').hasClass('compound') || !collapsedCy.getElementById('call__exception').length) throw new Error('Collapse did not restore the opaque call and its paired exception alternative');
+if (collapsedCy.getElementById('call__return').length || !collapsedCy.getElementById('t_C7').length) throw new Error('Collapse left callee nodes behind or discarded unrelated edits');
+if (collapsedCy.getElementById('unrelated_start').data('custom_name') !== 'renamed by user') throw new Error('Collapse discarded an unrelated committed name');
+console.log('PASS');
+"""
+        proc = subprocess.run(
+            ["node", "-e", node_script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"Current-graph expansion preservation failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
+    def test_expansion_routes_each_explicit_callee_outcome_to_its_caller_destination(self):
+        viewer_fns = _get_viewer_functions()
+        node_script = f"""
+const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
+
+{viewer_fns}
+
+const callerNet = {{
+  places: [
+    {{ id: 'caller_start', label: 'start', initial_tokens: 1 }},
+    {{ id: 'normal_after', label: 'after call' }},
+    {{ id: 'caught', label: 'except_entry' }}
+  ],
+  transitions: [
+    {{ id: 'call', label: 'worker()', resolved: true, resolved_to: 'worker', metadata: {{ tau: 1.0 }} }},
+    {{ id: 'call__exception', label: 'exception: worker()', metadata: {{ exception_alternative: true, exception_alternative_of: 'call' }} }}
+  ],
+  arcs: [
+    {{ source: 'caller_start', target: 'call', weight: 1 }},
+    {{ source: 'call', target: 'normal_after', weight: 1 }},
+    {{ source: 'caller_start', target: 'call__exception', weight: 1 }},
+    {{ source: 'call__exception', target: 'caught', weight: 1 }}
+  ]
+}};
+const calleeNet = {{
+  places: [
+    {{ id: 'callee_start', label: 'start', initial_tokens: 1 }},
+    {{ id: 'callee_internal', label: 'work', initial_tokens: 9 }},
+    {{ id: 'callee_end', label: 'end' }},
+    {{ id: 'callee_exception_end', label: 'exception_end' }}
+  ],
+  transitions: [
+    {{ id: 'return', label: 'return value', metadata: {{ tau: 2.5, call_results: [{{ transition_id: 'return', call_site_id: 'worker:return' }}] }} }},
+    {{ id: 'raise', label: 'raise ValueError', metadata: {{ tau: 1.25 }} }}
+  ],
+  arcs: [
+    {{ source: 'callee_start', target: 'return', weight: 1 }},
+    {{ source: 'return', target: 'callee_end', weight: 2 }},
+    {{ source: 'callee_start', target: 'raise', weight: 1 }},
+    {{ source: 'raise', target: 'callee_exception_end', weight: 3 }}
+  ]
+}};
+const expandedNodes = new Map([['call', {{ calleeName: 'worker' }}]]);
+const calleeNetsMap = {{ worker: calleeNet }};
+const elements = netToElements(callerNet);
+const cy = cytoscape({{ headless: true, elements: elements }});
+function edge(source, target) {{
+  return cy.edges().filter(function(item) {{
+    return item.data('source') === source && item.data('target') === target;
+  }});
+}}
+if (edge('call__return', 'normal_after').length !== 1) throw new Error('Normal completion did not reach the call’s normal continuation');
+if (edge('call__raise', 'caught').length !== 1) throw new Error('Exceptional completion did not reach the paired caller handler');
+if (edge('call__return', 'caught').length || edge('call__raise', 'normal_after').length) throw new Error('Expansion crossed normal and exceptional outcomes');
+if (cy.getElementById('call__exception').length) throw new Error('The replaced opaque exception alternative remained live');
+if (cy.getElementById('call__callee_exception_end').length) throw new Error('Callee exceptional boundary remained as a disconnected internal exit');
+if (cy.getElementById('call__callee_internal').data('initial_tokens') !== 0) throw new Error('Expansion added an invocation token from an internal callee marking');
+if (edge('call__return', 'normal_after').data('weight') !== 2 || edge('call__raise', 'caught').data('weight') !== 3) throw new Error('Expansion discarded callee exit arc weights');
+if (cy.getElementById('call__return').data('call_results')[0].transition_id !== 'call__return') throw new Error('Expansion did not remap call-result ownership');
+if (cy.getElementById('call').data('tau') !== 0) throw new Error('Expanded call container still contributes its original transition weight');
+const transitionIds = cy.nodes('.transition').filter(function(transition) {{ return !transition.hasClass('compound'); }})
+  .map(function(transition) {{ return transition.id(); }});
+const inputs = new Map(transitionIds.map(function(id) {{ return [id, []]; }}));
+const outputs = new Map(transitionIds.map(function(id) {{ return [id, []]; }}));
+cy.edges().forEach(function(arc) {{
+  const source = arc.data('source');
+  const target = arc.data('target');
+  const weight = Number(arc.data('weight') || 1);
+  if (inputs.has(target)) inputs.get(target).push([source, weight]);
+  if (outputs.has(source)) outputs.get(source).push([target, weight]);
+}});
+const queue = [{{ caller_start: 1 }}];
+const seen = new Set();
+let normalReached = false;
+let exceptionReached = false;
+let bothReached = false;
+while (queue.length) {{
+  const marking = queue.shift();
+  const key = JSON.stringify(Object.keys(marking).sort().map(function(id) {{ return [id, marking[id]]; }}));
+  if (seen.has(key)) continue;
+  seen.add(key);
+  normalReached = normalReached || Boolean(marking.normal_after);
+  exceptionReached = exceptionReached || Boolean(marking.caught);
+  bothReached = bothReached || (Boolean(marking.normal_after) && Boolean(marking.caught));
+  transitionIds.forEach(function(id) {{
+    const preset = inputs.get(id);
+    if (!preset.every(function(pair) {{ return (marking[pair[0]] || 0) >= pair[1]; }})) return;
+    const next = Object.assign({{}}, marking);
+    preset.forEach(function(pair) {{ next[pair[0]] -= pair[1]; }});
+    outputs.get(id).forEach(function(pair) {{ next[pair[0]] = (next[pair[0]] || 0) + pair[1]; }});
+    Object.keys(next).forEach(function(placeId) {{ if (next[placeId] === 0) delete next[placeId]; }});
+    queue.push(next);
+  }});
+}}
+if (!normalReached || !exceptionReached || bothReached) throw new Error('Reachable execution did not preserve alternative normal/error outcomes');
+console.log('PASS');
+"""
+        proc = subprocess.run(
+            ["node", "-e", node_script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, f"Outcome-aware browser expansion failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
 
     def test_headless_cytoscape_compound_expansion_and_collapse(self):
         """Simulates client-side tap events, compound node mutation, boundary unification, and collapse."""

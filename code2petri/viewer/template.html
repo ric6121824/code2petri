@@ -1006,25 +1006,57 @@
 
       function findBoundaryPlaces(calleeNet) {
         const places = calleeNet.places || [];
-        if (places.length === 0) return { sourcePlaceId: null, sinkPlaceId: null };
-
-        let sourcePlace = places.find(function(p) {
-          return (p.initial_tokens > 0 || p.label === 'start' || p.id === 'p0');
-        });
-        if (!sourcePlace) sourcePlace = places[0];
-
-        let sinkPlace = null;
-        for (let i = places.length - 1; i >= 0; i--) {
-          if (places[i].label === 'end' || (places[i].id && places[i].id.endsWith('_end'))) {
-            sinkPlace = places[i];
-            break;
-          }
+        function hasRole(place, label, role) {
+          const metadata = place.metadata || {};
+          return place.label === label || metadata.boundary_role === role;
         }
-        if (!sinkPlace) sinkPlace = places[places.length - 1];
+        const sourcePlaces = places.filter(function(place) {
+          return hasRole(place, 'start', 'source');
+        });
+        const normalExitPlaces = places.filter(function(place) {
+          return hasRole(place, 'end', 'normal_exit');
+        });
+        const exceptionalExitPlaces = places.filter(function(place) {
+          return hasRole(place, 'exception_end', 'exceptional_exit');
+        });
+        if (sourcePlaces.length !== 1) {
+          throw new Error('Cannot expand call: callee must have exactly one explicit source boundary.');
+        }
+        if (normalExitPlaces.length > 1 || exceptionalExitPlaces.length > 1 ||
+            (normalExitPlaces.length === 0 && exceptionalExitPlaces.length === 0)) {
+          throw new Error('Cannot expand call: callee normal/exceptional exit boundaries are missing or ambiguous.');
+        }
+
+        const sourcePlace = sourcePlaces[0];
+        const normalExitPlace = normalExitPlaces[0] || null;
+        const exceptionalExitPlace = exceptionalExitPlaces[0] || null;
+        const transitionIds = new Set((calleeNet.transitions || []).map(function(transition) { return transition.id; }));
+        const arcs = calleeNet.arcs || [];
+        function endpointId(endpoint) {
+          return typeof endpoint === 'object' ? endpoint.id : endpoint;
+        }
+        function exitTransitions(exitPlace) {
+          if (!exitPlace) return new Set();
+          return new Set(arcs.filter(function(arc) {
+            return endpointId(arc.target) === exitPlace.id && transitionIds.has(endpointId(arc.source));
+          }).map(function(arc) { return endpointId(arc.source); }));
+        }
+        const normalExitTransitions = exitTransitions(normalExitPlace);
+        const exceptionalExitTransitions = exitTransitions(exceptionalExitPlace);
+        if (Array.from(normalExitTransitions).some(function(id) { return exceptionalExitTransitions.has(id); })) {
+          throw new Error('Cannot expand call: one callee transition activates both normal and exceptional exits.');
+        }
+        if (sourcePlace.id === (normalExitPlace && normalExitPlace.id) ||
+            sourcePlace.id === (exceptionalExitPlace && exceptionalExitPlace.id)) {
+          throw new Error('Cannot expand call: source and exit boundaries must be distinct.');
+        }
 
         return {
-          sourcePlaceId: sourcePlace ? sourcePlace.id : null,
-          sinkPlaceId: sinkPlace ? sinkPlace.id : null
+          sourcePlaceId: sourcePlace.id,
+          normalExitPlaceId: normalExitPlace ? normalExitPlace.id : null,
+          exceptionalExitPlaceId: exceptionalExitPlace ? exceptionalExitPlace.id : null,
+          normalExitTransitions: normalExitTransitions,
+          exceptionalExitTransitions: exceptionalExitTransitions
         };
       }
 
@@ -1045,7 +1077,7 @@
         };
       }
 
-      function netToElements(net) {
+      function netToElements(net, expansionIds) {
         const elements = [];
         const places = net.places || [];
         const transitions = net.transitions || [];
@@ -1079,27 +1111,38 @@
           const depthClass = 'depth-' + (depth % 3);
           const paddingDepthClass = 'padding-depth-' + Math.min(depth, 3);
           const readableLabel = compound.label || (compound.function_name ? compound.function_name + '()' : compound.id);
+          const compoundData = {
+            id: compound.id,
+            label: readableLabel,
+            function_name: compound.function_name || '',
+            file: compound.file || '',
+            function_ref: typeof compound.function_ref === 'string' ? compound.function_ref : undefined,
+            depth: depth,
+            is_compound: true,
+            composite_preassembled: true,
+            parent: compound.parent || undefined,
+            type: 'Compound Function Container'
+          };
+          const viewerState = compound.viewer_state || null;
+          let compoundClasses = 'compound ' + depthClass + ' ' + paddingDepthClass;
+          if (viewerState && viewerState.data) {
+            Object.assign(compoundData, JSON.parse(JSON.stringify(viewerState.data)));
+            compoundData.id = compound.id;
+            if (compound.parent) compoundData.parent = compound.parent;
+            compoundClasses = typeof viewerState.classes === 'string' ? viewerState.classes : compoundClasses;
+          }
+          if (!compoundClasses.split(/\s+/).includes('compound')) compoundClasses += ' compound';
           elements.push({
             group: 'nodes',
-            data: {
-              id: compound.id,
-              label: readableLabel,
-              function_name: compound.function_name || '',
-              file: compound.file || '',
-              function_ref: typeof compound.function_ref === 'string' ? compound.function_ref : undefined,
-              depth: depth,
-              is_compound: true,
-              composite_preassembled: true,
-              parent: compound.parent || undefined,
-              type: 'Compound Function Container'
-            },
-            classes: 'compound ' + depthClass + ' ' + paddingDepthClass
+            data: compoundData,
+            classes: compoundClasses,
+            position: viewerState && viewerState.position ? Object.assign({}, viewerState.position) : undefined
           });
         });
 
-        function formatPlaceElement(p, prefix, parentId) {
+        function formatPlaceElement(p, prefix, parentId, suppressInitialTokens) {
           prefix = prefix || '';
-          const tokens = p.initial_tokens || 0;
+          const tokens = suppressInitialTokens ? 0 : (p.initial_tokens || 0);
           const label = (p.label || p.id) + (tokens > 0 ? ' (' + tokens + ')' : '');
           const pid = parentId || p.parent || (p.metadata && p.metadata.parent) || undefined;
           const encFn = p.enclosing_function || (p.metadata && p.metadata.enclosing_function) || undefined;
@@ -1109,7 +1152,8 @@
             type: 'Place',
             tokens: tokens,
             initial_tokens: tokens,
-            raw_label: p.label || p.id
+            raw_label: p.label || p.id,
+            metadata: p.metadata ? JSON.parse(JSON.stringify(p.metadata)) : undefined
           };
           if (encFn) {
             data.enclosing_function = encFn;
@@ -1117,16 +1161,39 @@
           if (pid) {
             data.parent = pid;
           }
+          const viewerState = p.viewer_state || null;
+          if (viewerState && viewerState.data) {
+            Object.assign(data, JSON.parse(JSON.stringify(viewerState.data)));
+            data.id = prefix + p.id;
+            data.label = viewerState.data.label || label;
+            data.raw_label = viewerState.data.raw_label || p.label || p.id;
+            data.tokens = tokens;
+            data.initial_tokens = tokens;
+            if (parentId) data.parent = parentId;
+            else if (!pid) delete data.parent;
+          }
           return {
             group: 'nodes',
             data: data,
-            classes: 'place' + (tokens > 0 ? ' has-tokens' : '')
+            classes: viewerState && typeof viewerState.classes === 'string'
+              ? viewerState.classes : ('place' + (tokens > 0 ? ' has-tokens' : '')),
+            position: viewerState && viewerState.position ? Object.assign({}, viewerState.position) : undefined
           };
         }
 
         function formatTransitionElement(t, prefix, parentId) {
           prefix = prefix || '';
           const meta = t.metadata || {};
+          const clonedMeta = JSON.parse(JSON.stringify(meta));
+          if (prefix && Array.isArray(clonedMeta.call_results)) {
+            clonedMeta.call_results = clonedMeta.call_results.map(function(record) {
+              if (!record || typeof record !== 'object') return record;
+              return Object.assign({}, record, { transition_id: prefix + t.id });
+            });
+          }
+          if (prefix && clonedMeta.exception_alternative_of) {
+            clonedMeta.exception_alternative_of = prefix + clonedMeta.exception_alternative_of;
+          }
           const isOpaque = Boolean(meta.opaque || (t.id && t.id.startsWith('t_C')));
           const tau = meta.tau !== undefined ? Number(meta.tau) : (t.tau !== undefined ? Number(t.tau) : 1.0);
           const pid = parentId || t.parent || (meta && meta.parent) || undefined;
@@ -1159,6 +1226,7 @@
           const classes = ['transition'];
           if (isOpaque) classes.push('opaque');
           if (statusClass) classes.push(statusClass);
+          if (meta.expansion_container === true) classes.push('compound');
 
           const encFn = t.enclosing_function || (meta && meta.enclosing_function) || undefined;
           const nodeData = {
@@ -1175,13 +1243,18 @@
             target_file: t.target_file,
             component_type: meta.component_type,
             omega: meta.omega !== undefined ? meta.omega : t.omega,
-            source_line: meta.source_line !== undefined ? meta.source_line : t.source_line
+            source_line: meta.source_line !== undefined ? meta.source_line : t.source_line,
+            metadata: clonedMeta,
+            exception_alternative: clonedMeta.exception_alternative === true,
+            exception_alternative_of: clonedMeta.exception_alternative_of,
+            is_compound: meta.expansion_container === true,
+            is_expansion_container: meta.expansion_container === true
           };
-          if (Array.isArray(meta.call_results)) {
-            nodeData.call_results = meta.call_results;
+          if (Array.isArray(clonedMeta.call_results)) {
+            nodeData.call_results = clonedMeta.call_results;
           }
-          if (meta.function_return_evidence && typeof meta.function_return_evidence === 'object') {
-            nodeData.function_return_evidence = meta.function_return_evidence;
+          if (clonedMeta.function_return_evidence && typeof clonedMeta.function_return_evidence === 'object') {
+            nodeData.function_return_evidence = clonedMeta.function_return_evidence;
           }
           if (typeof meta.function_ref === 'string') {
             nodeData.function_ref = meta.function_ref;
@@ -1196,10 +1269,23 @@
             nodeData.badge_svg = badgeSvg;
           }
 
+          const viewerState = t.viewer_state || null;
+          let classesText = classes.join(' ');
+          if (viewerState && viewerState.data) {
+            Object.assign(nodeData, JSON.parse(JSON.stringify(viewerState.data)));
+            nodeData.id = prefix + t.id;
+            if (parentId) nodeData.parent = parentId;
+            classesText = typeof viewerState.classes === 'string' ? viewerState.classes : classesText;
+          }
+          if (meta.expansion_container === true && !classesText.split(/\s+/).includes('compound')) {
+            classesText += ' compound';
+          }
+
           return {
             group: 'nodes',
             data: nodeData,
-            classes: classes.join(' ')
+            classes: classesText,
+            position: viewerState && viewerState.position ? Object.assign({}, viewerState.position) : undefined
           };
         }
 
@@ -1219,7 +1305,8 @@
             data: {
               id: a.id || ('arc_' + idx + '_' + src + '_' + tgt),
               source: src,
-              target: tgt
+              target: tgt,
+              weight: a.weight === undefined || a.weight === null ? 1 : Number(a.weight)
             },
             classes: 'arc'
           });
@@ -1235,16 +1322,27 @@
           const calleeNet = calleeNetsMap[calleeName];
           if (!calleeNet) return;
 
+          const boundaries = findBoundaryPlaces(calleeNet);
+          const rawSourcePlaceId = boundaries.sourcePlaceId;
+          const rawNormalExitPlaceId = boundaries.normalExitPlaceId;
+          const rawExceptionalExitPlaceId = boundaries.exceptionalExitPlaceId;
+
+          if (parentNode.data.is_expansion_container === true) return;
+          const originalParentElement = JSON.parse(JSON.stringify(parentNode));
+
           if (!parentNode.classes.includes('compound')) {
             parentNode.classes += ' compound';
           }
           parentNode.data.is_compound = true;
           parentNode.data.type = 'Compound Node (Expanded Callee)';
+          parentNode.data.is_expansion_container = true;
+          parentNode.data.tau = 0;
+          parentNode.data.metadata = Object.assign({}, parentNode.data.metadata || {}, {
+            expansion_container: true,
+            tau: 0
+          });
 
           const prefix = parentId + '__';
-          const boundaries = findBoundaryPlaces(calleeNet);
-          const rawSourcePlaceId = boundaries.sourcePlaceId;
-          const rawSinkPlaceId = boundaries.sinkPlaceId;
 
           // Discover caller preset and postset places connected to parentId
           const presetArcs = elements.filter(function(el) {
@@ -1256,23 +1354,119 @@
             return el.group === 'edges' && el.data.source === parentId;
           });
           const postsetPlaceIds = postsetArcs.map(function(el) { return el.data.target; });
+          const pairedExceptionTransitions = elements.filter(function(el) {
+            return el.group === 'nodes' && el.data.exception_alternative_of === parentId;
+          });
+          if (pairedExceptionTransitions.length > 1) {
+            throw new Error('Cannot expand call: caller has ambiguous paired exception alternatives.');
+          }
+          const pairedExceptionNode = pairedExceptionTransitions[0] || null;
+          let exceptionalPostsetPlaceIds = [];
+          let exceptionAlternativeArcs = [];
+          let createdExceptionBoundaryId = null;
+          if (boundaries.exceptionalExitTransitions.size > 0) {
+            if (pairedExceptionNode) {
+              const pairedId = pairedExceptionNode.data.id;
+              exceptionAlternativeArcs = elements.filter(function(el) {
+                return el.group === 'edges' &&
+                  (el.data.source === pairedId || el.data.target === pairedId);
+              });
+              const pairedPresetIds = exceptionAlternativeArcs.filter(function(el) {
+                return el.data.target === pairedId;
+              }).map(function(el) { return el.data.source; }).sort();
+              if (JSON.stringify(pairedPresetIds) !== JSON.stringify(presetPlaceIds.slice().sort())) {
+                throw new Error('Cannot expand call: caller exception alternative does not share the call input.');
+              }
+              exceptionalPostsetPlaceIds = exceptionAlternativeArcs.filter(function(el) {
+                return el.data.source === pairedId;
+              }).map(function(el) { return el.data.target; });
+              if (exceptionalPostsetPlaceIds.length === 0) {
+                throw new Error('Cannot expand call: paired exception alternative has no caller destination.');
+              }
+            } else {
+              const callerBoundaryPlaces = elements.filter(function(el) {
+                if (el.group !== 'nodes' || !el.classes.split(/\s+/).includes('place')) return false;
+                if (el.data.raw_label !== 'exception_end') return false;
+                return (el.data.parent || null) === (parentNode.data.parent || null);
+              });
+              if (callerBoundaryPlaces.length > 1) {
+                throw new Error('Cannot expand call: caller exceptional boundary is ambiguous.');
+              }
+              if (callerBoundaryPlaces.length === 1) {
+                exceptionalPostsetPlaceIds = [callerBoundaryPlaces[0].data.id];
+              } else {
+                const ids = new Set(elements.filter(function(el) { return el.group === 'nodes'; })
+                  .map(function(el) { return el.data.id; }));
+                let boundaryId = parentId + '__exception_end';
+                let suffix = 2;
+                while (ids.has(boundaryId)) {
+                  boundaryId = parentId + '__exception_end_' + suffix;
+                  suffix++;
+                }
+                const boundary = {
+                  group: 'nodes',
+                  data: {
+                    id: boundaryId,
+                    label: 'exception_end',
+                    raw_label: 'exception_end',
+                    type: 'Place',
+                    tokens: 0,
+                    initial_tokens: 0,
+                    parent: parentNode.data.parent || undefined
+                  },
+                  classes: 'place'
+                };
+                elements.push(boundary);
+                exceptionalPostsetPlaceIds = [boundaryId];
+                createdExceptionBoundaryId = boundaryId;
+              }
+            }
+          }
+
+          const restorationElements = [originalParentElement].concat(
+            presetArcs.map(function(element) { return JSON.parse(JSON.stringify(element)); }),
+            postsetArcs.map(function(element) { return JSON.parse(JSON.stringify(element)); })
+          );
+          if (pairedExceptionNode && boundaries.exceptionalExitTransitions.size > 0) {
+            restorationElements.push(JSON.parse(JSON.stringify(pairedExceptionNode)));
+            exceptionAlternativeArcs.forEach(function(element) {
+              restorationElements.push(JSON.parse(JSON.stringify(element)));
+            });
+          }
 
           // Remove direct caller edges into/out of parentId while expanded
           const edgesToRemove = new Set();
           presetArcs.forEach(function(el) { edgesToRemove.add(el.data.id); });
           postsetArcs.forEach(function(el) { edgesToRemove.add(el.data.id); });
+          exceptionAlternativeArcs.forEach(function(el) { edgesToRemove.add(el.data.id); });
           for (let i = elements.length - 1; i >= 0; i--) {
             if (elements[i].group === 'edges' && edgesToRemove.has(elements[i].data.id)) {
               elements.splice(i, 1);
             }
           }
+          if (pairedExceptionNode && boundaries.exceptionalExitTransitions.size > 0) {
+            const pairedId = pairedExceptionNode.data.id;
+            const pairedIndex = elements.findIndex(function(el) {
+              return el.group === 'nodes' && el.data.id === pairedId;
+            });
+            if (pairedIndex !== -1) elements.splice(pairedIndex, 1);
+          }
 
-          // Splice callee places inside compound node (unifying away boundary places to maintain bipartite net validity)
+          const expansionState = Object.assign({}, expandedNodes.get(parentId) || {}, {
+            calleeName: calleeName,
+            restoreElements: restorationElements,
+            createdExceptionBoundaryId: createdExceptionBoundaryId
+          });
+          expandedNodes.set(parentId, expansionState);
+
+          const boundaryPlaceIds = new Set([rawSourcePlaceId, rawNormalExitPlaceId, rawExceptionalExitPlaceId].filter(Boolean));
+          // Splice callee places inside compound node (unifying away boundaries to maintain bipartite net validity)
           (calleeNet.places || []).forEach(function(p) {
-            if (p.id === rawSourcePlaceId || p.id === rawSinkPlaceId) {
+            if (boundaryPlaceIds.has(p.id)) {
               return;
             }
-            elements.push(formatPlaceElement(p, prefix, parentId));
+            // The backend's inliner does not add another invocation token from callee markings.
+            elements.push(formatPlaceElement(p, prefix, parentId, true));
           });
 
           // Splice callee transitions inside compound node
@@ -1280,13 +1474,14 @@
             elements.push(formatTransitionElement(t, prefix, parentId));
           });
 
-          function addArc(source, target, edgeId) {
+          function addArc(source, target, edgeId, weight) {
             elements.push({
               group: 'edges',
               data: {
                 id: edgeId,
                 source: source,
-                target: target
+                target: target,
+                weight: weight === undefined || weight === null ? 1 : Number(weight)
               },
               classes: 'arc'
             });
@@ -1301,27 +1496,34 @@
               // Arc from boundary source place to callee entrance transition tgt.
               // Rewire each caller preset place directly to callee entrance transition.
               presetPlaceIds.forEach(function(pIn) {
-                addArc(pIn, prefix + tgt, prefix + 'arc_in_' + pIn + '_' + tgt);
+                addArc(pIn, prefix + tgt, prefix + 'arc_in_' + idx + '_' + pIn + '_' + tgt, a.weight);
               });
             } else if (tgt === rawSourcePlaceId) {
               // Reverse loop arc to source place
               presetPlaceIds.forEach(function(pIn) {
-                addArc(prefix + src, pIn, prefix + 'arc_in_rev_' + src + '_' + pIn);
+                  addArc(prefix + src, pIn, prefix + 'arc_in_rev_' + idx + '_' + src + '_' + pIn, a.weight);
               });
-            } else if (tgt === rawSinkPlaceId) {
-              // Arc from callee exit transition src to boundary sink place.
-              // Rewire callee exit transition directly to each caller postset place.
+            } else if (tgt === rawNormalExitPlaceId) {
+              // A normally completing callee exit reaches only the call's normal continuation.
               postsetPlaceIds.forEach(function(pOut) {
-                addArc(prefix + src, pOut, prefix + 'arc_out_' + src + '_' + pOut);
+                addArc(prefix + src, pOut, prefix + 'arc_out_' + idx + '_' + src + '_' + pOut, a.weight);
               });
-            } else if (src === rawSinkPlaceId) {
-              // Reverse arc from sink place
+            } else if (tgt === rawExceptionalExitPlaceId) {
+              // An exceptional callee exit replaces the paired opaque exception alternative.
+              exceptionalPostsetPlaceIds.forEach(function(pOut) {
+                addArc(prefix + src, pOut, prefix + 'arc_exception_out_' + idx + '_' + src + '_' + pOut, a.weight);
+              });
+            } else if (src === rawNormalExitPlaceId) {
               postsetPlaceIds.forEach(function(pOut) {
-                addArc(pOut, prefix + tgt, prefix + 'arc_out_rev_' + pOut + '_' + tgt);
+                addArc(pOut, prefix + tgt, prefix + 'arc_out_rev_' + idx + '_' + pOut + '_' + tgt, a.weight);
+              });
+            } else if (src === rawExceptionalExitPlaceId) {
+              exceptionalPostsetPlaceIds.forEach(function(pOut) {
+                addArc(pOut, prefix + tgt, prefix + 'arc_exception_out_rev_' + idx + '_' + pOut + '_' + tgt, a.weight);
               });
             } else {
               // Internal callee arc
-              addArc(prefix + src, prefix + tgt, prefix + 'arc_' + idx + '_' + src + '_' + tgt);
+              addArc(prefix + src, prefix + tgt, prefix + 'arc_' + idx + '_' + src + '_' + tgt, a.weight);
             }
           });
 
@@ -1335,7 +1537,8 @@
         }
 
         if (typeof expandedNodes !== 'undefined' && expandedNodes) {
-          Array.from(expandedNodes.keys()).forEach(function(nodeId) {
+          const idsToExpand = Array.isArray(expansionIds) ? expansionIds : Array.from(expandedNodes.keys());
+          idsToExpand.forEach(function(nodeId) {
             const matching = elements.some(function(el) {
               return el.group === 'nodes' && el.data.id === nodeId;
             });
@@ -2474,15 +2677,28 @@
 
         // An expanded call remains a resolved transition, so handle its graph action before inspection.
         if (!targetNode.hasClass('collapsed-compound') && expandedNodes.has(targetId)) {
-          performViewerAction('Collapse function call', function() {
-            const prefix = targetId + '__';
-            Array.from(expandedNodes.keys()).forEach(function(id) {
-              if (id.startsWith(prefix)) expandedNodes.delete(id);
+          try {
+            performViewerAction('Collapse function call', function() {
+              const currentElements = cy.elements().jsons();
+              const collapsedElements = collapseCallExpansion(
+                currentElements,
+                targetId,
+                expandedNodes.get(targetId)
+              );
+              if (!collapsedElements) {
+                throw new Error('Saved call restoration data is unavailable; the current graph was preserved.');
+              }
+              const prefix = targetId + '__';
+              Array.from(expandedNodes.keys()).forEach(function(id) {
+                if (id.startsWith(prefix)) expandedNodes.delete(id);
+              });
+              expandedNodes.delete(targetId);
+              renderGraphElements(collapsedElements, true, true);
+              return true;
             });
-            expandedNodes.delete(targetId);
-            renderStep(currentStep, true);
-            return true;
-          });
+          } catch (error) {
+            alert('Could not collapse function call: ' + (error && error.message ? error.message : 'Unknown error'));
+          }
           return;
         }
 
@@ -2501,11 +2717,15 @@
           }
 
           if (calleeName && calleeNetsMap[calleeName]) {
-            performViewerAction('Expand function call', function() {
-              expandedNodes.set(targetId, { calleeName: calleeName });
-              renderStep(currentStep, true);
-              return true;
-            });
+            try {
+              performViewerAction('Expand function call', function() {
+                const expandedElements = buildCurrentGraphWithExpandedCall(targetId, calleeName);
+                renderGraphElements(expandedElements, true, true);
+                return true;
+              });
+            } catch (error) {
+              alert('Could not expand function call: ' + (error && error.message ? error.message : 'Unknown error'));
+            }
             return;
           }
         }
@@ -2962,31 +3182,199 @@
         }
       }
 
-      function renderStep(stepIndex, animate) {
-        if (animate === undefined) animate = true;
-        currentStep = Math.max(0, Math.min(stepIndex, totalSteps));
-        const net = stepNets[currentStep];
+      function currentGraphToNet() {
+        const graphElements = cy.elements().jsons();
+        const currentPositions = new Map(cy.nodes().map(function(node) {
+          return [node.id(), Object.assign({}, node.position())];
+        }));
+        const places = [];
+        const transitions = [];
+        const arcs = [];
+        const compounds = [];
+        graphElements.forEach(function(element) {
+          const data = element.data || {};
+          if (element.group === 'edges') {
+            arcs.push({
+              id: data.id,
+              source: data.source,
+              target: data.target,
+              weight: data.weight === undefined || data.weight === null ? 1 : Number(data.weight)
+            });
+            return;
+          }
+          if (element.group !== 'nodes') return;
+          const classNames = String(element.classes || '').split(/\s+/).filter(Boolean);
+          const metadata = data.metadata && typeof data.metadata === 'object'
+            ? JSON.parse(JSON.stringify(data.metadata)) : {};
+          const viewerState = {
+            data: JSON.parse(JSON.stringify(data)),
+            classes: String(element.classes || ''),
+            position: currentPositions.get(data.id)
+          };
+          if (classNames.includes('place') || data.type === 'Place') {
+            places.push({
+              id: data.id,
+              label: data.custom_name || data.raw_label || data.label || data.id,
+              line_number: data.line_number,
+              initial_tokens: Number(data.initial_tokens || 0),
+              metadata: metadata,
+              parent: data.parent,
+              enclosing_function: data.enclosing_function,
+              viewer_state: viewerState
+            });
+          } else if (classNames.includes('transition') || data.type === 'Transition' || data.type === 'Opaque Transition') {
+            if (data.tau !== undefined && data.tau !== null) metadata.tau = Number(data.tau);
+            if (data.omega !== undefined && data.omega !== null) metadata.omega = Number(data.omega);
+            if (classNames.includes('opaque') || data.is_opaque === true) metadata.opaque = true;
+            if (data.is_expansion_container === true) metadata.expansion_container = true;
+            if (data.exception_alternative_of) metadata.exception_alternative_of = data.exception_alternative_of;
+            if (data.exception_alternative === true) metadata.exception_alternative = true;
+            if (Array.isArray(data.call_results)) metadata.call_results = JSON.parse(JSON.stringify(data.call_results));
+            if (data.function_ref && !metadata.function_ref) metadata.function_ref = data.function_ref;
+            if (data.function_return_evidence && !metadata.function_return_evidence) {
+              metadata.function_return_evidence = JSON.parse(JSON.stringify(data.function_return_evidence));
+            }
+            transitions.push({
+              id: data.id,
+              label: data.custom_name || data.raw_label || data.label || data.id,
+              line_number: data.line_number,
+              metadata: metadata,
+              resolved: data.resolved,
+              resolved_to: data.resolved_to,
+              target_file: data.target_file,
+              parent: data.parent,
+              enclosing_function: data.enclosing_function,
+              viewer_state: viewerState
+            });
+          } else if (classNames.includes('compound') || data.is_compound === true) {
+            compounds.push({
+              id: data.id,
+              label: data.label || data.id,
+              function_name: data.function_name || '',
+              file: data.file || '',
+              function_ref: data.function_ref,
+              parent: data.parent || null,
+              viewer_state: viewerState
+            });
+          }
+        });
+        return { places: places, transitions: transitions, arcs: arcs, compounds: compounds };
+      }
 
+      function buildCurrentGraphWithExpandedCall(parentId, calleeName) {
+        const currentNet = currentGraphToNet();
+        expandedNodes.set(parentId, { calleeName: calleeName });
+        return netToElements(currentNet, [parentId]);
+      }
+
+      function collapseCallExpansion(elements, parentId, expansionState) {
+        if (!expansionState || !Array.isArray(expansionState.restoreElements)) return null;
+        const nodes = elements.filter(function(element) { return element.group === 'nodes'; });
+        const nodeById = new Map(nodes.map(function(element) { return [element.data.id, element]; }));
+        const descendants = new Set();
+        let changed = true;
+        while (changed) {
+          changed = false;
+          nodes.forEach(function(element) {
+            const id = element.data.id;
+            const parent = element.data.parent;
+            if (id !== parentId && (parent === parentId || descendants.has(parent)) && !descendants.has(id)) {
+              descendants.add(id);
+              changed = true;
+            }
+          });
+        }
+        const remaining = elements.filter(function(element) {
+          if (element.group === 'nodes') return !descendants.has(element.data.id);
+          return !descendants.has(element.data.source) && !descendants.has(element.data.target);
+        });
+        const restoreById = new Map();
+        expansionState.restoreElements.forEach(function(element) {
+          if (!element || !element.data || typeof element.data.id !== 'string' ||
+              !['nodes', 'edges'].includes(element.group)) {
+            throw new Error('Saved call expansion restoration data is invalid.');
+          }
+          restoreById.set(element.data.id, JSON.parse(JSON.stringify(element)));
+        });
+        const restoredParent = restoreById.get(parentId);
+        const currentParent = nodeById.get(parentId);
+        if (!restoredParent || !currentParent) {
+          throw new Error('Saved call expansion restoration data is incomplete.');
+        }
+        ['label', 'raw_label', 'custom_name'].forEach(function(key) {
+          if (currentParent.data[key] !== undefined) restoredParent.data[key] = currentParent.data[key];
+        });
+        if (currentParent.position) restoredParent.position = Object.assign({}, currentParent.position);
+        const merged = new Map(remaining.map(function(element) { return [element.data.id, element]; }));
+        restoreById.forEach(function(element, id) {
+          merged.set(id, element);
+        });
+        if (expansionState.createdExceptionBoundaryId) {
+          const boundaryId = expansionState.createdExceptionBoundaryId;
+          const stillUsed = Array.from(merged.values()).some(function(element) {
+            return element.group === 'edges' &&
+              (element.data.source === boundaryId || element.data.target === boundaryId);
+          });
+          if (!stillUsed) merged.delete(boundaryId);
+        }
+        return Array.from(merged.values());
+      }
+
+      function renderGraphElements(elements, animate, preserveExistingPositions) {
+        const selectedIds = cy.nodes(':selected').map(function(node) { return node.id(); });
+        const inspectorNodeId = selectedInspectorNode && selectedInspectorNode.inside()
+          ? selectedInspectorNode.id() : null;
+        const viewport = captureViewport(cy);
         const oldPositions = {};
-        cy.nodes().forEach(function(n) {
-          const pos = n.position();
-          if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
-            oldPositions[n.id()] = { x: pos.x, y: pos.y };
+        cy.nodes().forEach(function(node) {
+          const position = node.position();
+          if (position && typeof position.x === 'number' && typeof position.y === 'number') {
+            oldPositions[node.id()] = { x: position.x, y: position.y };
           }
         });
-
-        const elements = netToElements(net);
-        elements.forEach(function(el) {
-          if (el.group === 'nodes' && oldPositions[el.data.id]) {
-            el.position = { x: oldPositions[el.data.id].x, y: oldPositions[el.data.id].y };
+        elements.forEach(function(element) {
+          if (element.group === 'nodes' && oldPositions[element.data.id]) {
+            element.position = { x: oldPositions[element.data.id].x, y: oldPositions[element.data.id].y };
           }
         });
-
         cy.elements().remove();
         cy.add(elements);
         applyLayout(animate);
+        if (preserveExistingPositions) {
+          const expansionRoots = cy.nodes().filter(function(node) {
+            return node.data('is_expansion_container') === true && oldPositions[node.id()];
+          });
+          expansionRoots.forEach(function(root) {
+            const previous = oldPositions[root.id()];
+            root.position({ x: previous.x, y: previous.y });
+          });
+          cy.nodes().forEach(function(node) {
+            const position = oldPositions[node.id()];
+            if (position && !node.data('is_expansion_container')) {
+              node.position({ x: position.x, y: position.y });
+            }
+          });
+        }
         updateUI();
         updateFoldableHighlights();
+        selectedIds.forEach(function(id) {
+          const node = cy.getElementById(id);
+          if (node && node.length > 0) node.select();
+        });
+        if (inspectorNodeId) {
+          const inspectorNode = cy.getElementById(inspectorNodeId);
+          if (inspectorNode && inspectorNode.length > 0) openInspector(inspectorNode);
+          else closeInspector();
+        }
+        restoreViewport(cy, viewport.zoom, viewport.pan);
+      }
+
+      function renderStep(stepIndex, animate, netOverride, expansionIds) {
+        if (animate === undefined) animate = true;
+        currentStep = Math.max(0, Math.min(stepIndex, totalSteps));
+        const net = netOverride || stepNets[currentStep];
+        const elements = netToElements(net, expansionIds);
+        renderGraphElements(elements, animate);
       }
 
       if (btnFold) {

@@ -336,28 +336,120 @@ if (!viewerActionHistory.canRedo || viewerActionHistory.canUndo) {
 
     def test_production_function_call_expansion_and_collapse_are_undoable(self):
         net_literal = """{
-  places: [{ id: 'p_in', label: 'in' }, { id: 'p_out', label: 'out' }],
-  transitions: [{ id: 't_call', label: 'helper()' }],
-  arcs: [{ source: 'p_in', target: 't_call' }, { source: 't_call', target: 'p_out' }]
+  places: [{ id: 'p_in', label: 'in', initial_tokens: 1 }, { id: 'p_out', label: 'out' }, { id: 'p_error', label: 'error' }],
+  transitions: [
+    { id: 't_call', label: 'helper()' },
+    { id: 't_call_error', label: 'exception: helper()', metadata: { exception_alternative: true, exception_alternative_of: 't_call' } }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_call' }, { source: 't_call', target: 'p_out' },
+    { source: 'p_in', target: 't_call_error' }, { source: 't_call_error', target: 'p_error' }
+  ]
 }"""
         logic = r"""
 const call = cy.getElementById('t_call');
 call.data('resolved', true);
 call.data('resolved_to', 'helper');
 call.data('raw_label', 'helper()');
-calleeNetsMap.helper = {
-  places: [{ id: 'helper_start', label: 'start' }, { id: 'helper_end', label: 'end' }],
-  transitions: [{ id: 'helper_inner', label: 'work()' }],
-  arcs: [{ source: 'helper_start', target: 'helper_inner' }, { source: 'helper_inner', target: 'helper_end' }]
+cy.add({
+  group: 'nodes',
+  data: { id: 't_C7', label: 'Manual fold', raw_label: 'Manual fold', type: 'Opaque Transition', is_opaque: true, tau: 7, metadata: { opaque: true, tau: 7, component_type: 'sequence' } },
+  classes: 'transition opaque component',
+  position: { x: 321, y: 123 }
+});
+cy.add([
+  { group: 'nodes', data: { id: 'unrelated_start', label: 'start', type: 'Place', initial_tokens: 0 }, classes: 'place' },
+  { group: 'nodes', data: { id: 'unrelated_end', label: 'end', type: 'Place', initial_tokens: 0 }, classes: 'place' },
+  { group: 'edges', data: { id: 'manual_in', source: 'unrelated_start', target: 't_C7', weight: 4 }, classes: 'arc' },
+  { group: 'edges', data: { id: 'manual_out', source: 't_C7', target: 'unrelated_end', weight: 5 }, classes: 'arc' }
+]);
+cy.getElementById('t_C7').data('custom_name', 'Keep my fold');
+cy.getElementById('t_C7').data('metadata', { opaque: true, tau: 7, component_type: 'sequence', user_tag: 'retained' });
+cy.viewport({ zoom: 1.7, pan: { x: 91, y: -33 } });
+const originalPositions = new Map(cy.nodes().map(node => [node.id(), node.position()]));
+layoutShiftHook = function() {
+  cy.nodes().forEach(node => node.position({ x: node.position().x + 500, y: node.position().y - 300 }));
 };
-call.emit('tap');
+calleeNetsMap.helper = {
+  places: [{ id: 'helper_start', label: 'start' }, { id: 'helper_end', label: 'end' }, { id: 'helper_exception_end', label: 'exception_end' }],
+  transitions: [{ id: 'helper_return', label: 'return' }, { id: 'helper_raise', label: 'raise' }],
+  arcs: [
+    { source: 'helper_start', target: 'helper_return' }, { source: 'helper_return', target: 'helper_end' },
+    { source: 'helper_start', target: 'helper_raise' }, { source: 'helper_raise', target: 'helper_exception_end' }
+  ]
+};
+cy.getElementById('t_call').emit('tap');
 if (!expandedNodes.has('t_call') || viewerActionHistory.undoStack.length !== 1) {
   throw new Error('Production resolved-call tap did not record expansion');
 }
-call.emit('tap');
+['p_in', 'p_out', 'p_error'].forEach(id => {
+  const expected = originalPositions.get(id);
+  const actual = cy.getElementById(id).position();
+  if (actual.x !== expected.x || actual.y !== expected.y) throw new Error('Expansion moved an unrelated caller place: ' + id);
+});
+const originalCallPosition = originalPositions.get('t_call');
+if (cy.getElementById('t_call').position().x !== originalCallPosition.x || cy.getElementById('t_call').position().y !== originalCallPosition.y) {
+  throw new Error('Expanded call container did not retain its original position: ' + JSON.stringify({ expected: originalCallPosition, actual: cy.getElementById('t_call').position() }));
+}
+if (cy.getElementById('t_C7').data('tau') !== 7 || cy.getElementById('t_C7').position().x !== 321 ||
+    cy.getElementById('t_C7').data('custom_name') !== 'Keep my fold' ||
+    cy.getElementById('t_C7').data('metadata').user_tag !== 'retained' ||
+    cy.getElementById('manual_in').data('weight') !== 4 || cy.getElementById('manual_out').data('weight') !== 5) {
+  throw new Error('Expansion changed an unrelated fold, its name, metadata, position, or weighted arcs');
+}
+if (cy.zoom() !== 1.7 || cy.pan().x !== 91 || cy.pan().y !== -33) throw new Error('Expansion changed the current camera');
+if (cy.getElementById('t_call__helper_return').length !== 1 || cy.getElementById('t_call__helper_raise').length !== 1) {
+  throw new Error('Production call expansion did not retain both callee outcome transitions');
+}
+if (!cy.edges().some(edge => edge.source().id() === 't_call__helper_return' && edge.target().id() === 'p_out')) {
+  throw new Error('Normal completion did not reach the caller continuation');
+}
+if (!cy.edges().some(edge => edge.source().id() === 't_call__helper_raise' && edge.target().id() === 'p_error')) {
+  throw new Error('Exceptional completion did not reach the caller handler');
+}
+if (cy.getElementById('t_call_error').length || cy.getElementById('t_call').data('tau') !== 0) {
+  throw new Error('Concrete exceptional completion did not replace the opaque alternative or zero its presentation container');
+}
+const pnmlExporter = require('./code2petri/viewer/engine/pnml_exporter.js');
+const pnml = pnmlExporter.serializeToPnml(cy, 'Outcome paths');
+if (!pnml.includes('id="t_call__helper_return"') || !pnml.includes('id="t_call__helper_raise"') || pnml.includes('id="t_call"')) {
+  throw new Error('PNML did not preserve expanded outcome transitions while omitting the presentation container');
+}
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const session = parseFoldStateSnapshot(serializeFoldStateSnapshot({
+  cy,
+  engine: foldEngine,
+  document: {
+    title: 'Expansion session', sourceFile: 'sample.py', filename: 'sample.py', functionName: '', mode: 'composite',
+    originalNet: net, compounds: [], foldSteps: [], calleeNets: calleeNetsMap,
+    expandedNodes: Array.from(expandedNodes.entries()), playback: { currentStep: 0, totalSteps: 0 }
+  }
+}));
+const savedRestore = JSON.stringify(expandedNodes.get('t_call').restoreElements);
+expandedNodes.clear();
+session.document.expandedNodes.forEach(entry => expandedNodes.set(entry[0], entry[1]));
+if (JSON.stringify(expandedNodes.get('t_call').restoreElements) !== savedRestore) {
+  throw new Error('Save/open did not retain call-local collapse restoration data');
+}
+cy.getElementById('t_C7').data('custom_name', 'Edited while call was expanded');
+cy.getElementById('t_C7').data('metadata', { opaque: true, tau: 7, component_type: 'sequence', user_tag: 'later-edit' });
+cy.getElementById('t_call').emit('tap');
 if (expandedNodes.has('t_call') || viewerActionHistory.undoStack.length !== 2) {
   throw new Error('Production expanded-call tap did not record collapse');
 }
+['p_in', 'p_out', 'p_error'].forEach(id => {
+  const expected = originalPositions.get(id);
+  const actual = cy.getElementById(id).position();
+  if (actual.x !== expected.x || actual.y !== expected.y) throw new Error('Collapse moved an unrelated caller place: ' + id);
+});
+if (cy.getElementById('t_C7').data('custom_name') !== 'Edited while call was expanded' ||
+    cy.getElementById('t_C7').data('metadata').user_tag !== 'later-edit' || cy.getElementById('t_C7').position().x !== 321) {
+  throw new Error('Collapse discarded an unrelated fold edit or position');
+}
+if (cy.getElementById('t_call').position().x !== originalCallPosition.x || cy.getElementById('t_call').position().y !== originalCallPosition.y) {
+  throw new Error('Collapse moved the call away from its preserved position');
+}
+if (cy.zoom() !== 1.7 || cy.pan().x !== 91 || cy.pan().y !== -33) throw new Error('Collapse changed the current camera');
 if (!viewerActionHistory.undo() || !expandedNodes.has('t_call')) {
   throw new Error('Undo did not restore the expanded function-call state');
 }
@@ -366,6 +458,270 @@ if (!viewerActionHistory.redo() || expandedNodes.has('t_call')) {
 }
 if (!viewerActionHistory.undo() || !viewerActionHistory.undo() || expandedNodes.has('t_call')) {
   throw new Error('Undo did not restore the original unexpanded call');
+}
+"""
+        script = _setup_live_fold_test_harness(net_literal, logic)
+        result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_exception_only_call_has_no_normal_route(self):
+        net_literal = """{
+  places: [{ id: 'before', label: 'before' }, { id: 'after', label: 'after' }, { id: 'error', label: 'error' }],
+  transitions: [
+    { id: 'call', label: 'fails()' },
+    { id: 'call_error', label: 'exception: fails()', metadata: { exception_alternative: true, exception_alternative_of: 'call' } }
+  ],
+  arcs: [
+    { source: 'before', target: 'call' }, { source: 'call', target: 'after' },
+    { source: 'before', target: 'call_error' }, { source: 'call_error', target: 'error' }
+  ]
+}"""
+        logic = r"""
+const call = cy.getElementById('call');
+call.data('resolved', true);
+call.data('resolved_to', 'fails');
+call.data('raw_label', 'fails()');
+calleeNetsMap.fails = {
+  places: [{ id: 'start', label: 'start' }, { id: 'unused_normal', label: 'end' }, { id: 'failure', label: 'exception_end' }],
+  transitions: [{ id: 'raise', label: 'raise' }],
+  arcs: [{ source: 'start', target: 'raise' }, { source: 'raise', target: 'failure' }]
+};
+cy.getElementById('call').emit('tap');
+if (!expandedNodes.has('call')) throw new Error('Production tap did not expand exception-only callee');
+if (!cy.edges().some(edge => edge.source().id() === 'call__raise' && edge.target().id() === 'error')) {
+  throw new Error('Exception-only callee did not reach its caller exception destination');
+}
+if (cy.edges().some(edge => edge.source().id() === 'call__raise' && edge.target().id() === 'after')) {
+  throw new Error('Unused normal-end placeholder invented a normal return');
+}
+if (cy.getElementById('call_error').length) throw new Error('Explicit exceptional callee exit retained the paired opaque alternative');
+"""
+        script = _setup_live_fold_test_harness(net_literal, logic)
+        result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_normal_only_call_retains_bounded_exception_alternative(self):
+        net_literal = """{
+  places: [{ id: 'before', label: 'before' }, { id: 'after', label: 'after' }, { id: 'error', label: 'error' }],
+  transitions: [
+    { id: 'call', label: 'returns()' },
+    { id: 'call_error', label: 'exception: returns()', metadata: { exception_alternative: true, exception_alternative_of: 'call' } }
+  ],
+  arcs: [
+    { source: 'before', target: 'call' }, { source: 'call', target: 'after' },
+    { source: 'before', target: 'call_error' }, { source: 'call_error', target: 'error' }
+  ]
+}"""
+        logic = r"""
+const call = cy.getElementById('call');
+call.data('resolved', true);
+call.data('resolved_to', 'returns');
+call.data('raw_label', 'returns()');
+calleeNetsMap.returns = {
+  places: [{ id: 'start', label: 'start' }, { id: 'end', label: 'end' }],
+  transitions: [{ id: 'return', label: 'return' }],
+  arcs: [{ source: 'start', target: 'return' }, { source: 'return', target: 'end' }]
+};
+cy.getElementById('call').emit('tap');
+if (!expandedNodes.has('call')) throw new Error('Production tap did not expand normal-only callee');
+if (!cy.edges().some(edge => edge.source().id() === 'call__return' && edge.target().id() === 'after')) {
+  throw new Error('Normal-only callee did not reach caller continuation');
+}
+if (!cy.getElementById('call_error').length) throw new Error('Missing explicit exceptional exit discarded bounded opaque-call exception behavior');
+"""
+        script = _setup_live_fold_test_harness(net_literal, logic)
+        result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_uncaught_callee_exception_reaches_caller_boundary(self):
+        net_literal = """{
+  places: [{ id: 'before', label: 'before' }, { id: 'after', label: 'after' }],
+  transitions: [{ id: 'call', label: 'raises()' }],
+  arcs: [{ source: 'before', target: 'call' }, { source: 'call', target: 'after' }]
+}"""
+        logic = r"""
+const call = cy.getElementById('call');
+call.data('resolved', true);
+call.data('resolved_to', 'raises');
+call.data('raw_label', 'raises()');
+calleeNetsMap.raises = {
+  places: [{ id: 'start', label: 'start' }, { id: 'normal', label: 'end' }, { id: 'error', label: 'exception_end' }],
+  transitions: [{ id: 'return', label: 'return' }, { id: 'raise', label: 'raise' }],
+  arcs: [
+    { source: 'start', target: 'return' }, { source: 'return', target: 'normal' },
+    { source: 'start', target: 'raise' }, { source: 'raise', target: 'error' }
+  ]
+};
+cy.getElementById('call').emit('tap');
+const exceptionBoundary = cy.nodes('.place').filter(node => node.data('raw_label') === 'exception_end' && node.id() !== 'error');
+if (exceptionBoundary.length !== 1) throw new Error('Expansion did not create a caller-scope exception boundary');
+if (!cy.edges().some(edge => edge.source().id() === 'call__raise' && edge.target().id() === exceptionBoundary.id())) {
+  throw new Error('Uncaught exceptional completion did not reach the caller exception boundary');
+}
+if (cy.edges().some(edge => edge.source().id() === 'call__raise' && edge.target().id() === 'after')) {
+  throw new Error('Uncaught exceptional completion was routed to normal continuation');
+}
+const expansionState = expandedNodes.get('call');
+cy.getElementById('call').emit('tap');
+if (expandedNodes.has('call') || cy.getElementById('call__exception_end').length) {
+  throw new Error('Collapse did not remove the no-longer-used created exception boundary');
+}
+"""
+        script = _setup_live_fold_test_harness(net_literal, logic)
+        result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_ambiguous_callee_boundary_refuses_without_history_or_graph_changes(self):
+        net_literal = """{
+  places: [{ id: 'before', label: 'before' }, { id: 'after', label: 'after' }],
+  transitions: [{ id: 'call', label: 'ambiguous()' }],
+  arcs: [{ source: 'before', target: 'call' }, { source: 'call', target: 'after' }]
+}"""
+        logic = r"""
+const call = cy.getElementById('call');
+call.data('resolved', true);
+call.data('resolved_to', 'ambiguous');
+call.data('raw_label', 'ambiguous()');
+calleeNetsMap.ambiguous = {
+  places: [{ id: 'start_a', label: 'start' }, { id: 'start_b', label: 'start' }, { id: 'end', label: 'end' }],
+  transitions: [{ id: 'work', label: 'work' }],
+  arcs: [{ source: 'start_a', target: 'work' }, { source: 'work', target: 'end' }]
+};
+function graphState() {
+  return JSON.stringify(cy.elements().jsons().map(element => {
+    const copy = JSON.parse(JSON.stringify(element));
+    delete copy.selected;
+    return copy;
+  }).sort((left, right) => left.data.id.localeCompare(right.data.id)));
+}
+const before = graphState();
+let refusal = '';
+try { cy.getElementById('call').emit('tap'); } catch (error) { refusal = error.message; }
+if (!refusal.includes('exactly one explicit source boundary')) throw new Error('Ambiguous boundary did not give a specific refusal: ' + refusal);
+const after = graphState();
+if (after !== before || expandedNodes.size !== 0 || viewerActionHistory.undoStack.length !== 0) {
+  throw new Error('Rejected expansion left a partial graph, expansion state, or history entry: ' + JSON.stringify({ graphChanged: after !== before, expansions: expandedNodes.size, undo: viewerActionHistory.undoStack.length }));
+}
+"""
+        script = _setup_live_fold_test_harness(net_literal, logic)
+        result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_repeated_call_occurrences_expand_and_collapse_independently(self):
+        net_literal = """{
+  places: [
+    { id: 'start', label: 'start' }, { id: 'between', label: 'between' },
+    { id: 'after_a', label: 'after a' }, { id: 'after_b', label: 'after b' },
+    { id: 'error_a', label: 'error a' }, { id: 'error_b', label: 'error b' }
+  ],
+  transitions: [
+    { id: 'call_a', label: 'worker()' },
+    { id: 'error_call_a', label: 'exception: worker()', metadata: { exception_alternative: true, exception_alternative_of: 'call_a' } },
+    { id: 'call_b', label: 'worker()' },
+    { id: 'error_call_b', label: 'exception: worker()', metadata: { exception_alternative: true, exception_alternative_of: 'call_b' } }
+  ],
+  arcs: [
+    { source: 'start', target: 'call_a' }, { source: 'call_a', target: 'between' },
+    { source: 'start', target: 'error_call_a' }, { source: 'error_call_a', target: 'error_a' },
+    { source: 'between', target: 'call_b' }, { source: 'call_b', target: 'after_b' },
+    { source: 'between', target: 'error_call_b' }, { source: 'error_call_b', target: 'error_b' }
+  ]
+}"""
+        logic = r"""
+['call_a', 'call_b'].forEach(id => {
+  const call = cy.getElementById(id);
+  call.data('resolved', true);
+  call.data('resolved_to', 'worker');
+  call.data('raw_label', 'worker()');
+});
+calleeNetsMap.worker = {
+  places: [{ id: 'start', label: 'start' }, { id: 'end', label: 'end' }, { id: 'exception_end', label: 'exception_end' }],
+  transitions: [{ id: 'return', label: 'return' }, { id: 'raise', label: 'raise' }],
+  arcs: [
+    { source: 'start', target: 'return' }, { source: 'return', target: 'end' },
+    { source: 'start', target: 'raise' }, { source: 'raise', target: 'exception_end' }
+  ]
+};
+cy.getElementById('call_a').emit('tap');
+cy.getElementById('call_b').emit('tap');
+if (!expandedNodes.has('call_a') || !expandedNodes.has('call_b')) throw new Error('Repeated call occurrences did not retain separate expansion state');
+if (cy.getElementById('call_a__return').length !== 1 || cy.getElementById('call_b__return').length !== 1 ||
+    cy.getElementById('call_a__raise').length !== 1 || cy.getElementById('call_b__raise').length !== 1) {
+  throw new Error('Repeated call occurrences shared or lost cloned node identities');
+}
+if (!cy.edges().some(edge => edge.source().id() === 'call_a__return' && edge.target().id() === 'between') ||
+    !cy.edges().some(edge => edge.source().id() === 'call_b__return' && edge.target().id() === 'after_b') ||
+    !cy.edges().some(edge => edge.source().id() === 'call_a__raise' && edge.target().id() === 'error_a') ||
+    !cy.edges().some(edge => edge.source().id() === 'call_b__raise' && edge.target().id() === 'error_b')) {
+  throw new Error('A repeated call occurrence routed to another call site’s destinations');
+}
+cy.getElementById('call_a').emit('tap');
+if (expandedNodes.has('call_a') || !expandedNodes.has('call_b') || cy.getElementById('call_a__return').length ||
+    !cy.getElementById('call_b__return').length || !cy.getElementById('error_call_a').length || cy.getElementById('error_call_b').length) {
+  throw new Error('Collapsing one occurrence changed the other call expansion or exception alternative');
+}
+"""
+        script = _setup_live_fold_test_harness(net_literal, logic)
+        result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_nested_call_exception_routes_to_its_own_handler(self):
+        net_literal = """{
+  places: [{ id: 'before', label: 'before' }, { id: 'after', label: 'after' }, { id: 'caller_error', label: 'caller error' }],
+  transitions: [
+    { id: 'outer_call', label: 'outer()' },
+    { id: 'outer_error', label: 'exception: outer()', metadata: { exception_alternative: true, exception_alternative_of: 'outer_call' } }
+  ],
+  arcs: [
+    { source: 'before', target: 'outer_call' }, { source: 'outer_call', target: 'after' },
+    { source: 'before', target: 'outer_error' }, { source: 'outer_error', target: 'caller_error' }
+  ]
+}"""
+        logic = r"""
+const outerCall = cy.getElementById('outer_call');
+outerCall.data('resolved', true);
+outerCall.data('resolved_to', 'outer');
+outerCall.data('raw_label', 'outer()');
+calleeNetsMap.outer = {
+  places: [
+    { id: 'start', label: 'start' }, { id: 'inner_after', label: 'inner after' },
+    { id: 'handler_entry', label: 'except_entry' }, { id: 'end', label: 'end' }, { id: 'exception_end', label: 'exception_end' }
+  ],
+  transitions: [
+    { id: 'inner_call', label: 'inner()', resolved: true, resolved_to: 'inner' },
+    { id: 'inner_error', label: 'exception: inner()', metadata: { exception_alternative: true, exception_alternative_of: 'inner_call' } },
+    { id: 'continue', label: 'continue' }, { id: 'handle', label: 'handle' }
+  ],
+  arcs: [
+    { source: 'start', target: 'inner_call' }, { source: 'inner_call', target: 'inner_after' },
+    { source: 'start', target: 'inner_error' }, { source: 'inner_error', target: 'handler_entry' },
+    { source: 'inner_after', target: 'continue' }, { source: 'continue', target: 'end' },
+    { source: 'handler_entry', target: 'handle' }, { source: 'handle', target: 'end' }
+  ]
+};
+calleeNetsMap.inner = {
+  places: [{ id: 'start', label: 'start' }, { id: 'end', label: 'end' }, { id: 'exception_end', label: 'exception_end' }],
+  transitions: [{ id: 'return', label: 'return' }, { id: 'raise', label: 'raise' }],
+  arcs: [
+    { source: 'start', target: 'return' }, { source: 'return', target: 'end' },
+    { source: 'start', target: 'raise' }, { source: 'raise', target: 'exception_end' }
+  ]
+};
+cy.getElementById('outer_call').emit('tap');
+const innerId = 'outer_call__inner_call';
+const innerAlternativeId = 'outer_call__inner_error';
+if (cy.getElementById(innerId).data('exception_alternative_of')) throw new Error('Nested call incorrectly became an exception alternative');
+cy.getElementById(innerId).emit('tap');
+if (!expandedNodes.has(innerId)) throw new Error('Nested resolved call did not expand independently');
+if (!cy.edges().some(edge => edge.source().id() === innerId + '__raise' && edge.target().id() === 'outer_call__handler_entry')) {
+  throw new Error('Nested exceptional completion did not reach its enclosing handler');
+}
+if (!cy.edges().some(edge => edge.source().id() === innerId + '__return' && edge.target().id() === 'outer_call__inner_after')) {
+  throw new Error('Nested normal completion did not reach its normal continuation');
+}
+if (cy.getElementById(innerAlternativeId).length) throw new Error('Nested explicit exceptional result retained its paired opaque alternative');
+if (cy.edges().some(edge => edge.source().id() === innerId + '__raise' && edge.target().id() === 'outer_call__inner_after')) {
+  throw new Error('Nested exception was routed through normal continuation instead of handler');
 }
 """
         script = _setup_live_fold_test_harness(net_literal, logic)
@@ -384,7 +740,7 @@ if (!viewerActionHistory.undo() || !viewerActionHistory.undo() || expandedNodes.
             return match.group(0)
 
         update_ui = extract(r"function updateUI\(\) \{.*?\n      \}")
-        render_step = extract(r"function renderStep\(stepIndex, animate\) \{.*?\n      \}")
+        render_step = extract(r"function renderStep\(stepIndex, animate(?:, netOverride, expansionIds)?\) \{.*?\n      \}")
         controls = extract(r"if \(btnFold\) \{.*?(?=\n\n      function getSelectedPlaceIds\()")
         net_literal = """{
   places: [{ id: 'p0', label: 'start' }, { id: 'p1', label: 'end' }],
@@ -393,6 +749,8 @@ if (!viewerActionHistory.undo() || !viewerActionHistory.undo() || expandedNodes.
 }"""
         logic = f"""
 const isFoldMode = true;
+const reductionOutcome = null;
+var payload = {{}};
 const totalSteps = 2;
 const foldSteps = [
   {{ component_type: 'Sequence', opaque_transition: 'c_01', sm_score: 1.0, omega: 0, tau: 2 }},
