@@ -38,3 +38,7 @@ Implemented in the Ticket 73 work branch: Python fallback validation and incompl
 ### 2026-11-03 — Integrated review and validation
 
 Integrated into `codex/phase-2.8.2-call-refolding` at candidate commit `10c7553b1c8459e0777ee2790a076123de88c0f7` before this tracking update. Final Spec review found no remaining code violations; final Standards review found no documented-standard breaches. The 62 focused viewer action, expansion, and reduction tests pass; `compileall` and `git diff --check` pass. Actual regenerated Dots & Boxes browser acceptance remains unperformed. The original retained standalone session needed to reproduce the historical final-fold refusal was not available as a browser artifact in this integration worktree, so do not count the current regenerated graphs as that specific acceptance. Keep the ticket open for the human browser check.
+
+### 2026-11-03 — Current candidate review state
+
+The user-supplied round-01 review's original fallback finding was measured against the pre-implementation publication commit; the integrated Ticket 73 fallback and incomplete-result fixes remain present. Final Spec review of candidate `0d7ecee` found no mismatch, and Standards review found no documented breach. The regenerated browser-expanded and backend-inlined artifacts are recorded in Ticket 72, but they do not reconstruct the historical retained standalone session for the specific refusal scenario. That browser acceptance remains open.
