@@ -3,6 +3,7 @@ import os
 import sys
 import unittest
 from typing import List, Tuple
+import xml.etree.ElementTree as ET
 
 # Ensure repo root is on sys.path
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -12,6 +13,7 @@ if REPO_ROOT not in sys.path:
 from code2petri.model import PetriNet, Place, Transition
 from code2petri.fold import (
     FoldConfig,
+    Component,
     ComponentType,
     FoldStep,
     FoldResult,
@@ -27,6 +29,7 @@ from code2petri.fold import (
     fold_well_structured,
     fold_loop,
     fold_unstructured,
+    NetTopology,
     _is_trivial_workflow_net,
 )
 from tests.test_fold_detection import (
@@ -61,6 +64,8 @@ class TestFoldSequence(unittest.TestCase):
         self.assertEqual(step2.tau, 3.0)
         self.assertEqual(step2.running_sm, 3.0)
         self.assertEqual(result.final_sm, 3.0)
+        self.assertEqual(result.outcome.value, "completed_structured")
+        self.assertEqual(result.accumulated_weight, 3.0)
 
         # Folded net at step 2 should have exactly 1 transition (t_C2) between p0 and p3
         folded_net = step2.snapshot
@@ -326,9 +331,11 @@ class TestFoldIrreducible(unittest.TestCase):
         self.assertEqual(last_step.omega, 156.0)
         self.assertEqual(last_step.tau, 160.0)
         self.assertEqual(result.final_sm, 160.0)
+        self.assertEqual(result.outcome.value, "completed_unstructured")
+        self.assertEqual(result.accumulated_weight, 160.0)
 
-    def test_unstructured_fold_on_single_place_net(self):
-        # Build an irreducible net with a single place and multiple transitions
+    def test_single_place_self_loop_remains_incomplete(self):
+        # A place self-loop has no distinct source/sink interface and must be preserved.
         net = PetriNet()
         p = net.add_place("p0", initial_tokens=1)
         t1 = net.add_transition("t1")
@@ -339,23 +346,12 @@ class TestFoldIrreducible(unittest.TestCase):
         net.add_arc(p, t2)
         net.add_arc(t2, p)
 
-        self.assertFalse(_is_trivial_workflow_net(net))
+        before = net.to_dict()
         result = fold_net(net)
-        self.assertFalse(result.fully_reducible)
-        self.assertEqual(len(result.steps), 1)
-        step = result.steps[0]
-        self.assertEqual(step.component_type, ComponentType.UNSTRUCTURED)
-        # Verify opaque transition has both input and output arcs connected to p0
-        final_net = step.snapshot
-        self.assertEqual(len(final_net.transitions), 1)
-        opaque_t = final_net.transitions[0]
-        self.assertEqual(len(final_net.arcs), 2)
-        sources = {a.source.id for a in final_net.arcs}
-        targets = {a.target.id for a in final_net.arcs}
-        self.assertIn("p0", sources)
-        self.assertIn(opaque_t.id, sources)
-        self.assertIn("p0", targets)
-        self.assertIn(opaque_t.id, targets)
+        self.assertEqual(result.outcome.value, "incomplete")
+        self.assertIsNone(result.final_sm)
+        self.assertEqual(result.final_net.to_dict(), before)
+        self.assertIn("source place", result.incomplete_reason)
 
     def test_single_place_self_loop_not_trivial_workflow_net(self):
         # A single-place net with a self-loop is NOT a trivial workflow net (must have distinct source and sink)
@@ -365,6 +361,134 @@ class TestFoldIrreducible(unittest.TestCase):
         net.add_arc(p0, t0)
         net.add_arc(t0, p0)
         self.assertFalse(_is_trivial_workflow_net(net))
+
+
+class TestIncompleteReductionOutcome(unittest.TestCase):
+    def test_empty_net_has_no_verified_final_score(self):
+        result = fold_net(PetriNet())
+
+        self.assertEqual(result.outcome.value, "incomplete")
+        self.assertIsNone(result.final_sm)
+        self.assertEqual(result.accumulated_weight, 0.0)
+        self.assertIn("no remaining transition", result.incomplete_reason)
+
+    def test_multiple_terminal_outcomes_are_preserved_without_a_final_sm(self):
+        net = PetriNet()
+        p_start = net.add_place("p_start", initial_tokens=1)
+        p_return = net.add_place("p_return")
+        p_exception = net.add_place("p_exception")
+        t_return = net.add_transition("t_return")
+        t_raise = net.add_transition("t_raise")
+        net.add_arc(p_start, t_return)
+        net.add_arc(t_return, p_return)
+        net.add_arc(p_start, t_raise)
+        net.add_arc(t_raise, p_exception)
+
+        result = fold_net(net)
+
+        self.assertEqual(result.outcome.value, "incomplete")
+        self.assertIsNone(result.final_sm)
+        self.assertEqual(result.accumulated_weight, 2.0)
+        self.assertTrue(result.incomplete_reason)
+        self.assertEqual(
+            {place.id for place in result.final_net.places if not NetTopology(result.final_net).out_degree(place.id)},
+            {"p_return", "p_exception"},
+        )
+        self.assertEqual({transition.id for transition in result.final_net.transitions}, {"t_return", "t_raise"})
+
+    def test_disconnected_remainder_keeps_safe_local_reduction_but_no_final_sm(self):
+        net, _, _, _ = build_sequence_net(2)
+        net.add_transition("t_orphan")
+
+        result = fold_net(net)
+
+        self.assertEqual(result.outcome.value, "incomplete")
+        self.assertIsNone(result.final_sm)
+        self.assertEqual(result.accumulated_weight, 3.0)
+        self.assertEqual(len(result.steps), 1)
+        self.assertEqual(
+            {transition.id for transition in result.final_net.transitions},
+            {"t_C1", "t_orphan"},
+        )
+        self.assertIn("source-to-sink", result.incomplete_reason)
+
+    def test_non_unit_rewiring_is_refused_and_original_graph_is_exportable(self):
+        net, _, _, _ = build_sequence_net(2)
+        next(arc for arc in net.arcs if arc.source.id == "t1" and arc.target.id == "p1").weight = 2
+
+        result = fold_net(net)
+
+        self.assertEqual(result.outcome.value, "incomplete")
+        self.assertIsNone(result.final_sm)
+        self.assertEqual(result.accumulated_weight, 2.0)
+        self.assertEqual(result.final_net.to_dict(), net.to_dict())
+        self.assertIn("arc weight", result.incomplete_reason)
+
+    def test_non_unit_arcs_on_single_transition_do_not_prove_completion(self):
+        net, _, _, _ = build_sequence_net(1)
+        next(arc for arc in net.arcs if arc.source.id == "p0").weight = 2
+
+        result = fold_net(net)
+
+        self.assertEqual(result.outcome.value, "incomplete")
+        self.assertIsNone(result.final_sm)
+        self.assertEqual(result.final_net.to_dict(), net.to_dict())
+        self.assertIn("arc weight", result.incomplete_reason)
+
+    def test_stale_marked_component_is_rejected_without_changing_net(self):
+        net, _, _, _ = build_sequence_net(2)
+        next(place for place in net.places if place.id == "p1").initial_tokens = 1
+        before = net.to_dict()
+        stale = Component(
+            component_type=ComponentType.SEQUENCE,
+            internal_node_ids={"p1"},
+            entrance="t1",
+            exit="t2",
+            omega=0.0,
+        )
+
+        with self.assertRaisesRegex(ValueError, "marked place"):
+            fold_component(net, stale, step_number=1)
+
+        self.assertEqual(net.to_dict(), before)
+
+    def test_incomplete_exports_keep_the_last_graph_and_status(self):
+        net = PetriNet()
+        p_start = net.add_place("p_start", initial_tokens=1)
+        p_return = net.add_place("p_return")
+        p_exception = net.add_place("p_exception")
+        t_return = net.add_transition("t_return")
+        t_raise = net.add_transition("t_raise")
+        net.add_arc(p_start, t_return)
+        net.add_arc(t_return, p_return)
+        net.add_arc(p_start, t_raise)
+        net.add_arc(t_raise, p_exception)
+        result = fold_net(net)
+
+        data = json.loads(result.to_json())
+        self.assertIsNone(data["final_sm"])
+        self.assertFalse(data["final_sm_available"])
+        self.assertEqual(data["reduction_outcome"], "incomplete")
+        self.assertEqual(
+            {t["id"] for t in data["final_net"]["transitions"]},
+            {"t_return", "t_raise"},
+        )
+        dot = result.to_dot()
+        self.assertIn("Final SM unavailable", dot)
+        self.assertIn('"t_return"', dot)
+        self.assertIn('"t_raise"', dot)
+
+        pnml = ET.fromstring(result.to_pnml())
+        pnml_transitions = {node.attrib["id"] for node in pnml.iter() if node.tag.endswith("transition")}
+        self.assertEqual(pnml_transitions, {"t_return", "t_raise"})
+        pnml_properties = {
+            prop.attrib["name"]: prop.find("{*}text").text
+            for prop in pnml.iter()
+            if prop.tag.endswith("property")
+        }
+        self.assertEqual(pnml_properties["reduction_outcome"], "incomplete")
+        self.assertEqual(pnml_properties["final_sm_available"], "false")
+        self.assertEqual(float(pnml_properties["accumulated_reduction_weight"]), 2.0)
 
 
 class TestFoldMacroComponents(unittest.TestCase):

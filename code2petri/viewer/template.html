@@ -281,6 +281,19 @@
     .status-badge .value.sm-score {
       color: #98c379;
     }
+    #badge-sm.analysis-incomplete {
+      display: grid;
+      grid-template-columns: auto auto;
+      justify-items: start;
+      column-gap: 8px;
+      row-gap: 3px;
+    }
+    #analysis-status {
+      grid-column: 1 / span 2;
+      color: #ffcc66;
+      font-size: 11px;
+      white-space: nowrap;
+    }
     #main-container {
       --inspector-sidebar-width: 320px;
       flex: 1;
@@ -635,8 +648,11 @@
       </div>
 
       <div class="status-badge" id="badge-sm">
-        <span class="label">SM Score</span>
+        <span class="label" id="label-sm">SM Score</span>
         <span class="value sm-score" id="val-sm">0.0</span>
+        <span id="analysis-status" style="display: none;"></span>
+        <span class="label" id="label-accumulated" style="display: none;">Accumulated Reduction Weight</span>
+        <span class="value" id="val-accumulated" style="display: none;">0.0</span>
       </div>
 
       <button class="btn" id="btn-open-session" title="Open a saved Fold State Snapshot">Open Session...</button>
@@ -968,7 +984,10 @@
       let initialNet = payload.composite_net || payload.initial_net || { places: [], transitions: [], arcs: [] };
       let foldSteps = payload.fold_steps || [];
       let totalSteps = foldSteps.length;
-      let currentStep = 0;
+      let reductionOutcome = payload.mode === 'fold'
+        ? (payload.reduction_outcome || 'unknown')
+        : null;
+      let currentStep = reductionOutcome === 'incomplete' ? totalSteps : 0;
 
       // Elements cache for each step
       let stepNets = [initialNet];
@@ -1376,7 +1395,7 @@
       // Initialize Cytoscape
       const cy = cytoscape({
         container: document.getElementById('cy'),
-        elements: netToElements(stepNets[0]),
+        elements: netToElements(stepNets[currentStep]),
         style: [
           {
             selector: 'node.place',
@@ -2420,7 +2439,7 @@
           if (typeof updateFoldableHighlights === 'function') updateFoldableHighlights();
           if (res.node && typeof openInspector === 'function') openInspector(res.node);
           if (typeof valSm !== 'undefined' && valSm && typeof foldEngine !== 'undefined' && foldEngine) {
-            valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+            updateScoreBadge();
           }
           return true;
         });
@@ -2510,7 +2529,7 @@
         if (typeof updateFoldableHighlights === 'function') updateFoldableHighlights();
         if (typeof closeInspector === 'function') closeInspector();
         if (typeof valSm !== 'undefined' && valSm && typeof foldEngine !== 'undefined' && foldEngine) {
-          valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+          updateScoreBadge();
         }
         return result;
       }
@@ -2553,8 +2572,53 @@
       const batchFoldResult = document.getElementById('batch-fold-result');
       const valStep = document.getElementById('val-step');
       const valSm = document.getElementById('val-sm');
+      const labelSm = document.getElementById('label-sm');
+      const analysisStatus = document.getElementById('analysis-status');
+      const labelAccumulated = document.getElementById('label-accumulated');
+      const valAccumulated = document.getElementById('val-accumulated');
       const infoTitle = document.getElementById('info-step-title');
       const infoDesc = document.getElementById('info-step-desc');
+
+      function calculateNetReductionWeight(net) {
+        return ((net && net.transitions) || []).reduce(function(total, transition) {
+          const metadata = transition.metadata || {};
+          const tau = metadata.tau !== undefined ? Number(metadata.tau) :
+            (transition.tau !== undefined ? Number(transition.tau) : 1.0);
+          return total + (Number.isFinite(tau) ? tau : 1.0);
+        }, 0.0);
+      }
+
+      function updateScoreBadge(net) {
+        if (reductionOutcome === 'incomplete' || reductionOutcome === 'unknown') {
+          if (badgeSm) badgeSm.classList.add('analysis-incomplete');
+          if (labelSm) labelSm.textContent = 'Final SM';
+          if (valSm) valSm.textContent = 'Unavailable';
+          if (analysisStatus) {
+            analysisStatus.textContent = reductionOutcome === 'incomplete'
+              ? 'Final SM unavailable—reduction incomplete'
+              : 'Final SM availability is unknown for this analysis';
+            analysisStatus.style.display = 'block';
+            analysisStatus.title = payload.incomplete_reason || '';
+          }
+          if (labelAccumulated) labelAccumulated.style.display = 'inline';
+          if (valAccumulated) {
+            const retainedNet = stepNets[totalSteps] || net || initialNet;
+            valAccumulated.textContent = calculateNetReductionWeight(retainedNet).toFixed(1);
+            valAccumulated.style.display = 'inline';
+          }
+          return;
+        }
+
+        if (badgeSm) badgeSm.classList.remove('analysis-incomplete');
+        if (labelSm) labelSm.textContent = 'SM Score';
+        if (analysisStatus) analysisStatus.style.display = 'none';
+        if (labelAccumulated) labelAccumulated.style.display = 'none';
+        if (valAccumulated) valAccumulated.style.display = 'none';
+        if (valSm) {
+          const score = foldEngine ? foldEngine.calculateSMScore() : initialSm;
+          valSm.textContent = score.toFixed(1);
+        }
+      }
       const viewerSearchInput = document.getElementById('viewer-search-input');
       const viewerSearchClear = document.getElementById('viewer-search-clear');
       const viewerSearchDropdown = document.getElementById('viewer-search-dropdown');
@@ -2840,6 +2904,15 @@
               valSm.textContent = (foldEngine ? foldEngine.calculateSMScore() : initialSm).toFixed(1);
             }
           }
+        } else if (reductionOutcome !== null) {
+          if (badgeSm) badgeSm.style.display = 'flex';
+          if (infoTitle) infoTitle.textContent = 'Reduction status';
+          if (infoDesc) {
+            infoDesc.textContent = reductionOutcome === 'incomplete'
+              ? 'Final SM unavailable—reduction incomplete. ' + (payload.incomplete_reason || '')
+              : 'Final SM availability is unknown for this analysis.';
+          }
+          updateScoreBadge(initialNet);
         } else {
           if (badgeSm) {
             badgeSm.style.display = 'none';
@@ -2880,6 +2953,12 @@
             desc += ' (Note: Expanded caller transition ' + hiddenExpansions.map(function(id) { return "'" + id + "'"; }).join(', ') + ' is folded away in this step).';
           }
           infoDesc.textContent = desc;
+        }
+        if (reductionOutcome !== null) {
+          if (reductionOutcome === 'incomplete' && payload.incomplete_reason) {
+            infoDesc.textContent += ' Final SM unavailable—reduction incomplete. ' + payload.incomplete_reason;
+          }
+          updateScoreBadge(stepNets[currentStep]);
         }
       }
 
@@ -2951,7 +3030,7 @@
         }
         restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
         updateFoldableHighlights();
-        if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+        updateScoreBadge();
       }
 
       function formatFoldActionResult(result) {
@@ -3028,7 +3107,7 @@
         afterRestore: function() {
           updateFoldableHighlights();
           if (isFoldMode) updateUI();
-          if (valSm) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+          updateScoreBadge();
           updateBatchPlaceFoldControls();
           updateActionHistoryControls();
           if (typeof refreshViewerSearch === 'function') refreshViewerSearch({ preserveActive: true });
@@ -3166,8 +3245,16 @@
           originalNet: originalNet,
           compounds: compounds,
           foldSteps: foldSteps,
-          finalSm: payload.final_sm,
+          finalSm: reductionOutcome === 'unknown'
+            ? null
+            : payload.final_sm,
           fullyReducible: payload.fully_reducible,
+          ...(reductionOutcome !== null ? {
+            reductionOutcome: reductionOutcome,
+            incompleteReason: payload.incomplete_reason || null,
+            finalSmAvailable: payload.final_sm_available === true,
+            accumulatedReductionWeight: calculateNetReductionWeight(stepNets[totalSteps] || originalNet)
+          } : {}),
           calleeNets: calleeNetsMap,
           expandedNodes: Array.from(expandedNodes.entries()),
           playback: { currentStep: currentStep, totalSteps: totalSteps }
@@ -3224,7 +3311,16 @@
         payload.composite_net = doc.originalNet;
         payload.compounds = doc.compounds || doc.originalNet.compounds || [];
         payload.fold_steps = doc.foldSteps;
-        payload.final_sm = doc.finalSm;
+        reductionOutcome = doc.mode === 'fold'
+          ? (typeof doc.reductionOutcome === 'string' ? doc.reductionOutcome : 'unknown')
+          : null;
+        payload.reduction_outcome = reductionOutcome;
+        payload.final_sm_available = doc.finalSmAvailable === true;
+        payload.final_sm = payload.final_sm_available ? doc.finalSm : null;
+        payload.accumulated_reduction_weight = Number.isFinite(doc.accumulatedReductionWeight)
+          ? doc.accumulatedReductionWeight
+          : 0.0;
+        payload.incomplete_reason = typeof doc.incompleteReason === 'string' ? doc.incompleteReason : null;
         payload.fully_reducible = doc.fullyReducible;
         document.title = doc.title + ' - code2petri Viewer';
         const headerTitle = document.querySelector('.header-title');
@@ -3261,9 +3357,15 @@
         );
         isFoldMode = doc.mode === 'fold' && totalSteps > 0;
         if (foldControls) foldControls.style.display = isFoldMode ? 'flex' : 'none';
-        if (badgeSm) badgeSm.style.display = (isFoldMode || doc.mode === 'composite') ? 'flex' : 'none';
+        if (badgeSm) badgeSm.style.display = (isFoldMode || doc.mode === 'composite' || doc.mode === 'fold') ? 'flex' : 'none';
         if (isFoldMode) updateUI();
-        if (valSm && foldEngine) valSm.textContent = foldEngine.calculateSMScore().toFixed(1);
+        else if (doc.mode === 'fold') {
+          if (infoTitle) infoTitle.textContent = 'Reduction status';
+          if (infoDesc) infoDesc.textContent = reductionOutcome === 'incomplete'
+            ? 'Final SM unavailable—reduction incomplete. ' + (payload.incomplete_reason || '')
+            : 'Final SM availability is unknown for this analysis.';
+        }
+        updateScoreBadge();
         cy.nodes(':selected').unselect();
         closeInspector();
         updateFoldableHighlights();
@@ -3302,7 +3404,24 @@
       if (btnExportPnml) {
         btnExportPnml.addEventListener('click', function(e) {
           if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-          exportClientSidePnml(cy);
+          if (reductionOutcome === 'incomplete' || reductionOutcome === 'unknown') {
+            const retainedNet = stepNets[totalSteps] || initialNet;
+            const exportCy = cytoscape({ headless: true, elements: netToElements(retainedNet) });
+            try {
+              exportClientSidePnml(exportCy, undefined, {
+                reductionOutcome: reductionOutcome,
+                finalSmAvailable: false,
+                accumulatedReductionWeight: calculateNetReductionWeight(retainedNet),
+                incompleteReason: reductionOutcome === 'incomplete'
+                  ? payload.incomplete_reason || ''
+                  : 'Analysis completion evidence is unavailable.'
+              });
+            } finally {
+              exportCy.destroy();
+            }
+          } else {
+            exportClientSidePnml(cy);
+          }
         });
       }
     })();

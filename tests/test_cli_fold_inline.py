@@ -25,6 +25,52 @@ class TestCLIFoldAndInlineIntegration(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_fold_cli_exports_incomplete_graph_without_claiming_final_sm(self):
+        source = os.path.join(self.temp_dir.name, "return_or_raise.py")
+        with open(source, "w", encoding="utf-8") as f:
+            f.write(
+                "def return_or_raise(flag):\n"
+                "    if flag:\n"
+                "        return 1\n"
+                "    raise ValueError()\n"
+            )
+        output = os.path.join(self.temp_dir.name, "incomplete.json")
+        stderr = io.StringIO()
+
+        with redirect_stderr(stderr):
+            result = code2petri(
+                source_path=source,
+                target_function="return_or_raise",
+                output_file=output,
+                fold=True,
+            )
+
+        self.assertIsNone(result.final_sm)
+        self.assertEqual(result.outcome.value, "incomplete")
+        self.assertIsNotNone(result.incomplete_reason)
+        self.assertIn("Final SM unavailable", stderr.getvalue())
+        with open(output, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertIsNone(data["final_sm"])
+        self.assertFalse(data["final_sm_available"])
+        self.assertEqual(data["reduction_outcome"], "incomplete")
+        self.assertIn("accumulated_reduction_weight", data)
+        self.assertEqual(data["final_net"]["places"], result.final_net.to_dict()["places"])
+
+        html_output = os.path.join(self.temp_dir.name, "incomplete.html")
+        code2petri(
+            source_path=source,
+            target_function="return_or_raise",
+            output_file=html_output,
+            fold=True,
+        )
+        with open(html_output, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        self.assertIn("Final SM unavailable—reduction incomplete", html_content)
+        self.assertIn("Accumulated Reduction Weight", html_content)
+        self.assertIn('"reduction_outcome": "incomplete"', html_content)
+        self.assertNotIn("SM Score = None", html_content)
+
     def test_fold_json_schema(self):
         """Validates that --fold with .json output serializes the full FoldResult schema."""
         out_json = os.path.join(self.temp_dir.name, "fold_result.json")

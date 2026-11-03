@@ -2560,6 +2560,110 @@
           };
         }
 
+        _getUnstructuredCandidateIssue(candidate, requireWholeNet = false) {
+          if (!candidate || !candidate.nodes || !candidate.sourceId || !candidate.sinkId) {
+            return 'Unstructured candidate is missing its node set or boundary places.';
+          }
+          const nodeIds = candidate.nodes instanceof Set
+            ? new Set(candidate.nodes)
+            : new Set(Array.isArray(candidate.nodes) ? candidate.nodes : []);
+          if (!nodeIds.has(candidate.sourceId) || !nodeIds.has(candidate.sinkId)) {
+            return 'Unstructured candidate boundaries must belong to the candidate subnet.';
+          }
+          if (candidate.sourceId === candidate.sinkId) {
+            return 'Unstructured candidate requires distinct source and sink places.';
+          }
+          const source = this.cy.getElementById(candidate.sourceId);
+          const sink = this.cy.getElementById(candidate.sinkId);
+          if (!source || source.length === 0 || !source.hasClass('place') ||
+              !sink || sink.length === 0 || !sink.hasClass('place')) {
+            return 'Unstructured candidate boundaries must be existing places.';
+          }
+
+          const allNodeIds = new Set(this.cy.nodes().filter(function(node) {
+            return node.hasClass('place') || node.hasClass('transition');
+          }).map(function(node) { return node.id(); }));
+          if (requireWholeNet && (nodeIds.size !== allNodeIds.size ||
+              Array.from(allNodeIds).some(function(id) { return !nodeIds.has(id); }))) {
+            return 'Whole-net Unstructured fallback must include every graph node.';
+          }
+
+          for (const id of nodeIds) {
+            const node = this.cy.getElementById(id);
+            if (!node || node.length === 0 || !allNodeIds.has(id)) {
+              return `Unstructured candidate node '${id}' no longer exists.`;
+            }
+            if (!node.hasClass('place') && !node.hasClass('transition')) {
+              return `Unstructured candidate node '${id}' is not a Petri net place or transition.`;
+            }
+            if (id !== candidate.sourceId && id !== candidate.sinkId) {
+              if (node.hasClass('place') && parseInt(node.data('initial_tokens') || 0, 10) > 0) {
+                return `Unstructured candidate contains token-bearing interior place '${id}'.`;
+              }
+            }
+          }
+
+          const adjacency = new Map();
+          const reverse = new Map();
+          nodeIds.forEach(function(id) {
+            adjacency.set(id, []);
+            reverse.set(id, []);
+          });
+          for (const edge of this.cy.edges()) {
+            const from = edge.source().id();
+            const to = edge.target().id();
+            const fromInside = nodeIds.has(from);
+            const toInside = nodeIds.has(to);
+            if (fromInside && toInside) {
+              const weight = edge.data('weight') === undefined ? 1 : Number(edge.data('weight'));
+              if (!Number.isFinite(weight) || weight !== 1) {
+                return `Unstructured candidate cannot safely rewire non-unit arc '${edge.id()}'.`;
+              }
+              adjacency.get(from).push(to);
+              reverse.get(to).push(from);
+            } else if (fromInside && !toInside && from !== candidate.sinkId) {
+              return `Unstructured candidate has a crossing outgoing interface at '${from}'.`;
+            } else if (!fromInside && toInside && to !== candidate.sourceId) {
+              return `Unstructured candidate has a crossing incoming interface at '${to}'.`;
+            }
+          }
+
+          function reachable(startId, graph) {
+            const reached = new Set([startId]);
+            const queue = [startId];
+            for (let index = 0; index < queue.length; index++) {
+              (graph.get(queue[index]) || []).forEach(function(nextId) {
+                if (!reached.has(nextId)) {
+                  reached.add(nextId);
+                  queue.push(nextId);
+                }
+              });
+            }
+            return reached;
+          }
+          const fromSource = reachable(candidate.sourceId, adjacency);
+          const toSink = reachable(candidate.sinkId, reverse);
+          for (const id of nodeIds) {
+            if (!fromSource.has(id) || !toSink.has(id)) {
+              return `Unstructured candidate node '${id}' is not on a complete source-to-sink path.`;
+            }
+          }
+
+          if (requireWholeNet) {
+            const sources = this.cy.nodes('.place').filter(function(place) {
+              return place.incomers('edge').length === 0;
+            });
+            const sinks = this.cy.nodes('.place').filter(function(place) {
+              return place.outgoers('edge').length === 0;
+            });
+            if (sources.length !== 1 || sinks.length !== 1 ||
+                sources[0].id() !== candidate.sourceId || sinks[0].id() !== candidate.sinkId) {
+              return 'Whole-net Unstructured fallback requires one distinct structural source and sink place.';
+            }
+          }
+          return null;
+        }
+
         detectUnstructured(scopeId = null, rejectionReasons = null) {
           const self = this;
           const knotCandidates = this._discoverSESESubnets({
@@ -2571,6 +2675,9 @@
             sortMinimal: true,
             validateNode: function(node, cand) {
               return self._getTokenBearingPlaceIssue(node, cand, 'unstructured', true);
+            },
+            validateSubnet: function(cand) {
+              return self._getUnstructuredCandidateIssue(cand, false);
             },
             calculateMultiplier: function(cand, compTrans) {
               const calc = self._calculateUnstructuredOmega(cand.nodes, compTrans);
@@ -2594,7 +2701,7 @@
 
           if (scopeId) return [];
 
-          // Global fallback: if no internal SESE pair exists and more than one transition remains
+          // Global fallback is limited to a justified single-source/single-sink workflow net.
           const transNodes = this.cy.nodes('.transition');
           if (transNodes.length <= 1) {
             return [];
@@ -2605,21 +2712,16 @@
             return [];
           }
 
-          const sourceCandidates = placeNodes.filter(function(p) {
-            return p.incomers('edge').length === 0 || parseInt(p.data('initial_tokens') || 0, 10) > 0;
-          });
-          const sinkCandidates = placeNodes.filter(function(p) {
-            return p.outgoers('edge').length === 0;
-          });
-
-          const p_src = sourceCandidates.length > 0 ? sourceCandidates[0] : placeNodes[0];
-          let p_snk = sinkCandidates.length > 0 ? sinkCandidates[0] : placeNodes[placeNodes.length - 1];
-          if (p_src.id() === p_snk.id() && placeNodes.length > 1) {
-            const otherPlaces = placeNodes.filter(function(p) { return p.id() !== p_src.id(); });
-            if (otherPlaces.length > 0) {
-              p_snk = otherPlaces[otherPlaces.length - 1];
-            }
+          const sourceCandidates = placeNodes.filter(function(p) { return p.incomers('edge').length === 0; });
+          const sinkCandidates = placeNodes.filter(function(p) { return p.outgoers('edge').length === 0; });
+          if (sourceCandidates.length !== 1 || sinkCandidates.length !== 1 ||
+              sourceCandidates[0].id() === sinkCandidates[0].id()) {
+            const reason = 'Whole-net Unstructured fallback requires one distinct structural source and sink place.';
+            this._recordRejectionReason(rejectionReasons, reason);
+            return [];
           }
+          const p_src = sourceCandidates[0];
+          const p_snk = sinkCandidates[0];
 
           const allNodeIds = new Set();
           placeNodes.forEach(function(p) { allNodeIds.add(p.id()); });
@@ -2628,7 +2730,7 @@
           const compTrans = transNodes.toArray();
           const calc = this._calculateUnstructuredOmega(allNodeIds, compTrans);
 
-          return [{
+          const fallback = {
             componentType: 'Unstructured',
             sourceId: p_src.id(),
             sinkId: p_snk.id(),
@@ -2643,7 +2745,14 @@
             tauNew: calc.tauNew,
             omega: calc.omega,
             isGlobalFallback: true
-          }];
+          };
+          const fallbackIssue = this._getUnstructuredCandidateIssue(fallback, true);
+          if (fallbackIssue) {
+            this._recordRejectionReason(rejectionReasons, fallbackIssue);
+            return [];
+          }
+
+          return [fallback];
         }
 
         // ProM selects maximal SESE components per Lassen Def. 18
@@ -2906,6 +3015,26 @@
         }
 
         _executePlaceSESEReduction(candidate) {
+          if (candidate && candidate.componentType === 'Unstructured') {
+            const issue = this._getUnstructuredCandidateIssue(candidate, candidate.isGlobalFallback === true);
+            if (issue) return { success: false, message: issue };
+            const nodes = candidate.nodes instanceof Set ? candidate.nodes : new Set(candidate.nodes);
+            const compTrans = Array.from(nodes).map((id) => this.cy.getElementById(id))
+              .filter((node) => node && node.length > 0 && node.hasClass('transition'));
+            const current = this._calculateUnstructuredOmega(nodes, compTrans);
+            candidate = Object.assign({}, candidate, {
+              nodes: nodes,
+              compTrans: compTrans,
+              diffP: current.diffP,
+              diffT: current.diffT,
+              arcCount: current.arcCount,
+              nodeCount: current.nodeCount,
+              weight: current.weight,
+              tauSum: current.tauSum,
+              tauNew: current.tauNew,
+              omega: current.omega
+            });
+          }
           const p_src = this.cy.getElementById(candidate.sourceId);
           const p_snk = this.cy.getElementById(candidate.sinkId);
           if (!p_src || p_src.length === 0 || !p_snk || p_snk.length === 0) {

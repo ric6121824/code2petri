@@ -213,6 +213,7 @@ const btnExportPnml = {{
 const infoFilename = {{ textContent: 'sample_test.py' }};
 const headerTitle = {{ textContent: 'Sample Test' }};
 const valSm = {{ textContent: '0.0' }};
+function updateScoreBadge() {{}}
 const inspectorSm = {{ textContent: '—' }};
 const hudBtnContractMg = {{
   style: {{ display: 'none' }},
@@ -3732,88 +3733,77 @@ console.log(JSON.stringify(result));
         self.assertEqual(js_data["tau"], expected_tau)
         self.assertEqual(js_data["omega"], expected_omega)
 
-    def test_unstructured_global_fallback_headless(self):
-        """Validates that when no internal SESE pair exists, global fallback collapses entire net matching Python."""
-        from code2petri.model import PetriNet
-        from code2petri.fold import fold_unstructured, FoldConfig
-
-        # 1. Python calculation on single-place looping net
-        py_net = PetriNet()
-        p0 = py_net.add_place("p0", initial_tokens=1)
-        t1 = py_net.add_transition("t1")
-        t2 = py_net.add_transition("t2")
-        py_net.add_arc(p0, t1)
-        py_net.add_arc(t1, p0)
-        py_net.add_arc(p0, t2)
-        py_net.add_arc(t2, p0)
-
-        py_folded, py_step = fold_unstructured(py_net, step_number=1, config=FoldConfig())
-        self.assertIsNotNone(py_step)
-        expected_tau = py_step.tau
-        expected_omega = py_step.omega
-
-        # 2. JS calculation
+    def test_unstructured_global_fallback_rejects_identical_boundaries_headless(self):
+        """A one-place loop cannot be collapsed with the same place as source and sink."""
         test_logic = """
-const cands = foldEngine.detectUnstructured();
-if (cands.length !== 1) {
-  throw new Error('Expected 1 global fallback candidate, got ' + cands.length);
+const rejections = [];
+const cands = foldEngine.detectUnstructured(null, rejections);
+if (cands.length !== 0) throw new Error('Unsafe one-place fallback was offered');
+if (!rejections.some(reason => reason.includes('distinct structural source and sink'))) {
+  throw new Error('Expected a specific source/sink rejection reason, got ' + JSON.stringify(rejections));
 }
-if (!cands[0].isGlobalFallback) {
-  throw new Error('Expected isGlobalFallback flag to be true');
+const before = JSON.stringify(cy.elements().jsons());
+const stepCounter = foldEngine.stepCounter;
+const result = foldEngine.executeUnstructuredContraction('p0');
+if (result.success) throw new Error('Unsafe one-place fallback executed');
+if (foldEngine.stepCounter !== stepCounter || JSON.stringify(cy.elements().jsons()) !== before) {
+  throw new Error('Refused fallback changed graph state or allocated a component ID');
 }
-
-const res = foldEngine.executeUnstructuredContraction(cands[0]);
-if (!res.success) {
-  throw new Error('Unstructured fallback contraction failed: ' + res.message);
-}
-
-// Single place p0 remains on canvas
-if (cy.getElementById('p0').length !== 1) {
-  throw new Error('p0 should remain on canvas');
-}
-
-// Opaque component created with looping arcs
-const c01 = cy.getElementById('c_01');
-if (c01.length === 0) throw new Error('c_01 was not created');
-if (c01.data('component_type') !== 'Unstructured') throw new Error('Expected component_type Unstructured');
-
-const inEdges = c01.incomers('edge');
-const outEdges = c01.outgoers('edge');
-if (inEdges.length !== 1 || inEdges[0].source().id() !== 'p0') {
-  throw new Error('Expected incoming arc p0 -> c_01');
-}
-if (outEdges.length !== 1 || outEdges[0].target().id() !== 'p0') {
-  throw new Error('Expected outgoing arc c_01 -> p0');
-}
-
-const result = {
-  tau: c01.data('tau'),
-  omega: c01.data('omega')
-};
-console.log(JSON.stringify(result));
+console.log('PASS');
 """
         node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_SINGLE_PLACE_NET_JSON, test_logic)
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
-        js_data = json.loads(proc.stdout.strip())
+        self.assertIn("PASS", proc.stdout)
 
-        self.assertEqual(js_data["tau"], expected_tau)
-        self.assertEqual(js_data["omega"], expected_omega)
+    def test_unstructured_candidate_revalidated_before_execution_headless(self):
+        """Stale internal candidates are refused before the viewer mutates or advances IDs."""
+        test_logic = """
+const candidate = foldEngine.detectUnstructured()[0];
+if (!candidate) throw new Error('Expected an initially eligible knot');
+cy.add({ group: 'nodes', data: { id: 'p_exit', label: 'p_exit', initial_tokens: 0 }, position: { x: 900, y: 900 }, classes: 'place' });
+cy.add({ group: 'edges', data: { id: 'stale_crossing', source: 't1', target: 'p_exit', weight: 1 }, classes: 'arc' });
+const before = JSON.stringify(cy.elements().jsons());
+const stepCounter = foldEngine.stepCounter;
+const result = foldEngine.executeUnstructuredContraction(candidate);
+if (result.success || !result.message.includes('crossing outgoing interface')) {
+  throw new Error('Stale candidate was not rejected with an interface reason: ' + result.message);
+}
+if (foldEngine.stepCounter !== stepCounter || JSON.stringify(cy.elements().jsons()) !== before) {
+  throw new Error('Refusal changed graph state or allocated a component ID');
+}
+console.log('PASS');
+"""
+        node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_IRREDUCIBLE_NET_JSON, test_logic)
+        proc = _run_node_script(node_script)
+        self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
 
     def test_unstructured_custom_config_respected_headless(self):
         """Validates that LiveFoldReductionEngine respects custom unstructured Fold Config penalty weight matching Python."""
         from code2petri.model import PetriNet
         from code2petri.fold import fold_unstructured, FoldConfig
 
-        # 1. Python calculation with unstructured=14.0
+        # 1. Python calculation on a valid single-exit unstructured knot.
         py_net = PetriNet()
-        p0 = py_net.add_place("p0", initial_tokens=1)
+        p_start = py_net.add_place("p_start", initial_tokens=1)
+        p_in = py_net.add_place("p_knot_in")
+        p1 = py_net.add_place("p_k1")
+        p2 = py_net.add_place("p_k2")
+        p_out = py_net.add_place("p_knot_out")
+        p_end = py_net.add_place("p_end")
+        head = py_net.add_transition("t_head")
         t1 = py_net.add_transition("t1")
         t2 = py_net.add_transition("t2")
-        py_net.add_arc(p0, t1)
-        py_net.add_arc(t1, p0)
-        py_net.add_arc(p0, t2)
-        py_net.add_arc(t2, p0)
+        t3 = py_net.add_transition("t3")
+        t4 = py_net.add_transition("t4")
+        tail = py_net.add_transition("t_tail")
+        for source, target in [
+            (p_start, head), (head, p_in), (p_in, t1), (p_in, t2),
+            (t1, p1), (t2, p2), (p1, t3), (p2, t3), (p1, t4),
+            (t3, p_out), (t4, p2), (p_out, tail), (tail, p_end),
+        ]:
+            py_net.add_arc(source, target)
 
         py_folded, py_step = fold_unstructured(py_net, step_number=1, config=FoldConfig(unstructured=14.0))
         self.assertIsNotNone(py_step)
@@ -3838,7 +3828,7 @@ const result = {
 };
 console.log(JSON.stringify(result));
 """
-        node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_SINGLE_PLACE_NET_JSON, test_logic)
+        node_script = _setup_live_fold_test_harness(self.UNSTRUCTURED_KNOT_NET_JSON, test_logic)
         proc = _run_node_script(node_script)
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         js_data = json.loads(proc.stdout.strip())
@@ -5247,6 +5237,46 @@ console.log('PASS');
         self.assertEqual(len(arcs), 2)
         arc_pairs = {(a.attrib.get("source"), a.attrib.get("target")) for a in arcs}
         self.assertEqual(arc_pairs, {("p0", "t0"), ("t0", "p1")})
+
+    def test_client_side_pnml_export_carries_incomplete_status(self):
+        net_literal = """{
+  places: [
+    { id: 'p_start', label: 'start', initial_tokens: 1 },
+    { id: 'p_return', label: 'return' },
+    { id: 'p_exception', label: 'exception' }
+  ],
+  transitions: [
+    { id: 't_return', label: 'return', tau: 1 },
+    { id: 't_raise', label: 'raise', tau: 1 }
+  ],
+  arcs: [
+    { source: 'p_start', target: 't_return' },
+    { source: 't_return', target: 'p_return' },
+    { source: 'p_start', target: 't_raise' },
+    { source: 't_raise', target: 'p_exception' }
+  ]
+}"""
+        test_logic = """
+const xml = serializeToPnml(cy, 'Incomplete', {
+  reductionOutcome: 'incomplete', finalSmAvailable: false,
+  accumulatedReductionWeight: 22, incompleteReason: 'Two exit places remain.'
+});
+console.log('___XML_START___' + xml + '___XML_END___');
+console.log('PASS');
+"""
+        root, _, _ = self._run_pnml_export_test(net_literal, test_logic)
+        net_el = root.find("{http://www.pnml.org/version-2009/grammar/pnml}net")
+        place_ids = {place.attrib.get("id") for place in net_el.iter() if place.tag.endswith("place")}
+        self.assertEqual(place_ids, {"p_start", "p_return", "p_exception"})
+        properties = {
+            prop.attrib.get("name"): prop.attrib.get("value")
+            for prop in net_el.iter()
+            if prop.tag.endswith("property")
+        }
+        self.assertEqual(properties["reduction_outcome"], "incomplete")
+        self.assertEqual(properties["final_sm_available"], "false")
+        self.assertEqual(properties["accumulated_reduction_weight"], "22")
+        self.assertEqual(properties["incomplete_reason"], "Two exit places remain.")
 
     def test_client_side_pnml_export_after_live_fold_reduction_headless(self):
         """Validates that PNML export accurately reflects live fold reductions (Ticket 42)."""
@@ -7609,6 +7639,60 @@ console.log('PASS');
 
 
 class TestFoldStateSnapshotValidation(unittest.TestCase):
+    def test_reduction_outcome_snapshot_round_trip_and_validation(self):
+        script = r"""
+const { parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+function snapshot(reductionFields) {
+  const document = Object.assign({
+    title: 'Example', sourceFile: '/src/example.py', filename: 'example.py',
+    functionName: 'answer', mode: 'fold',
+    originalNet: { places: [], transitions: [], arcs: [] }, compounds: [], foldSteps: [],
+    calleeNets: {}, expandedNodes: [], playback: { currentStep: 0, totalSteps: 0 }
+  }, reductionFields || {});
+  return { schemaVersion: 1, snapshotType: 'code2petri-fold-state', elements: [],
+    engine: { stepCounter: 0, cfg: {}, rememberedCustomNames: [] },
+    viewport: { zoom: 1, pan: { x: 0, y: 0 } }, document };
+}
+const legacy = parseFoldStateSnapshot(snapshot());
+if (Object.prototype.hasOwnProperty.call(legacy.document, 'reductionOutcome')) {
+  throw new Error('Legacy snapshot was assigned unsupported completion evidence');
+}
+const incomplete = parseFoldStateSnapshot(snapshot({
+  finalSm: null, reductionOutcome: 'incomplete', finalSmAvailable: false,
+  accumulatedReductionWeight: 22, incompleteReason: 'Two exit places remain.'
+}));
+if (incomplete.document.accumulatedReductionWeight !== 22 ||
+    incomplete.document.reductionOutcome !== 'incomplete' || incomplete.document.finalSm !== null) {
+  throw new Error('Incomplete reduction evidence did not round-trip');
+}
+const complete = parseFoldStateSnapshot(snapshot({
+  finalSm: 13, reductionOutcome: 'completed_unstructured', finalSmAvailable: true,
+  accumulatedReductionWeight: 13, incompleteReason: null
+}));
+if (complete.document.finalSm !== 13 || !complete.document.finalSmAvailable) {
+  throw new Error('Completed reduction evidence did not round-trip');
+}
+for (const fields of [
+  { finalSm: 0, reductionOutcome: 'incomplete', finalSmAvailable: false,
+    accumulatedReductionWeight: 22, incompleteReason: 'Two exits remain.' },
+  { finalSm: null, reductionOutcome: 'incomplete', finalSmAvailable: false,
+    accumulatedReductionWeight: 22, incompleteReason: '' },
+  { finalSm: null, reductionOutcome: 'completed_structured', finalSmAvailable: true,
+    accumulatedReductionWeight: 13, incompleteReason: null },
+  { finalSm: null, reductionOutcome: 'unknown', finalSmAvailable: false,
+    accumulatedReductionWeight: NaN, incompleteReason: null }
+]) {
+  let rejected = false;
+  try { parseFoldStateSnapshot(snapshot(fields)); }
+  catch (error) { rejected = error.message.includes('Invalid Fold State Snapshot'); }
+  if (!rejected) throw new Error('Malformed reduction outcome metadata was accepted');
+}
+console.log('PASS');
+""";
+        proc = _run_node_script(script)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("PASS", proc.stdout)
+
     def test_return_metadata_validation_accepts_old_records_and_rejects_malformed(self):
         script = r"""
 const { parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
@@ -7726,6 +7810,10 @@ console.log('PASS');
         from code2petri.viewer import _load_template
 
         html = _load_template()
+        self.assertIn("reductionOutcome: reductionOutcome", html)
+        self.assertIn("typeof doc.reductionOutcome === 'string' ? doc.reductionOutcome : 'unknown'", html)
+        self.assertIn("const retainedNet = stepNets[totalSteps] || initialNet", html)
+        self.assertIn("calculateNetReductionWeight(stepNets[totalSteps] || originalNet)", html)
         self.assertIn('id="btn-open-session"', html)
         self.assertIn('id="input-open-session" type="file" accept=".json,application/json"', html)
         self.assertIn("restoreFoldStateSnapshot(parseFoldStateSnapshot(reader.result))", html)
@@ -7815,6 +7903,9 @@ const totalSteps = 0;
 const currentStep = 0;
 const calleeNetsMap = {};
 const expandedNodes = new Map();
+const reductionOutcome = null;
+const stepNets = [initialNet];
+function calculateNetReductionWeight(net) { return (net.transitions || []).length; }
 __CONTEXT_FUNCTION__
 const context = getFoldStateDocumentContext();
 if (context.functionName !== 'module.Processor.run') throw new Error('Snapshot lost the explicit active function identity');
@@ -7880,6 +7971,7 @@ const closeInspector = () => { closedInspector++; };
 const updateFoldableHighlights = () => {};
 const updateBatchPlaceFoldControls = () => {};
 const updateUI = () => {};
+const updateScoreBadge = () => {};
 global.document = { title: '', querySelector: () => ({ textContent: '' }) };
 __RESTORE_FUNCTION__
 restoreFoldStateSnapshot(snapshot);
@@ -7888,6 +7980,7 @@ if (layoutCount !== 0) throw new Error('Restore unexpectedly ran a layout');
 if (viewport.zoom !== 1.5 || viewport.pan.x !== 20 || viewport.pan.y !== -8) throw new Error('Viewport was not restored');
 if (restoredSidebarVisible !== true || restoreSequence.join(',') !== 'sidebar,viewport') throw new Error('Old snapshot did not default to shown layout before restoring camera');
 if (payload.title !== 'Restored Doc' || global.document.title !== 'Restored Doc - code2petri Viewer') throw new Error('Document identity was not restored');
+if (reductionOutcome !== null) throw new Error('Composite session was assigned a fold completion outcome');
 if (foldEngine.stepCounter !== 5 || foldEngine.cfg.choice !== 2 || !foldEngine.rememberedCustomNames.has('c_05')) throw new Error('Engine state was not restored');
 if (initialNet.places[0].id !== 'start' || !calleeNetsMap.helper || closedInspector !== 1) throw new Error('Document context or inspector state was not restored');
 if (historyClearCalls !== 1) throw new Error('Successful Open Session did not clear viewer action history');

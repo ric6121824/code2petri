@@ -7,7 +7,7 @@ from typing import Optional, List, Sequence, Set, Union
 
 from code2petri.model import PetriNet
 from code2petri.symbol_table import SymbolTable, SUPPORTED_WALKERS
-from code2petri.fold import FoldConfig, FoldResult, fold_net
+from code2petri.fold import FoldConfig, FoldResult, ReductionOutcome, fold_net
 from code2petri.inline import inline_expand, precompute_callee_nets
 from code2petri.viewer import generate_html
 
@@ -260,7 +260,16 @@ def code2petri(
 
         logger.info("Executing structural fold analysis...")
         fold_result = fold_net(net, config=fold_config)
-        sys.stderr.write(f"Code2Petri: SM score = {fold_result.final_sm}\n")
+        if fold_result.outcome == ReductionOutcome.INCOMPLETE:
+            status = (
+                "Code2Petri: Final SM unavailable—reduction incomplete. "
+                f"Accumulated Reduction Weight = {fold_result.accumulated_weight:g}."
+            )
+            if fold_result.incomplete_reason:
+                status += f" Reason: {fold_result.incomplete_reason}."
+            sys.stderr.write(status + "\n")
+        else:
+            sys.stderr.write(f"Code2Petri: SM score = {fold_result.final_sm}\n")
         sys.stderr.flush()
 
     if output_file:
