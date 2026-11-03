@@ -416,7 +416,7 @@ if (!pnml.includes('id="t_call__helper_return"') || !pnml.includes('id="t_call__
   throw new Error('PNML did not preserve expanded outcome transitions while omitting the presentation container');
 }
 const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
-const session = parseFoldStateSnapshot(serializeFoldStateSnapshot({
+const serializedRefoldSession = serializeFoldStateSnapshot({
   cy,
   engine: foldEngine,
   document: {
@@ -424,7 +424,8 @@ const session = parseFoldStateSnapshot(serializeFoldStateSnapshot({
     originalNet: net, compounds: [], foldSteps: [], calleeNets: calleeNetsMap,
     expandedNodes: Array.from(expandedNodes.entries()), playback: { currentStep: 0, totalSteps: 0 }
   }
-}));
+});
+const session = parseFoldStateSnapshot(serializedRefoldSession);
 const savedRestore = JSON.stringify(expandedNodes.get('t_call').restoreElements);
 expandedNodes.clear();
 session.document.expandedNodes.forEach(entry => expandedNodes.set(entry[0], entry[1]));
@@ -459,6 +460,217 @@ if (!viewerActionHistory.redo() || expandedNodes.has('t_call')) {
 if (!viewerActionHistory.undo() || !viewerActionHistory.undo() || expandedNodes.has('t_call')) {
   throw new Error('Undo did not restore the original unexpanded call');
 }
+"""
+        script = _setup_live_fold_test_harness(net_literal, logic)
+        result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_fold_entire_function_refolds_two_outcome_call(self):
+        net_literal = """{
+  places: [{ id: 'p_in', label: 'in', initial_tokens: 1 }, { id: 'p_out', label: 'out' }, { id: 'p_error', label: 'error' }],
+  transitions: [
+    { id: 't_call', label: 'helper()' },
+    { id: 't_call_error', label: 'exception: helper()', metadata: { exception_alternative: true, exception_alternative_of: 't_call' } }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_call' }, { source: 't_call', target: 'p_out' },
+    { source: 'p_in', target: 't_call_error' }, { source: 't_call_error', target: 'p_error' }
+  ]
+}"""
+        logic = r"""
+global.trackScoreState = true;
+global.reductionOutcome = 'completed_structured';
+global.payload = { final_sm: 3, final_sm_available: true, incomplete_reason: null };
+const call = cy.getElementById('t_call');
+call.data('resolved', true);
+call.data('resolved_to', 'helper');
+call.data('raw_label', 'helper()');
+calleeNetsMap.helper = {
+  places: [
+    { id: 'helper_start', label: 'start', metadata: { boundary_role: 'source' } },
+    { id: 'helper_return_end', label: 'end', metadata: { boundary_role: 'normal_exit' } },
+    { id: 'helper_exception_end', label: 'exception_end', metadata: { boundary_role: 'exceptional_exit' } }
+  ],
+  transitions: [{ id: 'helper_return', label: 'return' }, { id: 'helper_raise', label: 'raise' }],
+  arcs: [
+    { source: 'helper_start', target: 'helper_return' }, { source: 'helper_return', target: 'helper_return_end' },
+    { source: 'helper_start', target: 'helper_raise' }, { source: 'helper_raise', target: 'helper_exception_end' }
+  ]
+};
+call.emit('tap');
+if (!expandedNodes.has('t_call')) throw new Error('setup failed to expand the two-outcome call');
+const beforeRefold = JSON.stringify(cy.elements().jsons());
+if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('expanded call did not expose Fold Entire Function');
+const actualFoldEntireFunction = handleFoldEntireFunction;
+let result = null;
+handleFoldEntireFunction = function(node) {
+  result = actualFoldEntireFunction(node);
+  return result;
+};
+hudBtnFoldEntireFunction.click();
+if (!result || !result.success) throw new Error('Fold Entire Function did not refold an eligible two-outcome call: ' + JSON.stringify(result));
+if (result.complete !== true) throw new Error('successful call refolding was conflated with score availability');
+if (result.reductionOutcome !== 'incomplete' || result.finalSmAvailable !== false) {
+  throw new Error('the Fold Entire Function result conflated graph completion with score availability');
+}
+if (reductionOutcome !== 'incomplete' || payload.final_sm !== null || payload.final_sm_available !== false) {
+  throw new Error('refolded call claimed an unvalidated final SM');
+}
+if (inspectorSm.textContent !== 'Unavailable') throw new Error('inspector presented a numeric final SM for the refolded call');
+if (expandedNodes.has('t_call')) throw new Error('refold left the call marked as expanded');
+if (cy.getElementById('t_call').data('is_expansion_container') === true) throw new Error('refold left the presentation container expanded');
+if (!cy.getElementById('t_call_error').length) throw new Error('refold lost the exceptional caller alternative');
+if (cy.getElementById('t_call').data('tau') !== 2 || cy.getElementById('t_call_error').data('tau') !== 0) {
+  throw new Error('the retained accumulated weight was not counted once across alternatives');
+}
+if (cy.getElementById('t_call__helper_return').length || cy.getElementById('t_call__helper_raise').length) {
+  throw new Error('refold left callee outcome transitions exposed');
+}
+if (viewerActionHistory.undoStack.length !== 2) throw new Error('expansion and refolding were not each one history gesture');
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const serializedRefoldSession = serializeFoldStateSnapshot({
+  cy, engine: foldEngine,
+  document: {
+    title: 'Refolded call', sourceFile: 'sample.py', filename: 'sample.py', functionName: '', mode: 'composite',
+    originalNet: net, compounds: [], foldSteps: [], calleeNets: calleeNetsMap,
+    expandedNodes: Array.from(expandedNodes.entries()), playback: { currentStep: 0, totalSteps: 0 },
+    reductionOutcome: reductionOutcome, finalSm: null, finalSmAvailable: false,
+    accumulatedReductionWeight: foldEngine.calculateSMScore(), incompleteReason: payload.incomplete_reason
+  }
+});
+const session = parseFoldStateSnapshot(serializedRefoldSession);
+const savedCall = session.elements.find(element => element.group === 'nodes' && element.data.id === 't_call');
+if (!savedCall || !savedCall.data.function_restoration || !savedCall.data.function_restoration.elements.length) {
+  throw new Error('save/open did not retain call-local restoration data');
+}
+if (session.document.reductionOutcome !== 'incomplete' || session.document.finalSm !== null) {
+  throw new Error('save/open claimed a final score for the refolded multi-exit call');
+}
+const malformedRefoldSession = JSON.parse(JSON.stringify(serializedRefoldSession));
+malformedRefoldSession.elements.find(element => element.group === 'nodes' && element.data.id === 't_call')
+  .data.function_restoration.version = 2;
+let malformedRefoldRejected = false;
+try { parseFoldStateSnapshot(malformedRefoldSession); }
+catch (error) { malformedRefoldRejected = /function_restoration/.test(error.message); }
+if (!malformedRefoldRejected) throw new Error('session parser accepted an unsupported call-restoration version');
+const pnmlExporter = require('./code2petri/viewer/engine/pnml_exporter.js');
+const pnml = pnmlExporter.serializeToPnml(cy, 'Refolded call', {
+  includeTools: true,
+  reductionOutcome: reductionOutcome,
+  finalSmAvailable: false,
+  accumulatedReductionWeight: foldEngine.calculateSMScore(),
+  incompleteReason: payload.incomplete_reason
+});
+if (!pnml.includes('id="t_call"') || !pnml.includes('id="t_call_error"') ||
+    pnml.includes('t_call__helper_return') || pnml.includes('t_call__helper_raise')) {
+  throw new Error('PNML did not export the opaque call and both separate caller outcomes');
+}
+if (!pnml.includes('name="final_sm_available" value="false"') || pnml.includes('name="final_sm" value=')) {
+  throw new Error('PNML claimed a final SM for the refolded multi-outcome call');
+}
+btnExportPnml.click();
+if (!lastCreatedBlob || !lastCreatedBlob.content.includes('id="t_call"') ||
+    !lastCreatedBlob.content.includes('id="t_call_error"') ||
+    !lastCreatedBlob.content.includes('name="final_sm_available" value="false"') ||
+    lastCreatedBlob.content.includes('name="final_sm" value=')) {
+  throw new Error('the production export action did not export the live refolded graph with unavailable score metadata');
+}
+if (!handleRightClickUnfold(cy.getElementById('t_call'))) throw new Error('Component-Local Unfold could not restore the refolded call');
+if (JSON.stringify(cy.elements().jsons()) !== beforeRefold) throw new Error('local Unfold did not restore the exact pre-refold graph');
+if (reductionOutcome !== 'completed_structured' || payload.final_sm !== 3 || payload.final_sm_available !== true) {
+  throw new Error('local Unfold did not restore the pre-action score-availability state');
+}
+if (!viewerActionHistory.undo() || expandedNodes.has('t_call')) throw new Error('Undo did not restore the refolded call');
+if (!viewerActionHistory.redo() || !expandedNodes.has('t_call')) throw new Error('Redo did not restore local Unfold from the recorded state');
+"""
+        script = _setup_live_fold_test_harness(net_literal, logic)
+        result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_fold_entire_function_refolds_backend_inlined_occurrence(self):
+        net_literal = """{
+  compounds: [{
+    id: 'compound_helper', label: 'helper()', function_name: 'helper', parent: null,
+    call_refolding: {
+      version: 1,
+      call_transition: { id: 't_call', label: 'helper()', metadata: { resolved: true, resolved_to: 'helper' }, resolved: true, resolved_to: 'helper' },
+      exception_transitions: [{ id: 't_call_error', label: 'exception: helper()', metadata: { exception_alternative: true, exception_alternative_of: 't_call' } }],
+      call_input_arcs: [{ source: 'p_in', target: 't_call', weight: 1 }],
+      call_output_arcs: [{ source: 't_call', target: 'p_out', weight: 1 }],
+      exception_input_arcs: [{ source: 'p_in', target: 't_call_error', weight: 1 }],
+      exception_output_arcs: [{ source: 't_call_error', target: 'p_error', weight: 1 }]
+    }
+  }],
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 }, { id: 'p_out', label: 'out' },
+    { id: 'p_error', label: 'error' }, { id: 'p_helper', label: 'helper state', parent: 'compound_helper' }
+  ],
+  transitions: [
+    { id: 't_helper_return', label: 'return', parent: 'compound_helper' },
+    { id: 't_helper_raise', label: 'raise', parent: 'compound_helper' }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_helper_return' }, { source: 't_helper_return', target: 'p_out' },
+    { source: 'p_in', target: 't_helper_raise' }, { source: 't_helper_raise', target: 'p_error' }
+  ]
+}"""
+        logic = r"""
+function normalizedGraph() {
+  return JSON.stringify(cy.elements().jsons().map(element => {
+    const copy = JSON.parse(JSON.stringify(element));
+    delete copy.selected;
+    return copy;
+  }).sort((left, right) => left.data.id.localeCompare(right.data.id)));
+}
+global.trackScoreState = true;
+global.reductionOutcome = 'completed_structured';
+global.payload = { final_sm: 2, final_sm_available: true, incomplete_reason: null };
+const beforeRefold = normalizedGraph();
+const backendCompound = cy.getElementById('compound_helper');
+if (!backendCompound.data('call_refolding')) throw new Error('compound call restoration metadata did not reach the viewer');
+backendCompound.emit('tap');
+if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('inlined call did not expose Fold Entire Function');
+const actualFoldEntireFunction = handleFoldEntireFunction;
+let result = null;
+handleFoldEntireFunction = function(node) {
+  result = actualFoldEntireFunction(node);
+  return result;
+};
+hudBtnFoldEntireFunction.click();
+if (!result || !result.success || result.complete !== true || result.reductionOutcome !== 'incomplete' || result.finalSmAvailable !== false) {
+  throw new Error('backend inlined occurrence did not refold with separate score status: ' + JSON.stringify(result));
+}
+if (cy.getElementById('compound_helper').length || cy.getElementById('p_helper').length ||
+    cy.getElementById('t_helper_return').length || cy.getElementById('t_helper_raise').length) {
+  throw new Error('backend refold retained the inlined callee subnet');
+}
+if (!cy.getElementById('t_call').length || !cy.getElementById('t_call_error').length) {
+  throw new Error('backend refold did not restore both call alternatives');
+}
+if (!cy.edges().some(edge => edge.source().id() === 't_call' && edge.target().id() === 'p_out') ||
+    !cy.edges().some(edge => edge.source().id() === 't_call_error' && edge.target().id() === 'p_error')) {
+  throw new Error('backend refold lost the original normal or exception destination');
+}
+if (reductionOutcome !== 'incomplete' || payload.final_sm !== null || payload.final_sm_available !== false) {
+  throw new Error('backend multi-outcome call claimed an unvalidated final SM');
+}
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const backendSession = parseFoldStateSnapshot(serializeFoldStateSnapshot({
+  cy, engine: foldEngine,
+  document: {
+    title: 'Backend refolded call', sourceFile: 'sample.py', filename: 'sample.py', functionName: '', mode: 'composite',
+    originalNet: net, compounds: net.compounds, foldSteps: [], calleeNets: {},
+    expandedNodes: Array.from(expandedNodes.entries()), playback: { currentStep: 0, totalSteps: 0 },
+    reductionOutcome: reductionOutcome, finalSm: null, finalSmAvailable: false,
+    accumulatedReductionWeight: foldEngine.calculateSMScore(), incompleteReason: payload.incomplete_reason
+  }
+}));
+if (backendSession.elements.find(element => element.data.id === 't_call').data.function_restoration.elements
+    .find(element => element.data.id === 'compound_helper').data.call_refolding.version !== 1) {
+  throw new Error('backend call provenance did not survive a session snapshot');
+}
+if (!handleRightClickUnfold(cy.getElementById('t_call'))) throw new Error('backend refold could not be locally unfolded');
+if (normalizedGraph() !== beforeRefold) throw new Error('backend local Unfold did not restore the exact inlined graph');
 """
         script = _setup_live_fold_test_harness(net_literal, logic)
         result = self.run_node(script)

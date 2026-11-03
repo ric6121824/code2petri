@@ -111,6 +111,16 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     fold_entire_function_js = extract_function(
         "handleFoldEntireFunction", "\n\n      if (hudEls.foldEntireFunctionBtnEl)"
     )
+    fold_entire_function_button_js = re.search(
+        r"if \(hudEls\.foldEntireFunctionBtnEl\) \{.*?\n      \}", html, re.DOTALL
+    )
+    assert fold_entire_function_button_js is not None, "Could not extract Fold Entire Function button handler"
+    calculate_net_reduction_weight_js = extract_function(
+        "calculateNetReductionWeight", "\n\n      function updateScoreBadge("
+    )
+    export_current_viewer_graph_js = extract_function(
+        "exportCurrentViewerGraph", "\n\n      if (btnExportPnml)"
+    )
     current_graph_expansion_js = "\n".join([
         extract_function("findBoundaryPlaces", "\n\n      // Convert PetriNet dict to Cytoscape elements"),
         extract_function("currentGraphToNet", "\n      function buildCurrentGraphWithExpandedCall("),
@@ -136,6 +146,10 @@ global.captureViewport = captureViewport;
 global.computeAnchoredPan = computeAnchoredPan;
 global.restoreViewport = restoreViewport;
 global.alert = function(message) {{ throw new Error(message); }};
+
+global.reductionOutcome = null;
+global.payload = {{}};
+global.trackScoreState = false;
 
 {net_to_elements_js}
 {sese_js}
@@ -249,6 +263,17 @@ const hudBtnUnfold = {{
     }}
   }}
 }};
+const hudBtnFoldEntireFunction = {{
+  style: {{ display: 'none' }},
+  _listeners: {{}},
+  addEventListener: function(evt, cb) {{
+    this._listeners[evt] = this._listeners[evt] || [];
+    this._listeners[evt].push(cb);
+  }},
+  click: function() {{
+    if (this._listeners['click']) this._listeners['click'].forEach(cb => cb({{}}));
+  }}
+}};
 let dockedSidebarVisible = true;
 
 const document = {{
@@ -269,6 +294,7 @@ const document = {{
     if (id === 'val-sm') return valSm;
     if (id === 'hud-btn-contract-mg') return hudBtnContractMg;
     if (id === 'hud-btn-unfold') return hudBtnUnfold;
+    if (id === 'hud-btn-fold-entire-function') return hudBtnFoldEntireFunction;
     if (id === 'inspector-close' || id === 'btn-close-hud') return inspectorCloseBtn;
     if (id === 'btn-export-pnml') return btnExportPnml;
     if (id === 'info-filename') return infoFilename;
@@ -318,9 +344,12 @@ if (inspectorCloseBtn) {{
 
 {pnml_js}
 
+{calculate_net_reduction_weight_js}
+{export_current_viewer_graph_js}
+
 if (btnExportPnml) {{
   btnExportPnml.addEventListener('click', function(e) {{
-    exportClientSidePnml(cy);
+    exportCurrentViewerGraph();
   }});
 }}
 
@@ -350,7 +379,14 @@ viewerActionHistory = new ViewerActionHistory({{
     cfg: foldEngine.cfg,
     rememberedCustomNames: Array.from(foldEngine.rememberedCustomNames.entries()),
     expandedNodes: Array.from(expandedNodes.entries()),
-    currentStep
+    currentStep,
+    ...(global.trackScoreState ? {{
+      scoreState: true,
+      reductionOutcome: global.reductionOutcome,
+      incompleteReason: global.payload.incomplete_reason || null,
+      finalSm: global.payload.final_sm === undefined ? null : global.payload.final_sm,
+      finalSmAvailable: global.payload.final_sm_available === true
+    }} : {{}})
   }}),
   restoreContext: state => {{
     foldEngine.stepCounter = state.stepCounter;
@@ -359,6 +395,12 @@ viewerActionHistory = new ViewerActionHistory({{
     expandedNodes.clear();
     state.expandedNodes.forEach(entry => expandedNodes.set(entry[0], entry[1]));
     currentStep = state.currentStep;
+    if (global.trackScoreState && state.scoreState) {{
+      global.reductionOutcome = state.reductionOutcome;
+      global.payload.incomplete_reason = state.incompleteReason;
+      global.payload.final_sm = state.finalSm;
+      global.payload.final_sm_available = state.finalSmAvailable;
+    }}
   }},
   captureUi: () => ({{
     selectionIds: cy.nodes(':selected').map(node => node.id()),
@@ -389,6 +431,8 @@ updateFoldableHighlights();
 {fold_reduce_js}
 
 {fold_entire_function_js}
+const hudEls = _resolveHudElements();
+{fold_entire_function_button_js.group(0)}
 
 {get_selected_place_ids_js}
 {refresh_fold_action_view_js}

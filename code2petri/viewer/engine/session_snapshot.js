@@ -171,6 +171,73 @@
     }
   }
 
+  function _validateCallRefoldingRecord(record, description) {
+    if (!_isObject(record) || record.version !== 1) {
+      _invalidSnapshot(description + ' must be a version 1 call-refolding record');
+    }
+    const call = record.call_transition;
+    if (!_isObject(call)) _invalidSnapshot(description + '.call_transition must be an object');
+    _requireString(call.id, description + '.call_transition.id');
+    _requireString(call.label, description + '.call_transition.label');
+    if (call.metadata !== undefined && !_isObject(call.metadata)) {
+      _invalidSnapshot(description + '.call_transition.metadata must be an object');
+    }
+    if (call.metadata && call.metadata.call_results !== undefined) {
+      _validateCallResultRecords(call.metadata.call_results, description + '.call_transition.metadata.call_results', call.id);
+    }
+    if (call.metadata && call.metadata.function_return_evidence !== undefined) {
+      _validateFunctionReturnEvidence(
+        call.metadata.function_return_evidence,
+        description + '.call_transition.metadata.function_return_evidence'
+      );
+    }
+    if (!Array.isArray(record.exception_transitions)) {
+      _invalidSnapshot(description + '.exception_transitions must be an array');
+    }
+    const alternativeIds = new Set();
+    record.exception_transitions.forEach(function(transition, index) {
+      const path = description + '.exception_transitions[' + index + ']';
+      if (!_isObject(transition)) _invalidSnapshot(path + ' must be an object');
+      _requireString(transition.id, path + '.id');
+      _requireString(transition.label, path + '.label');
+      if (transition.id === call.id || alternativeIds.has(transition.id)) {
+        _invalidSnapshot(path + '.id duplicates another call transition');
+      }
+      alternativeIds.add(transition.id);
+      const metadata = transition.metadata;
+      if (!_isObject(metadata) || metadata.exception_alternative !== true ||
+          metadata.exception_alternative_of !== call.id) {
+        _invalidSnapshot(path + '.metadata does not identify the call alternative');
+      }
+    });
+    [
+      ['call_input_arcs', call.id, 'target'],
+      ['call_output_arcs', call.id, 'source'],
+      ['exception_input_arcs', alternativeIds, 'target'],
+      ['exception_output_arcs', alternativeIds, 'source']
+    ].forEach(function(specification) {
+      const key = specification[0];
+      const expectedNode = specification[1];
+      const role = specification[2];
+      const arcs = record[key];
+      if (!Array.isArray(arcs)) _invalidSnapshot(description + '.' + key + ' must be an array');
+      arcs.forEach(function(arc, index) {
+        const path = description + '.' + key + '[' + index + ']';
+        if (!_isObject(arc)) _invalidSnapshot(path + ' must be an object');
+        _requireString(arc.source, path + '.source');
+        _requireString(arc.target, path + '.target');
+        if (arc[role] !== expectedNode &&
+            !(expectedNode instanceof Set && expectedNode.has(arc[role]))) {
+          _invalidSnapshot(path + ' is connected to the wrong call outcome');
+        }
+        if (arc.weight !== undefined && arc.weight !== null && !Number.isFinite(Number(arc.weight))) {
+          _invalidSnapshot(path + '.weight must be numeric');
+        }
+      });
+    });
+    return { callId: call.id, alternativeIds: alternativeIds };
+  }
+
   function _requireFiniteNumber(value, description, positive) {
     if (typeof value !== 'number' || !Number.isFinite(value) || (positive && value <= 0)) {
       _invalidSnapshot(description + ' must be a finite ' + (positive ? 'positive ' : '') + 'number');
@@ -232,6 +299,9 @@
     if (record.data.function_return_evidence !== undefined) {
       _validateFunctionReturnEvidence(record.data.function_return_evidence, description + '.function_return_evidence');
     }
+    if (record.data.call_refolding !== undefined) {
+      _validateCallRefoldingRecord(record.data.call_refolding, description + '.call_refolding');
+    }
     if (record.group === 'edges') {
       _requireString(record.data.source, description + ' source');
       _requireString(record.data.target, description + ' target');
@@ -262,38 +332,114 @@
     if ((hasCanonicalRestoration || hasLegacyRestoration) && !_isObject(consumed)) {
       _invalidSnapshot('restoration record must be an object');
     }
-    if (!_isObject(consumed) || visited.has(consumed)) return;
-    visited.add(consumed);
-    ['nodes', 'consumedCompounds'].forEach(function(key) {
-      if (consumed[key] === undefined) return;
-      if (!Array.isArray(consumed[key])) _invalidSnapshot('restoration ' + key + ' must be an array');
-      consumed[key].forEach(function(child) {
-        _validateElementRecord(child, 'nodes', 'restoration node');
-        _collectRestorableNodes(child, nodeIds, componentIds, edgeReferences, visited, false);
-      });
-    });
-    if (consumed.internalEdges !== undefined) {
-      if (!Array.isArray(consumed.internalEdges)) _invalidSnapshot('restoration internalEdges must be an array');
-      consumed.internalEdges.forEach(function(edge) {
-        _validateElementRecord(edge, 'edges', 'restoration edge');
-        edgeReferences.push(edge.data.source, edge.data.target);
-      });
-    }
-    ['boundaryInArcs', 'boundaryOutArcs'].forEach(function(key) {
-      (consumed[key] || []).forEach(function(arc) {
-        if (!_isObject(arc)) _invalidSnapshot('restoration boundary arc must be an object');
-        ['sourceId', 'targetId'].forEach(function(field) {
-          _requireString(arc[field], 'restoration boundary arc ' + field);
-          edgeReferences.push(arc[field]);
+    if (_isObject(consumed) && !visited.has(consumed)) {
+      visited.add(consumed);
+      ['nodes', 'consumedCompounds'].forEach(function(key) {
+        if (consumed[key] === undefined) return;
+        if (!Array.isArray(consumed[key])) _invalidSnapshot('restoration ' + key + ' must be an array');
+        consumed[key].forEach(function(child) {
+          _validateElementRecord(child, 'nodes', 'restoration node');
+          _collectRestorableNodes(child, nodeIds, componentIds, edgeReferences, visited, false);
         });
-        ['originalSourceId', 'originalTargetId'].forEach(function(field) {
-          if (arc[field] !== undefined && arc[field] !== null) {
+      });
+      if (consumed.internalEdges !== undefined) {
+        if (!Array.isArray(consumed.internalEdges)) _invalidSnapshot('restoration internalEdges must be an array');
+        consumed.internalEdges.forEach(function(edge) {
+          _validateElementRecord(edge, 'edges', 'restoration edge');
+          edgeReferences.push(edge.data.source, edge.data.target);
+        });
+      }
+      ['boundaryInArcs', 'boundaryOutArcs'].forEach(function(key) {
+        (consumed[key] || []).forEach(function(arc) {
+          if (!_isObject(arc)) _invalidSnapshot('restoration boundary arc must be an object');
+          ['sourceId', 'targetId'].forEach(function(field) {
             _requireString(arc[field], 'restoration boundary arc ' + field);
             edgeReferences.push(arc[field]);
+          });
+          ['originalSourceId', 'originalTargetId'].forEach(function(field) {
+            if (arc[field] !== undefined && arc[field] !== null) {
+              _requireString(arc[field], 'restoration boundary arc ' + field);
+              edgeReferences.push(arc[field]);
+            }
+          });
+        });
+      });
+    }
+
+    if (data.call_refolding !== undefined) {
+      const callRefolding = _validateCallRefoldingRecord(
+        data.call_refolding, 'restoration node call_refolding'
+      );
+      const endpointRoles = [
+        ['call_input_arcs', 'source'],
+        ['call_output_arcs', 'target'],
+        ['exception_input_arcs', 'source'],
+        ['exception_output_arcs', 'target']
+      ];
+      endpointRoles.forEach(function(specification) {
+        (data.call_refolding[specification[0]] || []).forEach(function(arc) {
+          const endpoint = arc[specification[1]];
+          if (endpoint !== callRefolding.callId && !callRefolding.alternativeIds.has(endpoint)) {
+            edgeReferences.push(endpoint);
           }
         });
       });
-    });
+    }
+
+    const functionRestoration = data.function_restoration;
+    if (functionRestoration !== undefined) {
+      if (!_isObject(functionRestoration) || functionRestoration.version !== 1 ||
+          !Array.isArray(functionRestoration.elements) ||
+          !Array.isArray(functionRestoration.removeNodeIds) ||
+          !Array.isArray(functionRestoration.expandedNodes)) {
+        _invalidSnapshot('function_restoration has an unsupported or invalid shape');
+      }
+      const localNodeIds = new Set();
+      functionRestoration.elements.forEach(function(element) {
+        _validateElementRecord(element, null, 'function restoration element');
+        if (element.group === 'nodes') {
+          if (localNodeIds.has(element.data.id)) {
+            _invalidSnapshot('function_restoration contains duplicate node IDs');
+          }
+          localNodeIds.add(element.data.id);
+          _collectRestorableNodes(
+            element, nodeIds, componentIds, edgeReferences, visited, element.data.id === data.id
+          );
+        } else {
+          edgeReferences.push(element.data.source, element.data.target);
+        }
+      });
+      const removalIds = new Set();
+      functionRestoration.removeNodeIds.forEach(function(id) {
+        _requireString(id, 'function_restoration.removeNodeIds entry');
+        if (removalIds.has(id)) _invalidSnapshot('function_restoration repeats a removal node ID');
+        removalIds.add(id);
+      });
+      functionRestoration.expandedNodes.forEach(function(entry, index) {
+        const path = 'function_restoration.expandedNodes[' + index + ']';
+        if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string' || !_isObject(entry[1])) {
+          _invalidSnapshot(path + ' is invalid');
+        }
+        if (entry[1].restoreElements !== undefined) {
+          if (!Array.isArray(entry[1].restoreElements)) {
+            _invalidSnapshot(path + '.restoreElements must be an array');
+          }
+          entry[1].restoreElements.forEach(function(element) {
+            _validateElementRecord(element, null, path + '.restoreElements element');
+            if (element.group === 'edges') edgeReferences.push(element.data.source, element.data.target);
+          });
+        }
+      });
+      if (functionRestoration.analysis !== undefined && functionRestoration.analysis !== null) {
+        const analysis = functionRestoration.analysis;
+        if (!_isObject(analysis) ||
+            (analysis.reductionOutcome !== null && analysis.reductionOutcome !== undefined &&
+             !['completed_structured', 'completed_unstructured', 'incomplete', 'unknown']
+               .includes(analysis.reductionOutcome))) {
+          _invalidSnapshot('function_restoration.analysis is invalid');
+        }
+      }
+    }
   }
 
   function _validateDocumentContext(documentContext) {

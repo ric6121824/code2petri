@@ -33,6 +33,7 @@ class CompoundContainer:
     parent: Optional[str] = None
     node_ids: Optional[Set[str]] = None
     function_ref: Optional[str] = None
+    call_refolding: Optional[Dict[str, Any]] = None
 
     def __post_init__(self) -> None:
         if self.node_ids is None:
@@ -48,6 +49,8 @@ class CompoundContainer:
         }
         if self.function_ref:
             record["function_ref"] = self.function_ref
+        if self.call_refolding is not None:
+            record["call_refolding"] = json.loads(json.dumps(self.call_refolding))
         return record
 
 
@@ -477,6 +480,7 @@ class PetriNet:
         parent: Optional[str] = None,
         node_ids: Optional[Set[str]] = None,
         function_ref: Optional[str] = None,
+        call_refolding: Optional[Dict[str, Any]] = None,
     ) -> CompoundContainer:
         """Registers a compound node representing an inlined function container."""
         for c in self.compounds:
@@ -490,6 +494,7 @@ class PetriNet:
             parent=parent,
             node_ids=set(node_ids) if node_ids else set(),
             function_ref=function_ref,
+            call_refolding=json.loads(json.dumps(call_refolding)) if call_refolding is not None else None,
         )
         self.compounds.append(compound)
         return compound
@@ -651,6 +656,7 @@ class PetriNet:
                 parent=c.parent,
                 node_ids=set(c.node_ids) if c.node_ids else set(),
                 function_ref=c.function_ref,
+                call_refolding=json.loads(json.dumps(c.call_refolding)) if c.call_refolding is not None else None,
             )
             for c in self.compounds
         ]
