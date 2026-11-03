@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 import os
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -98,6 +99,135 @@ def _decorate_node_hierarchy(
         meta["enclosing_function"] = fn_name
 
 
+def _occurrence_call_refolding_record(
+    caller_net: PetriNet,
+    call_transition: Transition,
+    exception_alternatives: List[Transition],
+    callee_has_exception_exit: bool,
+    exception_postset_places: List[Place],
+    caller_parent: Optional[str],
+) -> Dict[str, Any]:
+    """Capture a call occurrence's external interface before it is spliced away."""
+    call_input_arcs = [
+        arc.to_dict() for arc in caller_net.arcs if arc.target.id == call_transition.id
+    ]
+    call_output_arcs = [
+        arc.to_dict() for arc in caller_net.arcs if arc.source.id == call_transition.id
+    ]
+    exception_input_arcs = [
+        arc.to_dict() for arc in caller_net.arcs
+        if any(arc.target.id == transition.id for transition in exception_alternatives)
+    ]
+    exception_output_arcs = [
+        arc.to_dict() for arc in caller_net.arcs
+        if any(arc.source.id == transition.id for transition in exception_alternatives)
+    ]
+    exception_records = [transition.to_dict() for transition in exception_alternatives]
+
+    # The inliner may create an exceptional caller boundary when the source call
+    # had no paired alternative. Retain a separate alternative for later refolding.
+    if callee_has_exception_exit and not exception_records and exception_postset_places:
+        exception_id = f"{call_transition.id}__exception"
+        existing_ids = {transition.id for transition in caller_net.transitions}
+        suffix = 2
+        while exception_id in existing_ids:
+            exception_id = f"{call_transition.id}__exception_{suffix}"
+            suffix += 1
+        exception_records.append({
+            "id": exception_id,
+            "label": f"exception: {call_transition.label}",
+            "line_number": call_transition.line_number,
+            "metadata": {
+                "exception_alternative": True,
+                "exception_alternative_of": call_transition.id,
+                "parent": caller_parent,
+            },
+            "parent": caller_parent,
+        })
+        exception_input_arcs = [
+            {"source": arc["source"], "target": exception_id, "weight": arc["weight"]}
+            for arc in call_input_arcs
+        ]
+        exception_output_arcs = [
+            {"source": exception_id, "target": place.id, "weight": 1}
+            for place in exception_postset_places
+        ]
+
+    return {
+        "version": 1,
+        "call_transition": call_transition.to_dict(),
+        "exception_transitions": exception_records,
+        "call_input_arcs": call_input_arcs,
+        "call_output_arcs": call_output_arcs,
+        "exception_input_arcs": exception_input_arcs,
+        "exception_output_arcs": exception_output_arcs,
+    }
+
+
+def _prefix_occurrence_call_refolding(
+    record: Optional[Dict[str, Any]],
+    prefix: str,
+    fallback_parent: str,
+    source_place_id: str,
+    preset_places: List[Place],
+    sink_postsets: Dict[str, List[Place]],
+) -> Optional[Dict[str, Any]]:
+    """Remap a nested occurrence restoration record along with its cloned subnet."""
+    if not isinstance(record, dict) or record.get("version") != 1:
+        return None
+
+    def clone_transition(transition: Dict[str, Any]) -> Dict[str, Any]:
+        result = json.loads(json.dumps(transition))
+        original_id = result["id"]
+        result["id"] = prefix + original_id
+        parent = result.get("parent") or (result.get("metadata") or {}).get("parent")
+        mapped_parent = prefix + parent if parent else fallback_parent
+        result["parent"] = mapped_parent
+        metadata = dict(result.get("metadata") or {})
+        call_results = metadata.get("call_results")
+        if isinstance(call_results, list):
+            metadata["call_results"] = [
+                {**record, "transition_id": prefix + str(record.get("transition_id", original_id))}
+                if isinstance(record, dict) else record
+                for record in call_results
+            ]
+        metadata["parent"] = mapped_parent
+        owner_id = metadata.get("exception_alternative_of")
+        if owner_id:
+            metadata["exception_alternative_of"] = prefix + owner_id
+        result["metadata"] = metadata
+        return result
+
+    def map_arc(arc: Dict[str, Any]) -> List[Dict[str, Any]]:
+        source_id = arc["source"]
+        target_id = arc["target"]
+        sources = (
+            [place.id for place in preset_places]
+            if source_id == source_place_id else [prefix + source_id]
+        )
+        targets = (
+            [place.id for place in sink_postsets[target_id]]
+            if target_id in sink_postsets else [prefix + target_id]
+        )
+        return [
+            {"source": source, "target": target, "weight": arc.get("weight", 1)}
+            for source in sources for target in targets
+        ]
+
+    cloned = {
+        "version": 1,
+        "call_transition": clone_transition(record["call_transition"]),
+        "exception_transitions": [clone_transition(item) for item in record.get("exception_transitions", [])],
+    }
+    for arc_key in (
+        "call_input_arcs", "call_output_arcs", "exception_input_arcs", "exception_output_arcs"
+    ):
+        cloned[arc_key] = [
+            mapped for arc in record.get(arc_key, []) for mapped in map_arc(arc)
+        ]
+    return cloned
+
+
 def _splice_callee_net(
     caller_net: PetriNet,
     call_transition: Transition,
@@ -181,6 +311,14 @@ def _splice_callee_net(
             idx += 1
 
     caller_parent = call_transition.parent
+    call_refolding = _occurrence_call_refolding_record(
+        caller_net=caller_net,
+        call_transition=call_transition,
+        exception_alternatives=exception_alternatives,
+        callee_has_exception_exit=callee_exception_sink is not None,
+        exception_postset_places=exception_postset_places,
+        caller_parent=caller_parent,
+    )
 
     # Register compound container in caller_net
     compound = caller_net.add_compound(
@@ -190,6 +328,7 @@ def _splice_callee_net(
         file=callee_file or "",
         parent=caller_parent,
         function_ref=function_ref,
+        call_refolding=call_refolding,
     )
 
     # Re-parent and register any nested compounds from callee_net
@@ -211,6 +350,14 @@ def _splice_callee_net(
             parent=new_parent,
             node_ids=nested_node_ids,
             function_ref=c.function_ref,
+            call_refolding=_prefix_occurrence_call_refolding(
+                c.call_refolding,
+                prefix,
+                compound_id,
+                callee_source_place.id,
+                preset_places,
+                sink_postsets,
+            ),
         )
 
     cloned_transitions: Dict[str, Transition] = {}

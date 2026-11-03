@@ -1,4 +1,6 @@
 import os
+import json
+import re
 import tempfile
 import unittest
 
@@ -7,6 +9,7 @@ from code2petri.javascript_walker import JavascriptWalker
 from code2petri.model import PetriNet, Place, Transition
 from code2petri.python_walker import PythonWalker
 from code2petri.symbol_table import SymbolTable
+from code2petri.viewer import generate_html
 from tests.petri_assertions import assert_valid_petri_net
 
 
@@ -75,6 +78,27 @@ class TestInlineExpansionEngine(unittest.TestCase):
         # 4. Callee nodes exist with namespace prefix
         self.assertTrue(any(t.id.startswith("inline_target_func__") for t in composite_net.transitions))
         self.assertTrue(any(p.id.startswith("inline_target_func__") for p in composite_net.places))
+
+        occurrence = next(compound for compound in composite_net.compounds if compound.function_name == "target_func")
+        self.assertIsNotNone(occurrence.call_refolding, "Inlined occurrence lost its original call restoration record")
+        self.assertEqual(occurrence.call_refolding["call_transition"]["id"], call_trans_id)
+        self.assertTrue(occurrence.call_refolding["call_input_arcs"])
+        self.assertTrue(occurrence.call_refolding["call_output_arcs"])
+        self.assertEqual(composite_net.to_dict()["compounds"][0]["call_refolding"], occurrence.call_refolding)
+        self.assertEqual(composite_net.clone().compounds[0].call_refolding, occurrence.call_refolding)
+        html = generate_html(composite_net)
+        data_match = re.search(
+            r'<script id="code2petri-data" type="application/json">\s*(\{.*?\})\s*</script>',
+            html,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(data_match)
+        viewer_payload = json.loads(data_match.group(1))
+        viewer_occurrence = next(
+            item for item in viewer_payload["composite_net"]["compounds"]
+            if item["function_name"] == "target_func"
+        )
+        self.assertEqual(viewer_occurrence["call_refolding"], occurrence.call_refolding)
 
         # 5. No orphaned nodes: every node must have >= 1 incident arc
         connected_node_ids = set()
@@ -558,6 +582,22 @@ class TestInlineExpansionEngine(unittest.TestCase):
         self.assertTrue(level_3_trans.resolution.resolved, "level_3 transition was not marked resolved")
         self.assertEqual(level_3_trans.resolution.resolved_to, "level_3")
         self.assertTrue(level_3_trans.metadata.get("resolved"))
+
+        active_node_ids = {place.id for place in composite_net.places} | {
+            transition.id for transition in composite_net.transitions
+        }
+        occurrence_records = [compound.call_refolding for compound in composite_net.compounds]
+        self.assertTrue(all(record and record["version"] == 1 for record in occurrence_records))
+        for record in occurrence_records:
+            call_id = record["call_transition"]["id"]
+            exception_ids = {item["id"] for item in record["exception_transitions"]}
+            self.assertNotIn(call_id, active_node_ids, "refolding record points at a live replacement transition")
+            for arc_key in ("call_input_arcs", "call_output_arcs", "exception_input_arcs", "exception_output_arcs"):
+                for arc in record[arc_key]:
+                    for endpoint in (arc["source"], arc["target"]):
+                        if endpoint == call_id or endpoint in exception_ids:
+                            continue
+                        self.assertIn(endpoint, active_node_ids, f"nested refolding arc lost endpoint {endpoint}")
 
     def test_nested_call_visualizer_rendering(self):
         """Validates that opaque call transitions within an expanded callee receive green (#2e7d32) styling in DOT and HTML."""

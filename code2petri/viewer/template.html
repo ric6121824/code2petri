@@ -1117,6 +1117,8 @@
             function_name: compound.function_name || '',
             file: compound.file || '',
             function_ref: typeof compound.function_ref === 'string' ? compound.function_ref : undefined,
+            call_refolding: compound.call_refolding && typeof compound.call_refolding === 'object'
+              ? JSON.parse(JSON.stringify(compound.call_refolding)) : undefined,
             depth: depth,
             is_compound: true,
             composite_preassembled: true,
@@ -2409,8 +2411,12 @@
         if (els.typeEl) els.typeEl.textContent = data.componentType;
         if (els.lineEl) els.lineEl.textContent = data.lineNumber;
         if (els.smEl) {
-          const currentSm = (typeof foldEngine !== 'undefined' && foldEngine) ? foldEngine.calculateSMScore().toFixed(1) : (typeof initialSm !== 'undefined' ? initialSm.toFixed(1) : '—');
-          els.smEl.textContent = currentSm;
+          if (reductionOutcome === 'incomplete' || reductionOutcome === 'unknown') {
+            els.smEl.textContent = 'Unavailable';
+          } else {
+            const currentSm = (typeof foldEngine !== 'undefined' && foldEngine) ? foldEngine.calculateSMScore().toFixed(1) : (typeof initialSm !== 'undefined' ? initialSm.toFixed(1) : '—');
+            els.smEl.textContent = currentSm;
+          }
         }
         if (els.contractMgBtnEl) {
           const isContractibleMg = node && typeof node.hasClass === 'function' && node.hasClass('contractible-marked-graph');
@@ -2498,6 +2504,354 @@
         if (!foldEngine || !compoundNode || !compoundNode.inside()) return null;
         return performViewerAction('Fold entire function', function() {
           const viewportBefore = captureViewport(cy);
+          const compoundId = compoundNode.id();
+          const expansionState = expandedNodes.get(compoundId);
+          if (expansionState && Array.isArray(expansionState.restoreElements)) {
+            const beforeElements = cy.elements().jsons().map(function(element) {
+              return JSON.parse(JSON.stringify(element));
+            });
+            const beforeNodes = beforeElements.filter(function(element) {
+              return element.group === 'nodes';
+            });
+            const localNodeIds = new Set([compoundId]);
+            let foundDescendant = true;
+            while (foundDescendant) {
+              foundDescendant = false;
+              beforeNodes.forEach(function(element) {
+                if (element.data.id !== compoundId && localNodeIds.has(element.data.parent) &&
+                    !localNodeIds.has(element.data.id)) {
+                  localNodeIds.add(element.data.id);
+                  foundDescendant = true;
+                }
+              });
+            }
+            const localElements = beforeElements.filter(function(element) {
+              return element.group === 'nodes'
+                ? localNodeIds.has(element.data.id)
+                : localNodeIds.has(element.data.source) || localNodeIds.has(element.data.target);
+            });
+            const nestedExpansionEntries = Array.from(expandedNodes.entries()).filter(function(entry) {
+              return entry[0] === compoundId || entry[0].startsWith(compoundId + '__');
+            }).map(function(entry) { return JSON.parse(JSON.stringify(entry)); });
+            const preActionAnalysis = {
+              reductionOutcome: typeof reductionOutcome === 'string' ? reductionOutcome : null,
+              incompleteReason: typeof payload !== 'undefined' ? payload.incomplete_reason || null : null,
+              finalSm: typeof payload !== 'undefined' ? payload.final_sm : undefined,
+              finalSmAvailable: typeof payload !== 'undefined' ? payload.final_sm_available : undefined
+            };
+
+            const reduction = foldEngine.executeFoldEntireFunction(compoundNode);
+            const activeCall = cy.getElementById(compoundId);
+            let accumulatedWeight = activeCall.descendants().filter(function(node) {
+              return node.hasClass('transition');
+            }).toArray().reduce(function(total, node) {
+              const tau = Number(node.data('tau'));
+              return total + (Number.isFinite(tau) ? tau : 1.0);
+            }, 0.0);
+            expansionState.restoreElements.filter(function(element) {
+              return element.group === 'nodes' && element.data.exception_alternative_of === compoundId;
+            }).forEach(function(alternative) {
+              if (!beforeElements.some(function(element) {
+                return element.group === 'nodes' && element.data.id === alternative.data.id;
+              })) return;
+              const liveAlternative = beforeElements.find(function(element) {
+                return element.group === 'nodes' && element.data.id === alternative.data.id;
+              });
+              const tau = Number(liveAlternative.data.tau);
+              accumulatedWeight += Number.isFinite(tau) ? tau : 1.0;
+            });
+            const collapsedElements = collapseCallExpansion(
+              cy.elements().jsons(), compoundId, expansionState
+            );
+            if (!collapsedElements) {
+              throw new Error('Call restoration data is unavailable; the expanded function was preserved.');
+            }
+
+            const callElement = collapsedElements.find(function(element) {
+              return element.group === 'nodes' && element.data.id === compoundId;
+            });
+            if (!callElement) throw new Error('Call restoration did not produce the original call node.');
+            const callMetadata = Object.assign({}, callElement.data.metadata || {}, {
+              opaque: true,
+              tau: accumulatedWeight,
+              call_refolded: true,
+              component_type: 'Call Refolding'
+            });
+            callElement.data.metadata = callMetadata;
+            callElement.data.type = 'Opaque Transition';
+            callElement.data.is_opaque = true;
+            callElement.data.is_compound = false;
+            callElement.data.is_expansion_container = false;
+            callElement.data.is_call_refolded = true;
+            callElement.data.tau = accumulatedWeight;
+            callElement.data.function_restoration = {
+              version: 1,
+              elements: localElements,
+              removeNodeIds: Array.from(new Set(localElements.filter(function(element) {
+                return element.group === 'nodes';
+              }).map(function(element) { return element.data.id; }).concat(
+                expansionState.restoreElements.filter(function(element) {
+                  return element.group === 'nodes';
+                }).map(function(element) { return element.data.id; })
+              ))),
+              expandedNodes: nestedExpansionEntries,
+              analysis: preActionAnalysis
+            };
+            callElement.classes = (callElement.classes || 'transition').split(/\s+/)
+              .filter(function(name) { return name !== 'compound'; })
+              .concat(['transition', 'opaque', 'component'])
+              .filter(function(name, index, all) { return all.indexOf(name) === index; })
+              .join(' ');
+            collapsedElements.forEach(function(element) {
+              if (element.group !== 'nodes' || element.data.exception_alternative_of !== compoundId) return;
+              const metadata = Object.assign({}, element.data.metadata || {}, {
+                tau: 0,
+                call_refolded_alternative: true
+              });
+              element.data.metadata = metadata;
+              element.data.tau = 0;
+            });
+
+            Array.from(expandedNodes.keys()).forEach(function(id) {
+              if (id === compoundId || id.startsWith(compoundId + '__')) expandedNodes.delete(id);
+            });
+            const hasAlternative = collapsedElements.some(function(element) {
+              return element.group === 'nodes' && element.data.exception_alternative_of === compoundId;
+            });
+            renderGraphElements(collapsedElements, true, true);
+            if (hasAlternative && typeof reductionOutcome !== 'undefined') reductionOutcome = 'incomplete';
+            if (hasAlternative && typeof payload !== 'undefined') {
+              payload.reduction_outcome = 'incomplete';
+              payload.final_sm = null;
+              payload.final_sm_available = false;
+              payload.incomplete_reason = 'Outcome-aware SM for a refolded multi-exit call is not validated.';
+            }
+            refreshFoldActionView(viewportBefore);
+            openInspector(cy.getElementById(compoundId));
+            const reductionCount = Array.isArray(reduction.folded) ? reduction.folded.length : 0;
+            return {
+              success: true,
+              complete: true,
+              reductionOutcome: hasAlternative ? 'incomplete' : preActionAnalysis.reductionOutcome,
+              finalSmAvailable: hasAlternative ? false : preActionAnalysis.finalSmAvailable === true,
+              accumulatedReductionWeight: foldEngine.calculateSMScore(),
+              folded: reduction.folded || [],
+              skipped: reduction.skipped || [],
+              message: `Refolded function call '${compoundId}' after ${reductionCount} eligible structural reduction${reductionCount === 1 ? '' : 's'}.${hasAlternative ? ' Final SM is unavailable because outcome-aware scoring is not validated.' : ''}`
+            };
+          }
+
+          const backendCallRefolding = compoundNode.data('call_refolding');
+          if (backendCallRefolding && backendCallRefolding.version === 1 &&
+              backendCallRefolding.call_transition &&
+              Array.isArray(backendCallRefolding.call_input_arcs) &&
+              Array.isArray(backendCallRefolding.call_output_arcs)) {
+            const beforeElements = cy.elements().jsons().map(function(element) {
+              return JSON.parse(JSON.stringify(element));
+            });
+            const localNodeIds = new Set([compoundId]);
+            let foundDescendant = true;
+            while (foundDescendant) {
+              foundDescendant = false;
+              beforeElements.forEach(function(element) {
+                if (element.group === 'nodes' && element.data.id !== compoundId &&
+                    localNodeIds.has(element.data.parent) && !localNodeIds.has(element.data.id)) {
+                  localNodeIds.add(element.data.id);
+                  foundDescendant = true;
+                }
+              });
+            }
+            const localElements = beforeElements.filter(function(element) {
+              return element.group === 'nodes'
+                ? localNodeIds.has(element.data.id)
+                : localNodeIds.has(element.data.source) || localNodeIds.has(element.data.target);
+            });
+            const nestedExpansionEntries = Array.from(expandedNodes.entries()).filter(function(entry) {
+              return localNodeIds.has(entry[0]) || entry[0].startsWith(compoundId + '__');
+            }).map(function(entry) { return JSON.parse(JSON.stringify(entry)); });
+            const preActionAnalysis = {
+              reductionOutcome: typeof reductionOutcome === 'string' ? reductionOutcome : null,
+              incompleteReason: typeof payload !== 'undefined' ? payload.incomplete_reason || null : null,
+              finalSm: typeof payload !== 'undefined' ? payload.final_sm : undefined,
+              finalSmAvailable: typeof payload !== 'undefined' ? payload.final_sm_available : undefined
+            };
+
+            const reduction = foldEngine.executeFoldEntireFunction(compoundNode);
+            const activeCompound = cy.getElementById(compoundId);
+            let accumulatedWeight = activeCompound.descendants().filter(function(node) {
+              return node.hasClass('transition');
+            }).toArray().reduce(function(total, node) {
+              const tau = Number(node.data('tau'));
+              return total + (Number.isFinite(tau) ? tau : 1.0);
+            }, 0.0);
+            const exceptionRecords = Array.isArray(backendCallRefolding.exception_transitions)
+              ? backendCallRefolding.exception_transitions : [];
+            exceptionRecords.forEach(function(exceptionRecord) {
+              const existingAlternative = beforeElements.find(function(element) {
+                return element.group === 'nodes' && element.data.id === exceptionRecord.id &&
+                  !localNodeIds.has(element.data.id);
+              });
+              if (!existingAlternative) return;
+              const tau = Number(existingAlternative.data.tau);
+              accumulatedWeight += Number.isFinite(tau) ? tau : 1.0;
+            });
+            const afterReduction = cy.elements().jsons();
+            const remaining = afterReduction.filter(function(element) {
+              if (element.group === 'nodes') return !localNodeIds.has(element.data.id);
+              return !localNodeIds.has(element.data.source) && !localNodeIds.has(element.data.target);
+            });
+            const restoredNodeIds = [];
+            const existingElementIds = new Set(remaining.map(function(element) { return element.data.id; }));
+            const callRecord = JSON.parse(JSON.stringify(backendCallRefolding.call_transition));
+            const callId = callRecord.id;
+            const callPosition = compoundNode.position();
+            const callMetadata = Object.assign({}, callRecord.metadata || {}, {
+              opaque: true,
+              tau: accumulatedWeight,
+              call_refolded: true,
+              component_type: 'Call Refolding'
+            });
+            const callData = {
+              id: callId,
+              label: callRecord.label || callId,
+              raw_label: callRecord.label || callId,
+              type: 'Opaque Transition',
+              line_number: callRecord.line_number,
+              is_opaque: true,
+              is_call_refolded: true,
+              is_compound: false,
+              is_expansion_container: false,
+              tau: accumulatedWeight,
+              metadata: callMetadata,
+              resolved: callRecord.resolved,
+              resolved_to: callRecord.resolved_to,
+              target_file: callRecord.target_file,
+              parent: callRecord.parent || callMetadata.parent,
+              function_ref: callMetadata.function_ref,
+              call_results: callMetadata.call_results,
+              function_return_evidence: callMetadata.function_return_evidence
+            };
+            const hasAlternative = exceptionRecords.length > 0;
+            callData.function_restoration = {
+              version: 1,
+              elements: localElements,
+              removeNodeIds: Array.from(new Set(Array.from(localNodeIds).concat(
+                [callId].concat(exceptionRecords.map(function(record) { return record.id; }))
+              ))),
+              expandedNodes: nestedExpansionEntries,
+              analysis: preActionAnalysis
+            };
+            remaining.push({
+              group: 'nodes', data: callData,
+              classes: 'transition opaque component',
+              position: { x: callPosition.x, y: callPosition.y }
+            });
+            restoredNodeIds.push(callId);
+
+            const transitionRecords = [callRecord].concat(exceptionRecords);
+            const weightedArcs = [];
+            ['call_input_arcs', 'call_output_arcs', 'exception_input_arcs', 'exception_output_arcs']
+              .forEach(function(key) {
+                (backendCallRefolding[key] || []).forEach(function(arc) {
+                  weightedArcs.push(arc);
+                });
+              });
+            exceptionRecords.forEach(function(exceptionRecord) {
+              if (existingElementIds.has(exceptionRecord.id)) {
+                remaining.forEach(function(element) {
+                  if (element.group === 'nodes' && element.data.id === exceptionRecord.id) {
+                    element.data.tau = 0;
+                    element.data.metadata = Object.assign({}, element.data.metadata || {}, {
+                      tau: 0,
+                      call_refolded_alternative: true
+                    });
+                  }
+                });
+                for (let index = remaining.length - 1; index >= 0; index--) {
+                  const element = remaining[index];
+                  if (element.group === 'edges' &&
+                      (element.data.source === exceptionRecord.id || element.data.target === exceptionRecord.id)) {
+                    remaining.splice(index, 1);
+                  }
+                }
+                return;
+              }
+              const metadata = Object.assign({}, exceptionRecord.metadata || {}, {
+                tau: 0,
+                call_refolded_alternative: true
+              });
+              const data = {
+                id: exceptionRecord.id,
+                label: exceptionRecord.label || exceptionRecord.id,
+                raw_label: exceptionRecord.label || exceptionRecord.id,
+                type: 'Transition',
+                line_number: exceptionRecord.line_number,
+                is_opaque: false,
+                tau: 0,
+                metadata: metadata,
+                exception_alternative: metadata.exception_alternative === true,
+                exception_alternative_of: metadata.exception_alternative_of,
+                resolved: exceptionRecord.resolved,
+                resolved_to: exceptionRecord.resolved_to,
+                target_file: exceptionRecord.target_file,
+                parent: exceptionRecord.parent || metadata.parent
+              };
+              remaining.push({
+                group: 'nodes', data: data,
+                classes: 'transition',
+                position: { x: callPosition.x, y: callPosition.y }
+              });
+              restoredNodeIds.push(exceptionRecord.id);
+            });
+
+            const usedEdgeIds = new Set(remaining.filter(function(element) {
+              return element.group === 'edges';
+            }).map(function(element) { return element.data.id; }));
+            weightedArcs.forEach(function(arc, index) {
+              if (!remaining.some(function(element) {
+                return element.group === 'nodes' && element.data.id === arc.source;
+              }) && !existingElementIds.has(arc.source)) return;
+              if (!remaining.some(function(element) {
+                return element.group === 'nodes' && element.data.id === arc.target;
+              }) && !existingElementIds.has(arc.target)) return;
+              const baseId = 'call_refold_' + compoundId + '_' + index;
+              let edgeId = baseId;
+              let suffix = 2;
+              while (usedEdgeIds.has(edgeId)) edgeId = baseId + '_' + suffix++;
+              usedEdgeIds.add(edgeId);
+              remaining.push({
+                group: 'edges',
+                data: { id: edgeId, source: arc.source, target: arc.target, weight: Number(arc.weight || 1) },
+                classes: 'arc'
+              });
+            });
+
+            Array.from(expandedNodes.keys()).forEach(function(id) {
+              if (localNodeIds.has(id) || id.startsWith(compoundId + '__')) expandedNodes.delete(id);
+            });
+            renderGraphElements(remaining, true, true);
+            if (hasAlternative && typeof reductionOutcome !== 'undefined') reductionOutcome = 'incomplete';
+            if (hasAlternative && typeof payload !== 'undefined') {
+              payload.reduction_outcome = 'incomplete';
+              payload.final_sm = null;
+              payload.final_sm_available = false;
+              payload.incomplete_reason = 'Outcome-aware SM for a refolded multi-exit call is not validated.';
+            }
+            refreshFoldActionView(viewportBefore);
+            openInspector(cy.getElementById(callId));
+            const reductionCount = Array.isArray(reduction.folded) ? reduction.folded.length : 0;
+            return {
+              success: true,
+              complete: true,
+              reductionOutcome: hasAlternative ? 'incomplete' : preActionAnalysis.reductionOutcome,
+              finalSmAvailable: hasAlternative ? false : preActionAnalysis.finalSmAvailable === true,
+              accumulatedReductionWeight: foldEngine.calculateSMScore(),
+              folded: reduction.folded || [],
+              skipped: reduction.skipped || [],
+              message: `Refolded inlined call '${callId}' after ${reductionCount} eligible structural reduction${reductionCount === 1 ? '' : 's'}.${hasAlternative ? ' Final SM is unavailable because outcome-aware scoring is not validated.' : ''}`
+            };
+          }
+
           const result = foldEngine.executeFoldEntireFunction(compoundNode);
           if (result.success) {
             refreshFoldActionView(viewportBefore);
@@ -2703,7 +3057,7 @@
         }
 
         // Resolved calls expand before the generic transition inspector handler.
-        if (targetNode.data('resolved') === true) {
+        if (targetNode.data('resolved') === true && targetNode.data('is_call_refolded') !== true) {
           const resolvedTo = targetNode.data('resolved_to');
           const rawLabel = targetNode.data('raw_label');
           let calleeName = null;
@@ -2721,6 +3075,8 @@
               performViewerAction('Expand function call', function() {
                 const expandedElements = buildCurrentGraphWithExpandedCall(targetId, calleeName);
                 renderGraphElements(expandedElements, true, true);
+                const expandedCall = cy.getElementById(targetId);
+                if (expandedCall && expandedCall.length > 0) openInspector(expandedCall);
                 return true;
               });
             } catch (error) {
@@ -2739,7 +3095,63 @@
       function performComponentLocalUnfold(node) {
         if (typeof foldEngine === 'undefined' || !foldEngine || !node) return false;
         const viewportBefore = captureViewport(cy);
-        const result = foldEngine.executeComponentLocalUnfold(node);
+        const functionRestoration = node.data('function_restoration');
+        let result;
+        if (functionRestoration && functionRestoration.version === 1 &&
+            Array.isArray(functionRestoration.elements) &&
+            Array.isArray(functionRestoration.removeNodeIds) &&
+            Array.isArray(functionRestoration.expandedNodes)) {
+          const currentElements = cy.elements().jsons();
+          const removalIds = new Set(functionRestoration.removeNodeIds);
+          let foundDescendant = true;
+          while (foundDescendant) {
+            foundDescendant = false;
+            currentElements.forEach(function(element) {
+              if (element.group === 'nodes' && element.data.id !== node.id() &&
+                  removalIds.has(element.data.parent) && !removalIds.has(element.data.id)) {
+                removalIds.add(element.data.id);
+                foundDescendant = true;
+              }
+            });
+          }
+          const remaining = currentElements.filter(function(element) {
+            if (element.group === 'nodes') return !removalIds.has(element.data.id);
+            return !removalIds.has(element.data.source) && !removalIds.has(element.data.target);
+          });
+          const merged = new Map(remaining.map(function(element) {
+            return [element.data.id, JSON.parse(JSON.stringify(element))];
+          }));
+          functionRestoration.elements.forEach(function(element) {
+            merged.set(element.data.id, JSON.parse(JSON.stringify(element)));
+          });
+          Array.from(expandedNodes.keys()).forEach(function(id) {
+            if (removalIds.has(id) || id.startsWith(node.id() + '__')) expandedNodes.delete(id);
+          });
+          functionRestoration.expandedNodes.forEach(function(entry) {
+            expandedNodes.set(entry[0], JSON.parse(JSON.stringify(entry[1])));
+          });
+          const restoredElements = Array.from(merged.values());
+          renderGraphElements(restoredElements, false, true);
+          functionRestoration.elements.forEach(function(element) {
+            if (element.group !== 'nodes' || !element.position) return;
+            const restoredNode = cy.getElementById(element.data.id);
+            if (restoredNode && restoredNode.length > 0) {
+              restoredNode.position({ x: element.position.x, y: element.position.y });
+            }
+          });
+          if (typeof reductionOutcome !== 'undefined' && functionRestoration.analysis) {
+            reductionOutcome = functionRestoration.analysis.reductionOutcome;
+          }
+          if (typeof payload !== 'undefined' && functionRestoration.analysis) {
+            payload.reduction_outcome = functionRestoration.analysis.reductionOutcome;
+            payload.incomplete_reason = functionRestoration.analysis.incompleteReason;
+            payload.final_sm = functionRestoration.analysis.finalSm;
+            payload.final_sm_available = functionRestoration.analysis.finalSmAvailable;
+          }
+          result = { success: true, restored: functionRestoration.elements.length };
+        } else {
+          result = foldEngine.executeComponentLocalUnfold(node);
+        }
         if (!result || !result.success) return false;
         if (typeof refreshCompoundDepthPresentation === 'function') refreshCompoundDepthPresentation(cy);
         if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
@@ -2820,9 +3232,14 @@
             analysisStatus.style.display = 'block';
             analysisStatus.title = payload.incomplete_reason || '';
           }
+          if (infoDesc && reductionOutcome === 'incomplete') {
+            infoDesc.textContent = 'Final SM unavailable—reduction incomplete. ' +
+              (payload.incomplete_reason || 'The result does not have a validated final score.');
+          }
           if (labelAccumulated) labelAccumulated.style.display = 'inline';
           if (valAccumulated) {
-            const retainedNet = stepNets[totalSteps] || net || initialNet;
+            const retainedNet = net || (typeof currentGraphToNet === 'function'
+              ? currentGraphToNet() : (stepNets[totalSteps] || initialNet));
             valAccumulated.textContent = calculateNetReductionWeight(retainedNet).toFixed(1);
             valAccumulated.style.display = 'inline';
           }
@@ -3253,6 +3670,8 @@
               function_name: data.function_name || '',
               file: data.file || '',
               function_ref: data.function_ref,
+              call_refolding: data.call_refolding && typeof data.call_refolding === 'object'
+                ? JSON.parse(JSON.stringify(data.call_refolding)) : undefined,
               parent: data.parent || null,
               viewer_state: viewerState
             });
@@ -3413,7 +3832,7 @@
       }
 
       function refreshFoldActionView(viewportBefore) {
-        if (cy.elements().length > 0 && typeof cy.layout === 'function') {
+        if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
           cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false, animate: false })).run();
         }
         restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);
@@ -3479,7 +3898,11 @@
             cfg: foldEngine.cfg,
             rememberedCustomNames: Array.from(foldEngine.rememberedCustomNames.entries()),
             expandedNodes: Array.from(expandedNodes.entries()),
-            currentStep: currentStep
+            currentStep: currentStep,
+            reductionOutcome: reductionOutcome,
+            incompleteReason: payload.incomplete_reason || null,
+            finalSm: payload.final_sm === undefined ? null : payload.final_sm,
+            finalSmAvailable: payload.final_sm_available === true
           };
         },
         restoreContext: function(state) {
@@ -3489,6 +3912,11 @@
           expandedNodes.clear();
           state.expandedNodes.forEach(function(entry) { expandedNodes.set(entry[0], entry[1]); });
           currentStep = state.currentStep;
+          reductionOutcome = state.reductionOutcome;
+          payload.reduction_outcome = state.reductionOutcome;
+          payload.incomplete_reason = state.incompleteReason;
+          payload.final_sm = state.finalSm;
+          payload.final_sm_available = state.finalSmAvailable;
         },
         captureUi: captureHistoryUi,
         restoreUi: restoreHistoryUi,
@@ -3699,9 +4127,9 @@
         payload.composite_net = doc.originalNet;
         payload.compounds = doc.compounds || doc.originalNet.compounds || [];
         payload.fold_steps = doc.foldSteps;
-        reductionOutcome = doc.mode === 'fold'
-          ? (typeof doc.reductionOutcome === 'string' ? doc.reductionOutcome : 'unknown')
-          : null;
+        reductionOutcome = typeof doc.reductionOutcome === 'string'
+          ? doc.reductionOutcome
+          : (doc.mode === 'fold' ? 'unknown' : null);
         payload.reduction_outcome = reductionOutcome;
         payload.final_sm_available = doc.finalSmAvailable === true;
         payload.final_sm = payload.final_sm_available ? doc.finalSm : null;
@@ -3789,27 +4217,30 @@
         });
       }
 
+      function exportCurrentViewerGraph() {
+        if (reductionOutcome === 'incomplete' || reductionOutcome === 'unknown') {
+          const retainedNet = currentGraphToNet();
+          const exportCy = cytoscape({ headless: true, elements: netToElements(retainedNet) });
+          try {
+            return exportClientSidePnml(exportCy, undefined, {
+              reductionOutcome: reductionOutcome,
+              finalSmAvailable: false,
+              accumulatedReductionWeight: calculateNetReductionWeight(retainedNet),
+              incompleteReason: reductionOutcome === 'incomplete'
+                ? payload.incomplete_reason || ''
+                : 'Analysis completion evidence is unavailable.'
+            });
+          } finally {
+            exportCy.destroy();
+          }
+        }
+        return exportClientSidePnml(cy);
+      }
+
       if (btnExportPnml) {
         btnExportPnml.addEventListener('click', function(e) {
           if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
-          if (reductionOutcome === 'incomplete' || reductionOutcome === 'unknown') {
-            const retainedNet = stepNets[totalSteps] || initialNet;
-            const exportCy = cytoscape({ headless: true, elements: netToElements(retainedNet) });
-            try {
-              exportClientSidePnml(exportCy, undefined, {
-                reductionOutcome: reductionOutcome,
-                finalSmAvailable: false,
-                accumulatedReductionWeight: calculateNetReductionWeight(retainedNet),
-                incompleteReason: reductionOutcome === 'incomplete'
-                  ? payload.incomplete_reason || ''
-                  : 'Analysis completion evidence is unavailable.'
-              });
-            } finally {
-              exportCy.destroy();
-            }
-          } else {
-            exportClientSidePnml(cy);
-          }
+          exportCurrentViewerGraph();
         });
       }
     })();
