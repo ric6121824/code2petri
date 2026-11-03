@@ -123,6 +123,7 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     )
     current_graph_expansion_js = "\n".join([
         extract_function("findBoundaryPlaces", "\n\n      // Convert PetriNet dict to Cytoscape elements"),
+        extract_function("collectDescendantNodeIds", "\n\n      function currentGraphToNet("),
         extract_function("currentGraphToNet", "\n      function buildCurrentGraphWithExpandedCall("),
         extract_function("buildCurrentGraphWithExpandedCall", "\n      function collapseCallExpansion("),
         extract_function("collapseCallExpansion", "\n      function renderGraphElements("),

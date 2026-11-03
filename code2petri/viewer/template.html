@@ -2509,21 +2509,7 @@
               removalNodeIds.add(step.componentId);
             }
           });
-          const afterNodes = afterElements.filter(function(element) {
-            return element.group === 'nodes' && element.data && typeof element.data.id === 'string';
-          });
-          let foundDescendant = true;
-          while (foundDescendant) {
-            foundDescendant = false;
-            afterNodes.forEach(function(element) {
-              const id = element.data.id;
-              if (id !== undefined && !removalNodeIds.has(id) && removalNodeIds.has(element.data.parent)) {
-                removalNodeIds.add(id);
-                foundDescendant = true;
-              }
-            });
-          }
-          return removalNodeIds;
+          return collectDescendantNodeIds(afterElements, Array.from(removalNodeIds));
         }
         return performViewerAction('Fold entire function', function() {
           const viewportBefore = captureViewport(cy);
@@ -2533,21 +2519,7 @@
             const beforeElements = cy.elements().jsons().map(function(element) {
               return JSON.parse(JSON.stringify(element));
             });
-            const beforeNodes = beforeElements.filter(function(element) {
-              return element.group === 'nodes';
-            });
-            const localNodeIds = new Set([compoundId]);
-            let foundDescendant = true;
-            while (foundDescendant) {
-              foundDescendant = false;
-              beforeNodes.forEach(function(element) {
-                if (element.data.id !== compoundId && localNodeIds.has(element.data.parent) &&
-                    !localNodeIds.has(element.data.id)) {
-                  localNodeIds.add(element.data.id);
-                  foundDescendant = true;
-                }
-              });
-            }
+            const localNodeIds = collectDescendantNodeIds(beforeElements, [compoundId]);
             const localElements = beforeElements.filter(function(element) {
               return element.group === 'nodes'
                 ? localNodeIds.has(element.data.id)
@@ -2678,18 +2650,7 @@
             const beforeElements = cy.elements().jsons().map(function(element) {
               return JSON.parse(JSON.stringify(element));
             });
-            const localNodeIds = new Set([compoundId]);
-            let foundDescendant = true;
-            while (foundDescendant) {
-              foundDescendant = false;
-              beforeElements.forEach(function(element) {
-                if (element.group === 'nodes' && element.data.id !== compoundId &&
-                    localNodeIds.has(element.data.parent) && !localNodeIds.has(element.data.id)) {
-                  localNodeIds.add(element.data.id);
-                  foundDescendant = true;
-                }
-              });
-            }
+            const localNodeIds = collectDescendantNodeIds(beforeElements, [compoundId]);
             const localElements = beforeElements.filter(function(element) {
               return element.group === 'nodes'
                 ? localNodeIds.has(element.data.id)
@@ -3626,6 +3587,25 @@
         }
       }
 
+      function collectDescendantNodeIds(elements, rootNodeIds) {
+        const nodeIds = new Set(Array.isArray(rootNodeIds) ? rootNodeIds : []);
+        const nodes = (Array.isArray(elements) ? elements : []).filter(function(element) {
+          return element.group === 'nodes' && element.data && typeof element.data.id === 'string';
+        });
+        let foundDescendant = true;
+        while (foundDescendant) {
+          foundDescendant = false;
+          nodes.forEach(function(element) {
+            const id = element.data.id;
+            if (!nodeIds.has(id) && nodeIds.has(element.data.parent)) {
+              nodeIds.add(id);
+              foundDescendant = true;
+            }
+          });
+        }
+        return nodeIds;
+      }
+
       function currentGraphToNet() {
         const graphElements = cy.elements().jsons();
         const currentPositions = new Map(cy.nodes().map(function(node) {
@@ -3717,20 +3697,11 @@
         if (!expansionState || !Array.isArray(expansionState.restoreElements)) return null;
         const nodes = elements.filter(function(element) { return element.group === 'nodes'; });
         const nodeById = new Map(nodes.map(function(element) { return [element.data.id, element]; }));
-        const descendants = new Set((Array.isArray(additionalRemovalNodeIds) ? additionalRemovalNodeIds : [])
-          .filter(function(id) { return id !== parentId; }));
-        let changed = true;
-        while (changed) {
-          changed = false;
-          nodes.forEach(function(element) {
-            const id = element.data.id;
-            const parent = element.data.parent;
-            if (id !== parentId && (parent === parentId || descendants.has(parent)) && !descendants.has(id)) {
-              descendants.add(id);
-              changed = true;
-            }
-          });
-        }
+        const descendants = collectDescendantNodeIds(
+          elements,
+          [parentId].concat(Array.isArray(additionalRemovalNodeIds) ? additionalRemovalNodeIds : [])
+        );
+        descendants.delete(parentId);
         const remaining = elements.filter(function(element) {
           if (element.group === 'nodes') return !descendants.has(element.data.id);
           return !descendants.has(element.data.source) && !descendants.has(element.data.target);

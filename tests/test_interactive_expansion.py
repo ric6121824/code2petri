@@ -162,6 +162,7 @@ def _get_current_graph_expansion_functions() -> str:
     with open(template_path, "r", encoding="utf-8") as template_file:
         html = template_file.read()
     patterns = [
+        r"(function collectDescendantNodeIds\(elements, rootNodeIds\) \{[\s\S]*?\n      \})",
         r"(function currentGraphToNet\(\) \{[\s\S]*?\n      \})",
         r"(function buildCurrentGraphWithExpandedCall\(parentId, calleeName\) \{[\s\S]*?\n      \})",
         r"(function collapseCallExpansion\(elements, parentId, expansionState(?:, additionalRemovalNodeIds)?\) \{[\s\S]*?\n      \})",
