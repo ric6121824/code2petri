@@ -2502,6 +2502,29 @@
 
       function handleFoldEntireFunction(compoundNode) {
         if (!foldEngine || !compoundNode || !compoundNode.inside()) return null;
+        function getFunctionFoldRemovalNodeIds(beforeLocalNodeIds, afterElements, reduction) {
+          const removalNodeIds = new Set(beforeLocalNodeIds);
+          (Array.isArray(reduction && reduction.folded) ? reduction.folded : []).forEach(function(step) {
+            if (step && typeof step.componentId === 'string' && step.componentId) {
+              removalNodeIds.add(step.componentId);
+            }
+          });
+          const afterNodes = afterElements.filter(function(element) {
+            return element.group === 'nodes' && element.data && typeof element.data.id === 'string';
+          });
+          let foundDescendant = true;
+          while (foundDescendant) {
+            foundDescendant = false;
+            afterNodes.forEach(function(element) {
+              const id = element.data.id;
+              if (id !== undefined && !removalNodeIds.has(id) && removalNodeIds.has(element.data.parent)) {
+                removalNodeIds.add(id);
+                foundDescendant = true;
+              }
+            });
+          }
+          return removalNodeIds;
+        }
         return performViewerAction('Fold entire function', function() {
           const viewportBefore = captureViewport(cy);
           const compoundId = compoundNode.id();
@@ -2560,8 +2583,12 @@
               const tau = Number(liveAlternative.data.tau);
               accumulatedWeight += Number.isFinite(tau) ? tau : 1.0;
             });
+            const afterReductionElements = cy.elements().jsons();
+            const postReductionRemovalNodeIds = getFunctionFoldRemovalNodeIds(
+              localNodeIds, afterReductionElements, reduction
+            );
             const collapsedElements = collapseCallExpansion(
-              cy.elements().jsons(), compoundId, expansionState
+              afterReductionElements, compoundId, expansionState, Array.from(postReductionRemovalNodeIds)
             );
             if (!collapsedElements) {
               throw new Error('Call restoration data is unavailable; the expanded function was preserved.');
@@ -2587,13 +2614,16 @@
             callElement.data.function_restoration = {
               version: 1,
               elements: localElements,
-              removeNodeIds: Array.from(new Set(localElements.filter(function(element) {
-                return element.group === 'nodes';
-              }).map(function(element) { return element.data.id; }).concat(
-                expansionState.restoreElements.filter(function(element) {
-                  return element.group === 'nodes';
-                }).map(function(element) { return element.data.id; })
-              ))),
+              removeNodeIds: Array.from(new Set(
+                Array.from(postReductionRemovalNodeIds).concat(
+                  localElements.filter(function(element) {
+                    return element.group === 'nodes';
+                  }).map(function(element) { return element.data.id; }),
+                  expansionState.restoreElements.filter(function(element) {
+                    return element.group === 'nodes';
+                  }).map(function(element) { return element.data.id; })
+                )
+              )),
               expandedNodes: nestedExpansionEntries
             };
             callElement.classes = (callElement.classes || 'transition').split(/\s+/)
@@ -2695,9 +2725,12 @@
               accumulatedWeight += Number.isFinite(tau) ? tau : 1.0;
             });
             const afterReduction = cy.elements().jsons();
+            const postReductionRemovalNodeIds = getFunctionFoldRemovalNodeIds(
+              localNodeIds, afterReduction, reduction
+            );
             const remaining = afterReduction.filter(function(element) {
-              if (element.group === 'nodes') return !localNodeIds.has(element.data.id);
-              return !localNodeIds.has(element.data.source) && !localNodeIds.has(element.data.target);
+              if (element.group === 'nodes') return !postReductionRemovalNodeIds.has(element.data.id);
+              return !postReductionRemovalNodeIds.has(element.data.source) && !postReductionRemovalNodeIds.has(element.data.target);
             });
             const restoredNodeIds = [];
             const existingElementIds = new Set(remaining.map(function(element) { return element.data.id; }));
@@ -2734,9 +2767,11 @@
             callData.function_restoration = {
               version: 1,
               elements: localElements,
-              removeNodeIds: Array.from(new Set(Array.from(localNodeIds).concat(
-                [callId].concat(exceptionRecords.map(function(record) { return record.id; }))
-              ))),
+              removeNodeIds: Array.from(new Set(
+                Array.from(postReductionRemovalNodeIds).concat(
+                  [callId].concat(exceptionRecords.map(function(record) { return record.id; }))
+                )
+              )),
               expandedNodes: nestedExpansionEntries
             };
             remaining.push({
@@ -3678,11 +3713,12 @@
         return netToElements(currentNet, [parentId]);
       }
 
-      function collapseCallExpansion(elements, parentId, expansionState) {
+      function collapseCallExpansion(elements, parentId, expansionState, additionalRemovalNodeIds) {
         if (!expansionState || !Array.isArray(expansionState.restoreElements)) return null;
         const nodes = elements.filter(function(element) { return element.group === 'nodes'; });
         const nodeById = new Map(nodes.map(function(element) { return [element.data.id, element]; }));
-        const descendants = new Set();
+        const descendants = new Set((Array.isArray(additionalRemovalNodeIds) ? additionalRemovalNodeIds : [])
+          .filter(function(id) { return id !== parentId; }));
         let changed = true;
         while (changed) {
           changed = false;

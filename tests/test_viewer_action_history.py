@@ -782,6 +782,236 @@ if (normalizedGraph() !== beforeRefold) throw new Error('backend local Unfold di
         result = self.run_node(script)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_repeated_backend_refold_removes_its_generated_components(self):
+        net_literal = """{
+  compounds: [
+    {
+      id: 'compound_helper', label: 'helper()', function_name: 'helper', parent: null,
+      call_refolding: {
+        version: 1,
+        call_transition: { id: 't_call', label: 'helper()', metadata: { resolved: true, resolved_to: 'helper' }, resolved: true, resolved_to: 'helper' },
+        exception_transitions: [{ id: 't_call_error', label: 'exception: helper()', metadata: { exception_alternative: true, exception_alternative_of: 't_call' } }],
+        call_input_arcs: [{ source: 'p_in', target: 't_call', weight: 1 }],
+        call_output_arcs: [{ source: 't_call', target: 'p_out', weight: 1 }],
+        exception_input_arcs: [{ source: 'p_in', target: 't_call_error', weight: 1 }],
+        exception_output_arcs: [{ source: 't_call_error', target: 'p_error', weight: 1 }]
+      }
+    },
+    { id: 'compound_sibling', label: 'sibling()', function_name: 'sibling', parent: null }
+  ],
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 }, { id: 'p_middle', label: 'middle', parent: 'compound_helper' },
+    { id: 'p_auto_middle', label: 'auto middle', parent: 'compound_helper' },
+    { id: 'p_branch', label: 'branch', parent: 'compound_helper' }, { id: 'p_out', label: 'out' },
+    { id: 'p_error', label: 'error' }, { id: 'p_sibling_in', label: 'sibling in', parent: 'compound_sibling' },
+    { id: 'p_sibling_out', label: 'sibling out', parent: 'compound_sibling' }
+  ],
+  transitions: [
+    { id: 't_helper_prepare', label: 'prepare', parent: 'compound_helper' },
+    { id: 't_helper_manual_next', label: 'manual next', parent: 'compound_helper' },
+    { id: 't_helper_auto_next', label: 'automatic next', parent: 'compound_helper' },
+    { id: 't_helper_return', label: 'return', parent: 'compound_helper' },
+    { id: 't_helper_raise', label: 'raise', parent: 'compound_helper' },
+    { id: 'c_sibling_manual', label: 'sibling manual fold', parent: 'compound_sibling', tau: 7, omega: 0, component_type: 'Sequence', is_opaque: true }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_helper_prepare' }, { source: 't_helper_prepare', target: 'p_middle' },
+    { source: 'p_middle', target: 't_helper_manual_next' }, { source: 't_helper_manual_next', target: 'p_auto_middle' },
+    { source: 'p_auto_middle', target: 't_helper_auto_next' }, { source: 't_helper_auto_next', target: 'p_branch' },
+    { source: 'p_branch', target: 't_helper_return' }, { source: 't_helper_return', target: 'p_out' },
+    { source: 'p_branch', target: 't_helper_raise' }, { source: 't_helper_raise', target: 'p_error' },
+    { source: 'p_sibling_in', target: 'c_sibling_manual' }, { source: 'c_sibling_manual', target: 'p_sibling_out' }
+  ]
+}"""
+        logic = r"""
+function normalizedGraph() {
+  return JSON.stringify(cy.elements().jsons().map(element => {
+    const copy = JSON.parse(JSON.stringify(element));
+    delete copy.selected;
+    return copy;
+  }).sort((left, right) => left.data.id.localeCompare(right.data.id)));
+}
+global.trackScoreState = true;
+global.reductionOutcome = 'completed_structured';
+global.payload = { final_sm: 2, final_sm_available: true, incomplete_reason: null };
+if (!handleFoldReduction(cy.getElementById('p_middle'), null)) {
+  throw new Error('setup failed to create a prior manual reduction inside the selected function');
+}
+if (!cy.getElementById('c_01').length) throw new Error('prior manual reduction was not retained in the function');
+const initialGraph = normalizedGraph();
+const siblingBefore = JSON.stringify(cy.getElementById('compound_sibling').jsons());
+let refoldScore = null;
+for (let cycle = 0; cycle < 3; cycle += 1) {
+  const compound = cy.getElementById('compound_helper');
+  if (!compound.length) throw new Error('Unfold did not restore the backend function compound');
+  compound.emit('tap');
+  if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('backend function did not expose Fold Entire Function');
+  const originalHandler = handleFoldEntireFunction;
+  let result = null;
+  handleFoldEntireFunction = function(node) {
+    result = originalHandler(node);
+    return result;
+  };
+  hudBtnFoldEntireFunction.click();
+  if (!result || !result.success || !Array.isArray(result.folded) || result.folded.length === 0) {
+    throw new Error('Fold Entire Function did not perform an eligible reduction in cycle ' + (cycle + 1));
+  }
+  if (!result.folded.some(step => step.foldType === 'sequence')) {
+    throw new Error('the helper sequence was not reduced before Call Refolding');
+  }
+  const generatedIds = result.folded.map(step => step.componentId).filter(Boolean);
+  generatedIds.forEach(id => {
+    if (cy.getElementById(id).length) throw new Error('Fold left its newly generated reduction component live: ' + id);
+  });
+  if (cy.getElementById('compound_helper').length || cy.getElementById('p_middle').length ||
+      cy.getElementById('p_auto_middle').length || cy.getElementById('p_branch').length ||
+      cy.getElementById('c_01').length || cy.getElementById('t_helper_prepare').length ||
+      cy.getElementById('t_helper_manual_next').length || cy.getElementById('t_helper_auto_next').length ||
+      cy.getElementById('t_helper_return').length ||
+      cy.getElementById('t_helper_raise').length) {
+    throw new Error('Fold left part of the inlined function live after restoring its call');
+  }
+  if (!cy.getElementById('t_call').length || !cy.getElementById('t_call_error').length) {
+    throw new Error('Fold did not restore the opaque call and its exception alternative');
+  }
+  if (cy.getElementById('t_call').data('tau') !== 5 || cy.getElementById('t_call_error').data('tau') !== 0) {
+    throw new Error('Call Refolding did not retain the pre-existing manual and automatic contributions exactly once');
+  }
+  const callerOutgoing = cy.edges().filter(edge => edge.source().id() === 'p_in')
+    .map(edge => edge.target().id()).sort();
+  if (JSON.stringify(callerOutgoing) !== JSON.stringify(['t_call', 't_call_error'])) {
+    throw new Error('Fold left duplicate or incorrect caller routes: ' + JSON.stringify(callerOutgoing));
+  }
+  if (!cy.getElementById('c_sibling_manual').length ||
+      JSON.stringify(cy.getElementById('compound_sibling').jsons()) !== siblingBefore) {
+    throw new Error('Fold changed an unrelated sibling manual component');
+  }
+  if (reductionOutcome !== 'incomplete' || payload.final_sm !== null || payload.final_sm_available !== false) {
+    throw new Error('multi-outcome Call Refolding claimed an unvalidated final SM');
+  }
+  const scoreAfterFold = foldEngine.calculateSMScore();
+  if (refoldScore !== null && scoreAfterFold !== refoldScore) {
+    throw new Error('equivalent refold cycle inflated accumulated weight from ' + refoldScore + ' to ' + scoreAfterFold);
+  }
+  refoldScore = scoreAfterFold;
+  if (!handleRightClickUnfold(cy.getElementById('t_call'))) throw new Error('Component-Local Unfold failed after cycle ' + (cycle + 1));
+  if (!cy.getElementById('c_01').length) throw new Error('Component-Local Unfold did not restore the prior manual fold');
+  if (normalizedGraph() !== initialGraph) throw new Error('Component-Local Unfold did not restore the exact pre-action graph after cycle ' + (cycle + 1));
+}
+"""
+        result = self.run_node(_setup_live_fold_test_harness(net_literal, logic))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_repeated_browser_refold_removes_its_generated_components(self):
+        net_literal = """{
+  places: [
+    { id: 'p_in', label: 'in', initial_tokens: 1 }, { id: 'p_out', label: 'out' },
+    { id: 'p_error', label: 'error' }
+  ],
+  transitions: [
+    { id: 't_call', label: 'helper()' },
+    { id: 't_call_error', label: 'exception: helper()', metadata: { exception_alternative: true, exception_alternative_of: 't_call' } }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_call' }, { source: 't_call', target: 'p_out' },
+    { source: 'p_in', target: 't_call_error' }, { source: 't_call_error', target: 'p_error' }
+  ]
+}"""
+        logic = r"""
+function normalizedGraph() {
+  return JSON.stringify(cy.elements().jsons().map(element => {
+    const copy = JSON.parse(JSON.stringify(element));
+    delete copy.selected;
+    return copy;
+  }).sort((left, right) => left.data.id.localeCompare(right.data.id)));
+}
+global.trackScoreState = true;
+global.reductionOutcome = 'completed_structured';
+global.payload = { final_sm: 2, final_sm_available: true, incomplete_reason: null };
+const call = cy.getElementById('t_call');
+call.data('resolved', true);
+call.data('resolved_to', 'helper');
+call.data('raw_label', 'helper()');
+calleeNetsMap.helper = {
+  places: [
+    { id: 'helper_start', label: 'start', metadata: { boundary_role: 'source' } },
+    { id: 'helper_middle', label: 'middle' }, { id: 'helper_auto_middle', label: 'auto middle' },
+    { id: 'helper_branch', label: 'branch' },
+    { id: 'helper_normal_end', label: 'normal end', metadata: { boundary_role: 'normal_exit' } },
+    { id: 'helper_error_end', label: 'exception end', metadata: { boundary_role: 'exceptional_exit' } }
+  ],
+  transitions: [
+    { id: 'helper_prepare', label: 'prepare' }, { id: 'helper_manual_next', label: 'manual next' },
+    { id: 'helper_auto_next', label: 'automatic next' },
+    { id: 'helper_return', label: 'return' }, { id: 'helper_raise', label: 'raise' }
+  ],
+  arcs: [
+    { source: 'helper_start', target: 'helper_prepare' }, { source: 'helper_prepare', target: 'helper_middle' },
+    { source: 'helper_middle', target: 'helper_manual_next' }, { source: 'helper_manual_next', target: 'helper_auto_middle' },
+    { source: 'helper_auto_middle', target: 'helper_auto_next' }, { source: 'helper_auto_next', target: 'helper_branch' },
+    { source: 'helper_branch', target: 'helper_return' }, { source: 'helper_return', target: 'helper_normal_end' },
+    { source: 'helper_branch', target: 'helper_raise' }, { source: 'helper_raise', target: 'helper_error_end' }
+  ]
+};
+call.emit('tap');
+if (!expandedNodes.has('t_call')) throw new Error('the resolved call did not expand through the production handler');
+if (!handleFoldReduction(cy.getElementById('t_call__helper_middle'), null)) {
+  throw new Error('setup failed to create a prior manual reduction inside the expanded call');
+}
+if (!cy.getElementById('c_01').length) throw new Error('prior browser manual reduction was not retained in the call');
+openInspector(cy.getElementById('t_call'));
+const expandedGraphBeforeFunctionFold = normalizedGraph();
+let refoldScore = null;
+for (let cycle = 0; cycle < 3; cycle += 1) {
+  if (cycle > 0) openInspector(cy.getElementById('t_call'));
+  if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('expanded call did not expose Fold Entire Function');
+  const originalHandler = handleFoldEntireFunction;
+  let result = null;
+  handleFoldEntireFunction = function(node) {
+    result = originalHandler(node);
+    return result;
+  };
+  hudBtnFoldEntireFunction.click();
+  if (!result || !result.success || !result.folded.some(step => step.foldType === 'sequence')) {
+    throw new Error('Fold did not reduce the call subnet before refolding in cycle ' + (cycle + 1));
+  }
+  const generatedIds = result.folded.map(step => step.componentId).filter(Boolean);
+  if (generatedIds.includes('c_01')) throw new Error('automatic refold reused the pre-existing manual component');
+  generatedIds.forEach(id => {
+    if (cy.getElementById(id).length) throw new Error('browser Call Refolding left generated reduction component live: ' + id);
+  });
+  if (cy.getElementById('c_01').length) throw new Error('Call Refolding left a prior manual function component visible');
+  if (cy.getElementById('t_call').data('tau') !== 5 || cy.getElementById('t_call_error').data('tau') !== 0) {
+    throw new Error('browser Call Refolding did not retain the prior manual and automatic contributions exactly once');
+  }
+  const callerOutgoing = cy.edges().filter(edge => edge.source().id() === 'p_in')
+    .map(edge => edge.target().id()).sort();
+  if (JSON.stringify(callerOutgoing) !== JSON.stringify(['t_call', 't_call_error'])) {
+    throw new Error('browser Call Refolding left duplicate or incorrect caller routes: ' + JSON.stringify(callerOutgoing));
+  }
+  if (reductionOutcome !== 'incomplete' || payload.final_sm !== null || payload.final_sm_available !== false) {
+    throw new Error('browser multi-outcome Call Refolding claimed an unvalidated final SM');
+  }
+  const scoreAfterFold = foldEngine.calculateSMScore();
+  if (refoldScore !== null && scoreAfterFold !== refoldScore) {
+    throw new Error('browser refold cycle inflated accumulated weight from ' + refoldScore + ' to ' + scoreAfterFold);
+  }
+  refoldScore = scoreAfterFold;
+  if (!handleRightClickUnfold(cy.getElementById('t_call'))) throw new Error('browser Component-Local Unfold failed after cycle ' + (cycle + 1));
+  if (!expandedNodes.has('t_call')) throw new Error('browser Component-Local Unfold did not restore the expanded occurrence');
+  if (normalizedGraph() !== expandedGraphBeforeFunctionFold) {
+    throw new Error('browser Component-Local Unfold did not restore the exact function state including its prior manual fold');
+  }
+  if (!cy.getElementById('c_01').length) throw new Error('browser Component-Local Unfold did not restore its prior manual fold');
+  const restoredIds = new Set(cy.nodes().map(node => node.id()));
+  generatedIds.forEach(id => {
+    if (restoredIds.has(id)) throw new Error('browser Component-Local Unfold restored an action-created component: ' + id);
+  });
+}
+"""
+        result = self.run_node(_setup_live_fold_test_harness(net_literal, logic))
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_production_exception_only_call_has_no_normal_route(self):
         net_literal = """{
   places: [{ id: 'before', label: 'before' }, { id: 'after', label: 'after' }, { id: 'error', label: 'error' }],

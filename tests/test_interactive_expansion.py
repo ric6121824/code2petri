@@ -164,7 +164,7 @@ def _get_current_graph_expansion_functions() -> str:
     patterns = [
         r"(function currentGraphToNet\(\) \{[\s\S]*?\n      \})",
         r"(function buildCurrentGraphWithExpandedCall\(parentId, calleeName\) \{[\s\S]*?\n      \})",
-        r"(function collapseCallExpansion\(elements, parentId, expansionState\) \{[\s\S]*?\n      \})",
+        r"(function collapseCallExpansion\(elements, parentId, expansionState(?:, additionalRemovalNodeIds)?\) \{[\s\S]*?\n      \})",
     ]
     matches = [re.search(pattern, html) for pattern in patterns]
     if any(match is None for match in matches):
