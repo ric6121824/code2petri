@@ -10,7 +10,7 @@
 
 **Research:** [Primary-source reading note](../research/phase-2.8.2-function-refolding-papers.md).
 
-**Readiness:** Implementation and focused review are integrated, with a reported Fold/Unfold accumulation regression under repair. Tickets 72 and 73 still need actual Dots & Boxes browser acceptance. The user directed that multi-outcome final SM remain unavailable while outcome-aware metric research continues; no quotient projection, normalization, or penalty formula is approved.
+**Readiness:** Implementation and focused review are integrated. The reported Fold/Unfold accumulation regression is fixed in the integration branch and has focused repeated-cycle coverage. Tickets 71–73 still need the regenerated Dots & Boxes browser acceptance. The user directed that multi-outcome final SM remain unavailable while outcome-aware metric research continues; no quotient projection, normalization, or penalty formula is approved.
 
 ## Problem Statement
 
@@ -171,9 +171,9 @@ At publication this document specified required behavior and validation without 
 
 ### 2026-11-03 — Integrated implementation and acceptance state
 
-Implementation is integrated on `codex/phase-2.8.2-call-refolding`. The final two-axis code review found no remaining Spec violations and no documented Standards breaches. Review regressions for Component-Local Unfold position preservation and document-wide status preservation are fixed. Sixty-two focused viewer action, expansion, and reduction tests pass; compileall and `git diff --check` pass. Other focused parser suites had Acorn parse errors on JavaScript fixtures before assertions; those are recorded in the relevant ticket comments and are not reported as passing.
+Implementation is integrated on `codex/phase-2.8.2-call-refolding`. The earlier final two-axis code review found no remaining Spec violations and no documented Standards breaches; a new review is running against the Fold/Unfold leak repair. Review regressions for Component-Local Unfold position preservation and document-wide status preservation are fixed. The user-supplied round-01 report identified and reproduced a further repeated Fold/Unfold accumulation defect; the fix and 3-cycle regressions are recorded in Ticket 71. Twenty-nine focused action-history and expansion tests pass; compileall and `git diff --check` pass. Other focused parser suites had Acorn parse errors on JavaScript fixtures before assertions; those are recorded in the relevant ticket comments and are not reported as passing.
 
-Actual Dots & Boxes browser acceptance remains open for Tickets 71–73. Fresh browser-expanded and backend-inlined artifacts, source/generator identities, and hashes are recorded in Ticket 71. Ticket 73's historical retained standalone session is not available in this integration worktree as a browser artifact.
+Actual Dots & Boxes browser acceptance remains open for Tickets 71–73. The backend-inlined artifact on which the accumulation failure was reported predates the fix; fresh browser-expanded and backend-inlined artifacts must be regenerated from the reviewed candidate and retested. Ticket 73's historical retained standalone session is not available in this integration worktree as a browser artifact.
 
 The scoring projection evidence is recorded in [the validation note](../research/phase-2.8.2-scoring-projection-validation.md). It mechanically reproduces expected single-exit controls and derives representative conditional-return/error and nested-handler scores, but it collapses the normal/exception distinction in a disposable scoring copy. It therefore establishes a possible `SM(exit-quotiented function net)`, not invariance of the existing SM for the visible multi-outcome graph. The user directed that final SM remain unavailable while an outcome-aware metric is investigated; Ticket 71 remains incomplete.
 
