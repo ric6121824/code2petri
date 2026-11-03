@@ -563,7 +563,52 @@
         playback.totalSteps < playback.currentStep) {
       _invalidSnapshot('document.playback is invalid');
     }
-    if (documentContext.finalSm !== undefined) _requireFiniteNumber(documentContext.finalSm, 'document.finalSm');
+    const hasReductionOutcome = Object.prototype.hasOwnProperty.call(documentContext, 'reductionOutcome');
+    if (hasReductionOutcome) {
+      if (!['completed_structured', 'completed_unstructured', 'incomplete', 'unknown']
+        .includes(documentContext.reductionOutcome)) {
+        _invalidSnapshot('document.reductionOutcome is invalid');
+      }
+      if (typeof documentContext.finalSmAvailable !== 'boolean') {
+        _invalidSnapshot('document.finalSmAvailable must be a boolean');
+      }
+      _requireFiniteNumber(
+        documentContext.accumulatedReductionWeight,
+        'document.accumulatedReductionWeight'
+      );
+      if (documentContext.incompleteReason !== undefined &&
+          documentContext.incompleteReason !== null &&
+          typeof documentContext.incompleteReason !== 'string') {
+        _invalidSnapshot('document.incompleteReason must be a string or null');
+      }
+      if (documentContext.reductionOutcome === 'incomplete') {
+        if (documentContext.finalSmAvailable ||
+            (documentContext.finalSm !== undefined && documentContext.finalSm !== null)) {
+          _invalidSnapshot('incomplete reduction cannot include a final SM');
+        }
+        if (typeof documentContext.incompleteReason !== 'string' || !documentContext.incompleteReason) {
+          _invalidSnapshot('incomplete reduction requires an explanation');
+        }
+      } else if (documentContext.reductionOutcome === 'unknown') {
+        if (documentContext.finalSmAvailable ||
+            (documentContext.finalSm !== undefined && documentContext.finalSm !== null)) {
+          _invalidSnapshot('unknown reduction status cannot claim a final SM');
+        }
+      } else if (!documentContext.finalSmAvailable ||
+                 typeof documentContext.finalSm !== 'number' ||
+                 !Number.isFinite(documentContext.finalSm)) {
+        _invalidSnapshot('completed reduction must include its final SM');
+      }
+    }
+    if (documentContext.finalSm !== undefined && documentContext.finalSm !== null) {
+      _requireFiniteNumber(documentContext.finalSm, 'document.finalSm');
+    } else if (documentContext.finalSm === null && !hasReductionOutcome) {
+      _invalidSnapshot('document.finalSm cannot be null without a Reduction Outcome');
+    }
+    if (documentContext.finalSmAvailable !== undefined &&
+        typeof documentContext.finalSmAvailable !== 'boolean') {
+      _invalidSnapshot('document.finalSmAvailable must be a boolean');
+    }
     if (documentContext.fullyReducible !== undefined && typeof documentContext.fullyReducible !== 'boolean') {
       _invalidSnapshot('document.fullyReducible must be a boolean');
     }

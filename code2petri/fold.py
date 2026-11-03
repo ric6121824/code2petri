@@ -8,8 +8,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
 import json
+import math
 import os
 from typing import Any, Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
+import xml.etree.ElementTree as ET
 
 from code2petri.model import PetriNet, Place, Transition
 
@@ -23,6 +25,14 @@ class ComponentType(str, Enum):
     STATE_MACHINE = "state_machine"
     WELL_STRUCTURED = "well_structured"
     UNSTRUCTURED = "unstructured"
+
+
+class ReductionOutcome(str, Enum):
+    """Whether reduction completed and whether it required an Unstructured component."""
+
+    COMPLETED_STRUCTURED = "completed_structured"
+    COMPLETED_UNSTRUCTURED = "completed_unstructured"
+    INCOMPLETE = "incomplete"
 
 
 PRIORITY_MAP: Dict[ComponentType, int] = {
@@ -144,13 +154,24 @@ class FoldResult:
     Attributes:
         initial_net: Initial PetriNet prior to any reduction steps.
         steps: Ordered list of FoldStep snapshots.
-        final_sm: Final Structuredness Metric score (raw unnormalized tau).
-        fully_reducible: True if net reduced to a single transition with no unstructured fallback.
+        final_sm: Final Structuredness Metric score, or None when reduction is incomplete.
+        fully_reducible: Historical structural indicator, false if an Unstructured fold was used.
+        outcome: Whether reduction completed through structured or Unstructured components.
+        accumulated_weight: Sum of transition weights in the retained final net.
+        incomplete_reason: Explanation for an incomplete result.
     """
     initial_net: PetriNet
     steps: List[FoldStep]
-    final_sm: float
+    final_sm: Optional[float]
     fully_reducible: bool
+    outcome: ReductionOutcome
+    accumulated_weight: float
+    incomplete_reason: Optional[str] = None
+
+    @property
+    def final_net(self) -> PetriNet:
+        """Returns the last retained reduction state, including an incomplete remainder."""
+        return self.steps[-1].snapshot if self.steps else self.initial_net
 
     @property
     def penultimate_net(self) -> PetriNet:
@@ -163,7 +184,12 @@ class FoldResult:
         return {
             "initial_net": self.initial_net.to_dict(),
             "fold_steps": [s.to_dict() for s in self.steps],
-            "final_sm": float(self.final_sm),
+            "final_net": self.final_net.to_dict(),
+            "final_sm": float(self.final_sm) if self.final_sm is not None else None,
+            "final_sm_available": self.final_sm is not None,
+            "accumulated_reduction_weight": float(self.accumulated_weight),
+            "reduction_outcome": self.outcome.value,
+            "incomplete_reason": self.incomplete_reason,
             "fully_reducible": bool(self.fully_reducible),
         }
 
@@ -171,12 +197,47 @@ class FoldResult:
         return json.dumps(self.to_dict(), indent=indent) + "\n"
 
     def to_dot(self) -> str:
-        """Serializes the penultimate fold state to Graphviz DOT format with the final SM score in the title."""
+        """Serializes the retained result net and includes its completion status in the title."""
+        if self.outcome == ReductionOutcome.INCOMPLETE:
+            return self.final_net.to_dot(title=self._incomplete_export_title())
         return self.penultimate_net.to_dot(title=f"SM score = {self.final_sm}")
 
     def to_pnml(self) -> str:
-        """Serializes the penultimate fold state to PNML format."""
-        return self.penultimate_net.to_pnml()
+        """Serializes the appropriate fold state and records analysis status as tool metadata."""
+        net = self.final_net if self.outcome == ReductionOutcome.INCOMPLETE else self.penultimate_net
+        root = ET.fromstring(net.to_pnml())
+        net_element = next((child for child in root if child.tag.endswith("net")), None)
+        if net_element is None:
+            raise ValueError("Generated PNML is missing its net element")
+        namespace = root.tag[1:].split("}", 1)[0] if root.tag.startswith("{") else ""
+        qualify = lambda tag: f"{{{namespace}}}{tag}" if namespace else tag
+        toolspecific = ET.SubElement(
+            net_element,
+            qualify("toolspecific"),
+            tool="code2petri",
+            version="1.0",
+        )
+        properties = {
+            "reduction_outcome": self.outcome.value,
+            "final_sm_available": str(self.final_sm is not None).lower(),
+            "accumulated_reduction_weight": str(self.accumulated_weight),
+        }
+        if self.final_sm is not None:
+            properties["final_sm"] = str(self.final_sm)
+        if self.incomplete_reason:
+            properties["incomplete_reason"] = self.incomplete_reason
+        for name, value in properties.items():
+            prop = ET.SubElement(toolspecific, qualify("property"), name=name)
+            text = ET.SubElement(prop, qualify("text"))
+            text.text = value
+        ET.indent(root, space="  ", level=0)
+        return ET.tostring(root, encoding="utf-8", xml_declaration=True).decode("utf-8")
+
+    def _incomplete_export_title(self) -> str:
+        title = f"Final SM unavailable — reduction incomplete (Accumulated Reduction Weight = {self.accumulated_weight:g})"
+        if self.incomplete_reason:
+            title += f" — {self.incomplete_reason}"
+        return title
 
 
 class NetTopology:
@@ -281,6 +342,109 @@ class NetTopology:
         return abs(splits - joins) + 1
 
 
+def _reachable_within(
+    topo: NetTopology,
+    start_id: str,
+    allowed_ids: Set[str],
+    reverse: bool = False,
+) -> Set[str]:
+    """Returns the nodes reachable from a boundary while staying in a candidate subnet."""
+    neighbors = topo.presets if reverse else topo.postsets
+    visited = {start_id}
+    pending = [start_id]
+    while pending:
+        current = pending.pop()
+        for neighbor in neighbors(current):
+            if neighbor in allowed_ids and neighbor not in visited:
+                visited.add(neighbor)
+                pending.append(neighbor)
+    return visited
+
+
+def component_rejection_reason(net: PetriNet, component: "Component") -> Optional[str]:
+    """Explains why replacing a candidate subnet would not preserve its interface or marking."""
+    topo = NetTopology(net)
+    node_ids = topo.place_ids | topo.trans_ids
+    boundaries = {component.entrance, component.exit}
+    interior = set(component.internal_node_ids)
+    component_ids = boundaries | interior
+
+    if component.entrance == component.exit:
+        return "component source and sink must be distinct"
+    missing = component_ids - node_ids
+    if missing:
+        return f"candidate references missing nodes: {', '.join(sorted(missing))}"
+    if boundaries & interior:
+        return "component boundaries cannot also be consumed interior nodes"
+    if not any(tid in component_ids for tid in topo.trans_ids):
+        return "candidate subnet contains no transitions"
+    if component.exit not in _reachable_within(topo, component.entrance, component_ids):
+        return "component sink is not reachable from its source"
+
+    forward = _reachable_within(topo, component.entrance, component_ids)
+    backward = _reachable_within(topo, component.exit, component_ids, reverse=True)
+    if forward != component_ids or backward != component_ids:
+        return "candidate does not cover every node on a source-to-sink path"
+
+    for arc in net.arcs:
+        source_id = arc.source.id
+        target_id = arc.target.id
+        source_inside = source_id in component_ids
+        target_inside = target_id in component_ids
+        if source_inside and not target_inside and source_id != component.exit:
+            return f"candidate has an outgoing interface outside its sink at {source_id}"
+        if target_inside and not source_inside and target_id != component.entrance:
+            return f"candidate has an incoming interface inside its source at {target_id}"
+
+    consumed_ids = interior | {
+        boundary_id for boundary_id in boundaries if topo.is_transition(boundary_id)
+    }
+    affected_arc_pairs: Dict[Tuple[str, str], int] = defaultdict(int)
+    for arc in net.arcs:
+        pair = (arc.source.id, arc.target.id)
+        if pair[0] in consumed_ids or pair[1] in consumed_ids or pair[0] in interior or pair[1] in interior:
+            if arc.weight != 1:
+                return f"candidate requires unsupported arc weight {arc.weight} on {pair[0]} -> {pair[1]}"
+            affected_arc_pairs[pair] += 1
+            if affected_arc_pairs[pair] > 1:
+                return f"candidate contains parallel arcs on {pair[0]} -> {pair[1]}"
+
+    for node_id in interior:
+        place = topo.place_map.get(node_id)
+        if place is not None and place.initial_tokens != 0:
+            return f"candidate would consume marked place {node_id}"
+
+    if not math.isfinite(float(component.omega)):
+        return "candidate penalty must be a finite number"
+    return None
+
+
+def _workflow_net_rejection_reason(net: PetriNet) -> Optional[str]:
+    """Checks whether whole-net fallback has one covered, unmarked workflow interface."""
+    topo = NetTopology(net)
+    source_places = [place for place in net.places if topo.in_degree(place.id) == 0]
+    sink_places = [place for place in net.places if topo.out_degree(place.id) == 0]
+    if len(source_places) != 1:
+        return f"whole-net fallback requires one source place; found {len(source_places)}"
+    if len(sink_places) != 1:
+        return f"whole-net fallback requires one sink place; found {len(sink_places)}"
+    source = source_places[0]
+    sink = sink_places[0]
+    if source.id == sink.id:
+        return "whole-net fallback requires distinct source and sink places"
+
+    all_node_ids = topo.place_ids | topo.trans_ids
+    forward = _reachable_within(topo, source.id, all_node_ids)
+    backward = _reachable_within(topo, sink.id, all_node_ids, reverse=True)
+    if forward != all_node_ids or backward != all_node_ids:
+        return "not every node lies on a source-to-sink path"
+
+    for place in net.places:
+        if place.id not in {source.id, sink.id} and place.initial_tokens != 0:
+            return f"whole-net fallback would consume marked place {place.id}"
+    return None
+
+
 @dataclass(frozen=True)
 class Subnet:
     """A structural subnet or SESE component within a Petri net.
@@ -357,9 +521,11 @@ def _fold_first_candidate(
     step_number: int,
 ) -> Optional[Tuple[PetriNet, FoldStep]]:
     """Helper to fold the first candidate component if any are detected."""
-    if not candidates:
-        return None
-    return fold_component(net, candidates[0], step_number)
+    for candidate in candidates:
+        if component_rejection_reason(net, candidate) is not None:
+            continue
+        return fold_component(net, candidate, step_number)
+    return None
 
 
 def fold_sequence(
@@ -740,29 +906,26 @@ def _detect_macro(
     if not candidates:
         return []
 
-    # ProM selects MAXIMAL component
+    # ProM selects the maximal component, skipping any candidate that cannot be
+    # represented by the supported boundary, marking, and arc contract.
     candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
-    _, best_src, best_snk, best_nodes = candidates[0]
-
-    diff = topo.calculate_symmetry_multiplier(best_nodes, use_subnet_degrees=False)
-
-    comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
-    tau_sum = sum(t.get_tau() for t in comp_trans)
-    multiplier = cfg.marked_graph if is_marked_graph else cfg.state_machine
-    tau_new = sum(multiplier * t.get_tau() for t in comp_trans) * diff
-    omega = tau_new - tau_sum
-
     comp_type = ComponentType.MARKED_GRAPH if is_marked_graph else ComponentType.STATE_MACHINE
-
-    return [
-        Component(
+    multiplier = cfg.marked_graph if is_marked_graph else cfg.state_machine
+    for _, best_src, best_snk, best_nodes in candidates:
+        diff = topo.calculate_symmetry_multiplier(best_nodes, use_subnet_degrees=False)
+        comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
+        tau_sum = sum(t.get_tau() for t in comp_trans)
+        tau_new = sum(multiplier * t.get_tau() for t in comp_trans) * diff
+        candidate = Component(
             component_type=comp_type,
             internal_node_ids=best_nodes - {best_src, best_snk},
             entrance=best_src,
             exit=best_snk,
-            omega=omega,
+            omega=tau_new - tau_sum,
         )
-    ]
+        if component_rejection_reason(topo.net, candidate) is None:
+            return [candidate]
+    return []
 
 
 def detect_marked_graphs(
@@ -850,31 +1013,29 @@ def detect_well_structured(
     if not candidates:
         return []
 
-    # ProM selects MAXIMAL well-structured component
+    # ProM selects the maximal valid well-structured component.
     candidates.sort(key=lambda x: (-x[0], x[1], x[2]))
-    _, best_src, best_snk, best_nodes = candidates[0]
+    for _, best_src, best_snk, best_nodes in candidates:
+        diff_p = topo.calculate_symmetry_multiplier(
+            best_nodes, [nid for nid in best_nodes if topo.is_place(nid)], use_subnet_degrees=False
+        )
+        diff_t = topo.calculate_symmetry_multiplier(
+            best_nodes, [nid for nid in best_nodes if topo.is_transition(nid)], use_subnet_degrees=False
+        )
 
-    diff_p = topo.calculate_symmetry_multiplier(
-        best_nodes, [nid for nid in best_nodes if topo.is_place(nid)], use_subnet_degrees=False
-    )
-    diff_t = topo.calculate_symmetry_multiplier(
-        best_nodes, [nid for nid in best_nodes if topo.is_transition(nid)], use_subnet_degrees=False
-    )
-
-    comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
-    tau_sum = sum(t.get_tau() for t in comp_trans)
-    tau_new = sum(cfg.well_structured * t.get_tau() for t in comp_trans) * diff_p * diff_t
-    omega = tau_new - tau_sum
-
-    return [
-        Component(
+        comp_trans = [t for t in topo.net.transitions if t.id in best_nodes]
+        tau_sum = sum(t.get_tau() for t in comp_trans)
+        tau_new = sum(cfg.well_structured * t.get_tau() for t in comp_trans) * diff_p * diff_t
+        candidate = Component(
             component_type=ComponentType.WELL_STRUCTURED,
             internal_node_ids=best_nodes - {best_src, best_snk},
             entrance=best_src,
             exit=best_snk,
-            omega=omega,
+            omega=tau_new - tau_sum,
         )
-    ]
+        if component_rejection_reason(topo.net, candidate) is None:
+            return [candidate]
+    return []
 
 
 def fold_well_structured(
@@ -912,9 +1073,10 @@ def detect_unstructured(net_or_topology: Any, config: Optional[FoldConfig] = Non
     Strategy:
     1. Minimal SESE knot isolation: searches for place pairs (p_source, p_sink) that form
        a valid SESE subnet (forward == backward, >1 transitions) and selects the MINIMAL
-       subnet by node count, ensuring local irregularities (e.g. goto) are isolated.
-    2. Global fallback: if no internal SESE pair exists, folds the entire remaining net
-       bounded by source and sink places.
+       subnet by node count, ensuring local irregularities (e.g. goto) are isolated. Each
+       candidate is revalidated for complete coverage, markings, interfaces, and weights.
+    2. Whole-net fallback is available only for a connected, single-source/single-sink
+       workflow net whose internal places and rewired arcs satisfy the supported contract.
     """
     cfg = config if config is not None else FoldConfig()
     topo = net_or_topology if isinstance(net_or_topology, NetTopology) else NetTopology(net_or_topology)
@@ -925,40 +1087,34 @@ def detect_unstructured(net_or_topology: Any, config: Optional[FoldConfig] = Non
         candidates.append((len(sese_nodes), p_src_id, p_snk_id, sese_nodes))
 
     if candidates:
-        # Select the MINIMAL component (isolates the exact unstructured knot per User Story 3)
+        # Select the MINIMAL valid component (isolates the exact unstructured knot).
         candidates.sort(key=lambda x: (x[0], x[1], x[2]))
-        _, p_src_id, p_snk_id, comp_nodes = candidates[0]
-
-        knot_subnet = Subnet(
-            places={nid for nid in comp_nodes if topo.is_place(nid)},
-            transitions={nid for nid in comp_nodes if topo.is_transition(nid)},
-            arcs={(u, v) for (u, v) in topo.direct_arcs if u in comp_nodes and v in comp_nodes},
-        )
-
-        omega = _calculate_unstructured_omega(topo, knot_subnet, cfg)
-
-        return [
-            Component(
+        for _, p_src_id, p_snk_id, comp_nodes in candidates:
+            knot_subnet = Subnet(
+                places={nid for nid in comp_nodes if topo.is_place(nid)},
+                transitions={nid for nid in comp_nodes if topo.is_transition(nid)},
+                arcs={(u, v) for (u, v) in topo.direct_arcs if u in comp_nodes and v in comp_nodes},
+            )
+            omega = _calculate_unstructured_omega(topo, knot_subnet, cfg)
+            component = Component(
                 component_type=ComponentType.UNSTRUCTURED,
                 internal_node_ids=comp_nodes - {p_src_id, p_snk_id},
                 entrance=p_src_id,
                 exit=p_snk_id,
                 omega=omega,
             )
-        ]
+            if component_rejection_reason(topo.net, component) is None:
+                return [component]
 
-    # 2. Global fallback: whole net between source and sink places
+    # 2. Global fallback: whole net only when its source/sink contract is justified.
     if len(topo.trans_ids) <= 1:
         return []
 
-    source_candidates = topo.source_places()
-    sink_candidates = topo.sink_places()
-    p_src = source_candidates[0] if source_candidates else topo.net.places[0]
-    p_snk = sink_candidates[0] if sink_candidates else topo.net.places[-1]
-    if p_src.id == p_snk.id and len(topo.net.places) > 1:
-        other_places = [p for p in topo.net.places if p.id != p_src.id]
-        if other_places:
-            p_snk = other_places[-1]
+    if _workflow_net_rejection_reason(topo.net) is not None:
+        return []
+
+    p_src = next(place for place in topo.net.places if topo.in_degree(place.id) == 0)
+    p_snk = next(place for place in topo.net.places if topo.out_degree(place.id) == 0)
 
     global_subnet = Subnet(
         places=set(topo.place_ids),
@@ -969,15 +1125,14 @@ def detect_unstructured(net_or_topology: Any, config: Optional[FoldConfig] = Non
     omega = _calculate_unstructured_omega(topo, global_subnet, cfg)
 
     internal_nodes = (global_subnet.places - {p_src.id, p_snk.id}) | global_subnet.transitions
-    return [
-        Component(
-            component_type=ComponentType.UNSTRUCTURED,
-            internal_node_ids=internal_nodes,
-            entrance=p_src.id,
-            exit=p_snk.id,
-            omega=omega,
-        )
-    ]
+    component = Component(
+        component_type=ComponentType.UNSTRUCTURED,
+        internal_node_ids=internal_nodes,
+        entrance=p_src.id,
+        exit=p_snk.id,
+        omega=omega,
+    )
+    return [component] if component_rejection_reason(topo.net, component) is None else []
 
 
 def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> List[Component]:
@@ -994,20 +1149,26 @@ def detect_components(net: PetriNet, config: Optional[FoldConfig] = None) -> Lis
 
     topo = NetTopology(net)
     components: List[Component] = []
-    components.extend(detect_sequences(topo, config))
-    components.extend(detect_choices(topo, config))
-    components.extend(detect_while(topo, config))
-    components.extend(detect_loops(topo, config))
+    for detector in (detect_sequences, detect_choices, detect_while, detect_loops):
+        components.extend(
+            component for component in detector(topo, config)
+            if component_rejection_reason(net, component) is None
+        )
 
     # Macro-components are evaluated only if no elementary components are present per Definition 21
     if not components:
-        components.extend(detect_marked_graphs(topo, config))
-        components.extend(detect_state_machines(topo, config))
-        components.extend(detect_well_structured(topo, config))
+        for detector in (detect_marked_graphs, detect_state_machines, detect_well_structured):
+            components.extend(
+                component for component in detector(topo, config)
+                if component_rejection_reason(net, component) is None
+            )
 
     # Unstructured components are evaluated as fallback per Definition 21 Priority 7
     if not components:
-        components.extend(detect_unstructured(topo, config))
+        components.extend(
+            component for component in detect_unstructured(topo, config)
+            if component_rejection_reason(net, component) is None
+        )
 
     # Definition 21 sorting:
     # 1. priority rank (lowest integer = highest priority)
@@ -1061,6 +1222,10 @@ def fold_component(
     Returns:
         A tuple of (folded_petri_net, fold_step_record).
     """
+    rejection_reason = component_rejection_reason(net, component)
+    if rejection_reason is not None:
+        raise ValueError(f"Invalid reduction candidate: {rejection_reason}")
+
     folded_net = net.clone()
     topo = NetTopology(folded_net)
 
@@ -1135,7 +1300,7 @@ def fold_unstructured(
 def _is_trivial_workflow_net(net: PetriNet) -> bool:
     """Returns True if the net is reduced to a trivial workflow net (single transition connecting distinct source to sink)."""
     if len(net.transitions) == 0:
-        return len(net.places) <= 1
+        return False
     if len(net.transitions) == 1:
         t = net.transitions[0]
         topo = NetTopology(net)
@@ -1150,6 +1315,12 @@ def _is_trivial_workflow_net(net: PetriNet) -> bool:
         if {p.id for p in net.places} != {p_in_id, p_out_id}:
             return False
         if topo.presets(p_in_id) or topo.postsets(p_out_id):
+            return False
+        expected_arcs = {(p_in_id, t.id), (t.id, p_out_id)}
+        actual_arcs = [(arc.source.id, arc.target.id) for arc in net.arcs]
+        if len(actual_arcs) != len(expected_arcs) or set(actual_arcs) != expected_arcs:
+            return False
+        if any(arc.weight != 1 for arc in net.arcs):
             return False
         return True
     return False
@@ -1179,7 +1350,7 @@ def fold_net(
     step_number = 1
     fully_reducible = True
 
-    while not _is_trivial_workflow_net(current_net) and len(current_net.transitions) > 1:
+    while not _is_trivial_workflow_net(current_net):
         # Prioritize Sequence (Single-Place Contraction) -> Choice -> While (Loop)
         # -> Marked Graph -> State Machine -> Well Structured -> Elementary Loop
         # -> Unstructured (minimal SESE knot fallback) per ProM priority
@@ -1199,18 +1370,45 @@ def fold_net(
             step_number += 1
             if step.component_type == ComponentType.UNSTRUCTURED:
                 fully_reducible = False
-                if len(current_net.transitions) <= 1 or len(current_net.places) <= 1:
-                    break
             continue
 
         # Irreducible net with no further reduction possible
         break
 
-    final_sm = current_net.transitions[0].get_tau() if current_net.transitions else 0.0
+    completed = _is_trivial_workflow_net(current_net)
+    accumulated_weight = sum(t.get_tau() for t in current_net.transitions)
+    if completed:
+        final_sm = current_net.transitions[0].get_tau()
+        outcome = (
+            ReductionOutcome.COMPLETED_STRUCTURED
+            if fully_reducible
+            else ReductionOutcome.COMPLETED_UNSTRUCTURED
+        )
+        incomplete_reason = None
+    else:
+        final_sm = None
+        outcome = ReductionOutcome.INCOMPLETE
+        incomplete_reason = _reduction_incomplete_reason(current_net)
 
     return FoldResult(
         initial_net=initial_snapshot,
         steps=steps,
         final_sm=final_sm,
         fully_reducible=fully_reducible,
+        outcome=outcome,
+        accumulated_weight=accumulated_weight,
+        incomplete_reason=incomplete_reason,
     )
+
+
+def _reduction_incomplete_reason(net: PetriNet) -> str:
+    """Returns the most useful reason a retained graph cannot claim a final SM."""
+    if not net.transitions:
+        return "no remaining transition can represent the complete workflow"
+    workflow_reason = _workflow_net_rejection_reason(net)
+    if workflow_reason is not None:
+        return workflow_reason
+    for arc in net.arcs:
+        if arc.weight != 1:
+            return f"unsupported arc weight {arc.weight} prevents a validated reduction"
+    return "no eligible validated reduction remains; the graph is preserved"

@@ -30,3 +30,7 @@ Specification: [Phase 2.8.2 — Call Refolding and Exit Preservation](../specs/p
 ### 2026-11-03 — Approved publication
 
 Published after the user approved the three-ticket breakdown, scopes, and blocking edges. Tickets 72 and 73 can start independently; Ticket 71 is blocked by both. Publication does not claim implementation or browser acceptance.
+
+### 2026-11-03 — Implementation progress
+
+Implemented in the Ticket 73 work branch: Python fallback validation and incomplete `ReductionOutcome` reporting, browser Unstructured candidate revalidation, preserved-result HTML/PNML export metadata, and snapshot outcome validation. Focused API, CLI, Python export, headless viewer, PNML, and session tests pass. The regenerated Dots & Boxes browser check (refusal, preserved exits, save/reopen, and continued editing) was not performed in this worktree; keep this ticket open for that acceptance and the remaining integration review.

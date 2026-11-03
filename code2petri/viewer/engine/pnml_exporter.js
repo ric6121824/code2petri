@@ -155,6 +155,24 @@
     });
 
     xml += '    </page>\n';
+    if (typeof opts.reductionOutcome === 'string') {
+      const properties = {
+        reduction_outcome: opts.reductionOutcome,
+        final_sm_available: String(opts.finalSmAvailable === true),
+        accumulated_reduction_weight: String(opts.accumulatedReductionWeight)
+      };
+      if (opts.finalSmAvailable === true && Number.isFinite(Number(opts.finalSm))) {
+        properties.final_sm = String(opts.finalSm);
+      }
+      if (typeof opts.incompleteReason === 'string' && opts.incompleteReason) {
+        properties.incomplete_reason = opts.incompleteReason;
+      }
+      xml += '    <toolspecific tool="code2petri" version="1.0">\n';
+      Object.keys(properties).forEach(function(name) {
+        xml += `      <property name="${escapeXml(name)}" value="${escapeXml(properties[name])}"/>\n`;
+      });
+      xml += '    </toolspecific>\n';
+    }
     xml += '  </net>\n';
     xml += '</pnml>\n';
 

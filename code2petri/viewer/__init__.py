@@ -3,7 +3,7 @@ import json
 import os
 from typing import Any, Dict, Optional, Union
 
-from code2petri.fold import FoldResult
+from code2petri.fold import FoldResult, ReductionOutcome
 from code2petri.model import PetriNet
 
 
@@ -133,9 +133,18 @@ def generate_html(
         }
     elif isinstance(net_or_fold, FoldResult):
         fold_dict = net_or_fold.to_dict()
-        display_title = title if title is not None else f"SM Score = {net_or_fold.final_sm}"
+        if net_or_fold.outcome == ReductionOutcome.INCOMPLETE:
+            display_title = title if title is not None else "Final SM unavailable — reduction incomplete"
+            mode_desc = (
+                "Reduction incomplete. "
+                f"Accumulated Reduction Weight = {net_or_fold.accumulated_weight:g}."
+            )
+            if net_or_fold.incomplete_reason:
+                mode_desc += f" {net_or_fold.incomplete_reason}."
+        else:
+            display_title = title if title is not None else f"SM Score = {net_or_fold.final_sm}"
+            mode_desc = "Interactive step playback of ProM-aligned structural reductions."
         mode_label = "Fold Reduction View"
-        mode_desc = "Interactive step playback of ProM-aligned structural reductions."
         payload = {
             "mode": "fold",
             "title": display_title,
