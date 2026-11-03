@@ -47,3 +47,9 @@ Fresh acceptance files were generated from Dots & Boxes source commit `3ea8f5ea8
 ### 2026-11-03 — Regenerated after Fold/Unfold leak repair
 
 After integration commit `0d7eceea70795ad0ca3123adc44901644dcd593f`, regenerated the same two variants from source commit `3ea8f5ea8b8514dca03e706c45b6cd7e8ca5672c`. Use `/private/tmp/code2petri-phase-2.8.2/browser-call-expansion.html` (SHA-256 `cf57974ccbd9d3be0fc136c8eb97f5dd72f6062e723c1289dfaa9eacb4af175e`) for browser-expanded calls and `/private/tmp/code2petri-phase-2.8.2/backend-inlined.html` (SHA-256 `ff3a1dd355f9458e7a73cd743f83768b2ea07b01efc43865b7ee2bf09e9253fe`) for backend-inlined calls. These regenerated files await human browser acceptance, including both outcome routes, refold, history, save/reopen, and continued editing.
+
+### 2026-11-03 — User-run browser checklist results
+
+The user checked normal and exceptional routing, caller-handler behavior, and the Fold/Unfold lifecycle in Safari 18.6 using the regenerated browser-expanded and backend-inlined artifacts from generator commit `0d7eceea70795ad0ca3123adc44901644dcd593f`. Backend-inlined PNML outcome preservation was marked checked; browser-expanded PNML export was skipped. The standalone reference-export reproduction was not separately recorded, and the checklist's overall result fields are partial. Keep the ticket `ready-for-human` pending complete acceptance.
+
+The user noted layout/position restoration problems during Undo/Redo and Unfold. This also affects current-graph/view preservation; the details are recorded under Ticket 71. For long inline node IDs, use the Search graph result row to capture the occurrence ID and owner path; the inspector did not show the full value.

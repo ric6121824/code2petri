@@ -42,3 +42,7 @@ Integrated into `codex/phase-2.8.2-call-refolding` at candidate commit `10c7553b
 ### 2026-11-03 — Current candidate review state
 
 The user-supplied round-01 review's original fallback finding was measured against the pre-implementation publication commit; the integrated Ticket 73 fallback and incomplete-result fixes remain present. Final Spec review of candidate `0d7ecee` found no mismatch, and Standards review found no documented breach. The regenerated browser-expanded and backend-inlined artifacts are recorded in Ticket 72, but they do not reconstruct the historical retained standalone session for the specific refusal scenario. That browser acceptance remains open.
+
+### 2026-11-03 — Historical browser scenario skipped
+
+The user attempted to open the old graph needed for the historical invalid-fallback browser check. The viewer rejected it with `Invalid Fold State Snapshot: graph or restoration data contains a duplicate node ID`. The user chose to skip this scenario. No topology repair was attempted, and the pre-fix `backend-inlined_session_save.json` in the generator export folder is the Fold/Unfold leak progression, not the historical pre-fallback graph. Keep the historical refusal acceptance unchecked and the ticket `ready-for-human`; regenerated Phase 2.8.2 HTML does not substitute for the unavailable old graph.

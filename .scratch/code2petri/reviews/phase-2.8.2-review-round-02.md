@@ -59,3 +59,14 @@ The branch records passing focused action-history and expansion checks, includin
 
 - **Standards:** 0 hard findings; 1 possible duplication smell (judgment call).
 - **Spec:** 0 implementation mismatches among the reviewed fixes; 3 acceptance/design gates remain open. The broadest open item is actual browser acceptance on the regenerated artifacts.
+
+## User-run browser follow-up
+
+The user subsequently performed substantial manual checks in Safari 18.6 on the regenerated artifacts from generator commit `0d7eceea70795ad0ca3123adc44901644dcd593f`. The checklist records normal/exception routing, Fold/Unfold, three-cycle removal of generated `c_x` components, score availability, history, save/reopen, and continued editing as done in both paths; backend-inlined PNML outcome preservation is checked. Browser-expanded PNML export was skipped. This is partial user-run acceptance, not a full pass.
+
+The browser run identified a remaining position/layout issue: unaffected nodes do not return to their prior layout on Undo/Redo or Component-Local Unfold. This conflicts with Ticket 71's exact local position/current-view restoration requirement and remains a Spec finding pending repair/recheck. The backend-inlined `_coerce_direction()` occurrence IDs were too long for the inspector to display; use the Search graph result row for the full occurrence ID/context, but note those two IDs remain unrecorded. Ticket 73's historical invalid-fallback check was skipped because its old session fails to open with `Invalid Fold State Snapshot: graph or restoration data contains a duplicate node ID`. Keep the historical acceptance and score-design gate open.
+
+## Updated disposition
+
+- **Standards:** unchanged: 0 hard findings; 1 possible duplication smell (judgment call).
+- **Spec:** the three original implementation findings are addressed. The later browser run adds one implementation gap: graph positions are not fully restored through Undo/Redo and Component-Local Unfold. Browser acceptance is partial; browser-expanded PNML and the Ticket 73 historical refusal case remain unverified/skipped, and the scoring gate remains open.
