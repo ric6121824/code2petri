@@ -2594,8 +2594,7 @@
                   return element.group === 'nodes';
                 }).map(function(element) { return element.data.id; })
               ))),
-              expandedNodes: nestedExpansionEntries,
-              analysis: preActionAnalysis
+              expandedNodes: nestedExpansionEntries
             };
             callElement.classes = (callElement.classes || 'transition').split(/\s+/)
               .filter(function(name) { return name !== 'compound'; })
@@ -2738,8 +2737,7 @@
               removeNodeIds: Array.from(new Set(Array.from(localNodeIds).concat(
                 [callId].concat(exceptionRecords.map(function(record) { return record.id; }))
               ))),
-              expandedNodes: nestedExpansionEntries,
-              analysis: preActionAnalysis
+              expandedNodes: nestedExpansionEntries
             };
             remaining.push({
               group: 'nodes', data: callData,
@@ -3097,10 +3095,12 @@
         const viewportBefore = captureViewport(cy);
         const functionRestoration = node.data('function_restoration');
         let result;
+        let restoredFunction = false;
         if (functionRestoration && functionRestoration.version === 1 &&
             Array.isArray(functionRestoration.elements) &&
             Array.isArray(functionRestoration.removeNodeIds) &&
             Array.isArray(functionRestoration.expandedNodes)) {
+          restoredFunction = true;
           const currentElements = cy.elements().jsons();
           const removalIds = new Set(functionRestoration.removeNodeIds);
           let foundDescendant = true;
@@ -3139,22 +3139,14 @@
               restoredNode.position({ x: element.position.x, y: element.position.y });
             }
           });
-          if (typeof reductionOutcome !== 'undefined' && functionRestoration.analysis) {
-            reductionOutcome = functionRestoration.analysis.reductionOutcome;
-          }
-          if (typeof payload !== 'undefined' && functionRestoration.analysis) {
-            payload.reduction_outcome = functionRestoration.analysis.reductionOutcome;
-            payload.incomplete_reason = functionRestoration.analysis.incompleteReason;
-            payload.final_sm = functionRestoration.analysis.finalSm;
-            payload.final_sm_available = functionRestoration.analysis.finalSmAvailable;
-          }
           result = { success: true, restored: functionRestoration.elements.length };
         } else {
           result = foldEngine.executeComponentLocalUnfold(node);
         }
         if (!result || !result.success) return false;
         if (typeof refreshCompoundDepthPresentation === 'function') refreshCompoundDepthPresentation(cy);
-        if (cy.elements().length > 0 && typeof cy.layout === 'function' && typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
+        if (!restoredFunction && cy.elements().length > 0 && typeof cy.layout === 'function' &&
+            typeof DAGRE_LAYOUT_OPTIONS !== 'undefined') {
           cy.layout(Object.assign({}, DAGRE_LAYOUT_OPTIONS, { fit: false })).run();
         }
         restoreViewport(cy, viewportBefore.zoom, viewportBefore.pan);

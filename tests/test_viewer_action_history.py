@@ -485,6 +485,23 @@ const call = cy.getElementById('t_call');
 call.data('resolved', true);
 call.data('resolved_to', 'helper');
 call.data('raw_label', 'helper()');
+const DAGRE_LAYOUT_OPTIONS = { name: 'dagre' };
+let simulateLocalFinalLayout = false;
+let componentLocalLayoutRuns = 0;
+cy.layout = function() {
+  return { run: function() {
+    if (!simulateLocalFinalLayout) return;
+    componentLocalLayoutRuns += 1;
+    cy.nodes().forEach(node => {
+      const position = node.position();
+      node.position({ x: position.x - 250, y: position.y + 800 });
+    });
+  } };
+};
+cy.add({
+  group: 'nodes', data: { id: 'unrelated', label: 'Separate component', type: 'Place' },
+  classes: 'place', position: { x: 222, y: 333 }
+});
 calleeNetsMap.helper = {
   places: [
     { id: 'helper_start', label: 'start', metadata: { boundary_role: 'source' } },
@@ -575,16 +592,105 @@ if (!lastCreatedBlob || !lastCreatedBlob.content.includes('id="t_call"') ||
     lastCreatedBlob.content.includes('name="final_sm" value=')) {
   throw new Error('the production export action did not export the live refolded graph with unavailable score metadata');
 }
+const laterUnrelatedPosition = { x: 654, y: 987 };
+cy.getElementById('unrelated').position(laterUnrelatedPosition);
+const expectedUnfoldElements = JSON.parse(beforeRefold);
+expectedUnfoldElements.find(element => element.data.id === 'unrelated').position = laterUnrelatedPosition;
+const savedLocalPositions = new Map(expectedUnfoldElements
+  .filter(element => element.group === 'nodes')
+  .map(element => [element.data.id, element.position]));
+layoutShiftHook = function() {
+  cy.nodes().forEach(node => {
+    const position = node.position();
+    node.position({ x: position.x + 500, y: position.y - 300 });
+  });
+};
+simulateLocalFinalLayout = true;
 if (!handleRightClickUnfold(cy.getElementById('t_call'))) throw new Error('Component-Local Unfold could not restore the refolded call');
-if (JSON.stringify(cy.elements().jsons()) !== beforeRefold) throw new Error('local Unfold did not restore the exact pre-refold graph');
-if (reductionOutcome !== 'completed_structured' || payload.final_sm !== 3 || payload.final_sm_available !== true) {
-  throw new Error('local Unfold did not restore the pre-action score-availability state');
+const restoredElements = cy.elements().jsons();
+if (JSON.stringify(restoredElements) !== JSON.stringify(expectedUnfoldElements)) {
+  throw new Error('local Unfold moved restored or unrelated nodes during layout');
 }
+savedLocalPositions.forEach((expected, id) => {
+  const actual = cy.getElementById(id).position();
+  if (!expected || actual.x !== expected.x || actual.y !== expected.y) {
+    throw new Error('local Unfold changed the saved position of ' + id);
+  }
+});
+const unrelatedPosition = cy.getElementById('unrelated').position();
+if (unrelatedPosition.x !== laterUnrelatedPosition.x || unrelatedPosition.y !== laterUnrelatedPosition.y) {
+  throw new Error('local Unfold changed an unrelated node position made later in the session');
+}
+if (componentLocalLayoutRuns !== 0) throw new Error('Component-Local Unfold ran a graph-wide layout for function restoration');
 if (!viewerActionHistory.undo() || expandedNodes.has('t_call')) throw new Error('Undo did not restore the refolded call');
 if (!viewerActionHistory.redo() || !expandedNodes.has('t_call')) throw new Error('Redo did not restore local Unfold from the recorded state');
 """
         script = _setup_live_fold_test_harness(net_literal, logic)
         result = self.run_node(script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_production_local_unfold_preserves_newer_incomplete_score_state(self):
+        net_literal = """{
+  places: [{ id: 'p_in', label: 'in', initial_tokens: 1 }, { id: 'p_out', label: 'out' }, { id: 'p_error', label: 'error' }],
+  transitions: [
+    { id: 't_call', label: 'helper()' },
+    { id: 't_call_error', label: 'exception: helper()', metadata: { exception_alternative: true, exception_alternative_of: 't_call' } }
+  ],
+  arcs: [
+    { source: 'p_in', target: 't_call' }, { source: 't_call', target: 'p_out' },
+    { source: 'p_in', target: 't_call_error' }, { source: 't_call_error', target: 'p_error' }
+  ]
+}"""
+        logic = r"""
+global.trackScoreState = true;
+global.reductionOutcome = 'completed_structured';
+global.payload = { final_sm: 3, final_sm_available: true, incomplete_reason: null };
+const call = cy.getElementById('t_call');
+call.data('resolved', true);
+call.data('resolved_to', 'helper');
+call.data('raw_label', 'helper()');
+calleeNetsMap.helper = {
+  places: [
+    { id: 'helper_start', label: 'start', metadata: { boundary_role: 'source' } },
+    { id: 'helper_return_end', label: 'end', metadata: { boundary_role: 'normal_exit' } },
+    { id: 'helper_exception_end', label: 'exception_end', metadata: { boundary_role: 'exceptional_exit' } }
+  ],
+  transitions: [{ id: 'helper_return', label: 'return' }, { id: 'helper_raise', label: 'raise' }],
+  arcs: [
+    { source: 'helper_start', target: 'helper_return' }, { source: 'helper_return', target: 'helper_return_end' },
+    { source: 'helper_start', target: 'helper_raise' }, { source: 'helper_raise', target: 'helper_exception_end' }
+  ]
+};
+call.emit('tap');
+if (!expandedNodes.has('t_call')) throw new Error('setup failed to expand the two-outcome call');
+const actualFoldEntireFunction = handleFoldEntireFunction;
+let foldResult = null;
+handleFoldEntireFunction = function(node) {
+  foldResult = actualFoldEntireFunction(node);
+  return foldResult;
+};
+hudBtnFoldEntireFunction.click();
+if (!foldResult || !foldResult.success || reductionOutcome !== 'incomplete' ||
+    payload.final_sm !== null || payload.final_sm_available !== false) {
+  throw new Error('the production call refold did not establish the later incomplete document state');
+}
+const laterIncompleteReason = payload.incomplete_reason;
+const callNode = cy.getElementById('t_call');
+const restoration = JSON.parse(JSON.stringify(callNode.data('function_restoration')));
+const savedDocumentAnalysis = Object.prototype.hasOwnProperty.call(restoration, 'analysis');
+restoration.analysis = {
+  reductionOutcome: 'completed_structured', incompleteReason: null, finalSm: 3, finalSmAvailable: true
+};
+callNode.data('function_restoration', restoration);
+if (!handleRightClickUnfold(callNode)) throw new Error('production Component-Local Unfold failed');
+if (reductionOutcome !== 'incomplete' || payload.reduction_outcome !== 'incomplete' ||
+    payload.final_sm !== null || payload.final_sm_available !== false ||
+    payload.incomplete_reason !== laterIncompleteReason) {
+  throw new Error('local Unfold reverted the current document-wide incomplete analysis state');
+}
+if (savedDocumentAnalysis) throw new Error('call-local restoration persisted document-wide analysis state');
+"""
+        result = self.run_node(_setup_live_fold_test_harness(net_literal, logic))
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_production_fold_entire_function_refolds_backend_inlined_occurrence(self):
