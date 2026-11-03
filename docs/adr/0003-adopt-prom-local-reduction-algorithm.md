@@ -51,6 +51,12 @@ Phase 2.8's original Fold-Entire-Function contract applied elementary reductions
 
 See [Phase 2.8](../../.scratch/code2petri/specs/phase-2.8-viewer-interactive-enhancements.md) and [Ticket 66](../../.scratch/code2petri/issues/66-function-scoped-structural-folding.md). Tickets 47 and 53 retain their completed elementary-folding scope.
 
+### Exit preservation and incomplete results — amendment, 2026-11-03
+
+The whole-net fallback above is not permission to choose one of several final exits and consume the others. Phase 2.8.2 requires validated component boundaries, preserved markings and interfaces, and execution-time revalidation in both reduction engines. Inputs outside the applicable WF-net/component assumptions retain their graph and an explicit incomplete Reduction Outcome; export continues with final SM unavailable and Accumulated Reduction Weight reported separately. The earlier termination guarantee applies to admissible WF-net reductions, not arbitrary multi-exit, disconnected, or no-exit source graphs.
+
+Call Refolding restores a function's opaque call abstraction and remains distinct from a validated SESE Structural Fold. Its richer outcome interface does not authorize using the global fallback inside a selected function. A scoring construction for that abstraction still requires evidence. See [ADR 0007](./0007-preserve-exits-and-report-incomplete-analysis.md) and [Phase 2.8.2](../../.scratch/code2petri/specs/phase-2.8.2-call-refolding-and-exit-preservation.md).
+
 ## Consequences
 
 - **Positive:** Mathematically aligns our tool with the reference academic implementation (`PNAnalysis.jar` / Lassen & van der Aalst 2008).

@@ -28,6 +28,10 @@ _Avoid_: Black box, leaf transition
 The process of replacing an opaque call transition with the complete Petri net sub-graph of the called function.
 _Avoid_: Unrolling, flattening
 
+**Call Refolding**:
+The reversal of an Inline Expansion for one call occurrence, restoring an opaque call abstraction while retaining its expanded subnet for later restoration. It preserves the occurrence's accumulated complexity contribution and distinct control-flow outcomes.
+_Avoid_: Structural Fold (when referring only to restoring a call abstraction), function deletion
+
 **Composite Net**:
 A unified Petri net constructed by linking multiple per-function or cross-file Petri nets together.
 _Avoid_: Merged graph, global net
@@ -61,12 +65,20 @@ A constructor-assignment mapping (`variable → class`) extracted from file scop
 _Avoid_: Type inference, symbol alias
 
 **Structural Fold**:
-The reduction operation (Lassen & van der Aalst 2008, Def. 19) replacing a well-structured single-entry/single-exit (SESE) subnet with an opaque transition carrying accumulated complexity weight.
+The reduction operation (Lassen & van der Aalst 2008, Def. 19) replacing an eligible single-entry/single-exit (SESE) subnet with an opaque transition carrying accumulated complexity weight.
 _Avoid_: Graph compression, subnet deletion, macro collapsing
 
 **Structuredness Metric (SM)**:
-The quantitative complexity metric derived from iterative structural reduction and component penalty weighting, representing the raw accumulated weight $\\tau$ upon termination.
+The quantitative complexity metric derived from iterative structural reduction and component penalty weighting, representing the raw accumulated weight $\\tau$ upon validated completion. An incomplete reduction has Accumulated Reduction Weight rather than a verified final SM.
 _Avoid_: Complexity index, structuredness score normalization
+
+**Accumulated Reduction Weight**:
+The total complexity weight represented by a net's current reduction state, including initial transition weights and accumulated component penalties. It is not a final Structuredness Metric while the analysis remains incomplete or unvalidated.
+_Avoid_: Final SM (when referring to an incomplete running total), visible node count
+
+**Reduction Outcome**:
+The result of reduction analysis, distinguishing completion through structured components, completion using Unstructured components, and incomplete analysis with the remaining graph preserved.
+_Avoid_: Structural reducibility (when referring to whether analysis completed), guessed final score
 
 **Component Penalty ($\\omega$)**:
 The structural penalty score assigned to a recognized component based on its structural type and branch symmetry multiplier.
@@ -97,7 +109,7 @@ The interaction paradigm where a user explicitly selects a single Place node to 
 _Avoid_: Node clicking, manual reduction
 
 **Collapsed Compound State**:
-The visual state of an inlined function where its internal Petri net structure has been entirely reduced to a single transition, represented in the UI as a closed container (displaying the function name and component ID) rather than a naked opaque transition.
+The visual state of an inlined function presented as a closed container displaying its function name and component identity, with its expanded interior retained for later restoration. It can represent completed structural reduction or Call Refolding without implying that distinct completion outcomes are merged.
 _Avoid_: Folder node, closed sub-graph
 
 **Folded Component**:
@@ -105,7 +117,7 @@ An opaque transition created by Live Fold Reduction that represents a reduced su
 _Avoid_: Deleted subnet, unexpanded call (when referring to a reduced subnet)
 
 **Component-Local Unfold**:
-The restoration of the exact subnet consumed by a chosen folded component, independently of folds elsewhere. It is distinct from chronologically undoing or redoing a viewer action.
+The restoration of the exact subnet retained by a chosen Folded Component or refolded call, independently of folds elsewhere. It is distinct from chronologically undoing or redoing a viewer action.
 _Avoid_: Local undo, node expansion
 
 **Viewer Action History**:
@@ -129,7 +141,7 @@ A single user gesture that sequentially evaluates and folds all contractible pla
 _Avoid_: Multi-fold, mass collapse
 
 **Fold-Entire-Function**:
-A repeated reduction action within one Function Fold Scope, applying eligible elementary reductions before validated structural reductions until no further progress is possible or the compound fully collapses.
+The action that analyzes and reduces eligible structure within a selected Function Fold Scope before restoring an opaque call abstraction with preserved outcomes and accumulated complexity. Its local restoration retains the function's pre-action diagram.
 _Avoid_: Function collapse, auto-fold all
 
 **Function Fold Scope**:

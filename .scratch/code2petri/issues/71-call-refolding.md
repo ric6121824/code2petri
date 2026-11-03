@@ -1,0 +1,34 @@
+# 71: Fold expanded functions back to opaque calls
+
+**What to build:** Fold-Entire-Function performs eligible reductions and restores an expanded called function to an opaque call abstraction while preserving its distinct caller outcomes and justified accumulated contribution. A simple return-or-error function remains foldable without becoming Unstructured solely because it has two outcomes. Component-Local Unfold restores the function's exact pre-action diagram, including earlier manual folds. Support both browser-expanded and backend-inlined occurrences through continued editing, history, persistence, and export, completing Phase 2.8.2 — Call Refolding and Exit Preservation.
+
+**Blocked by:** 72 — Preserve normal and exceptional exits during browser call expansion; 73 — Preserve exit boundaries and report incomplete reduction honestly.
+
+**Status:** ready-for-agent
+
+- [ ] Establish and document the function-local scoring representation, boundary treatment, metric scope, and component/weight derivation before claiming a final call-level SM. Validate a sequence, conditional return/error, nested exception handling, and an eligible genuinely unstructured component using independently justified expected classifications and values; retain established single-exit metric controls.
+- [ ] Do not assume that a common completion sink, separate scoring copy, richer interface, or residual Unstructured penalty preserves the established metric. Record evidence, assumptions, and any necessary metric/ADR amendment. If a defensible construction cannot satisfy the agreed behavior, document the obstacle and keep the ticket incomplete rather than inventing a score or weakening the requirement.
+- [ ] A function with normal and exceptional outcomes can be refolded into its call abstraction from both browser-expanded and backend-inlined states. Verify the real Dots & Boxes edge-for-move occurrence and both nested direction-coercion occurrences, plus small normal-only and return-or-error controls.
+- [ ] Perform eligible structural reductions before Call Refolding, retaining existing containment, marking, interface, candidate-validation, and priority rules. Distinguish Call Refolding from SESE Structural Fold; never enable an invalid global fallback inside the function merely to finish.
+- [ ] Preserve correct normal and exceptional caller routing as alternatives through refolding. One completion must not activate both outcomes. Multiple outcomes alone neither prohibit refolding nor justify an Unstructured penalty. The opaque presentation may use an outcome-preserving internal representation; a transition fan-out activating both outcomes is insufficient.
+- [ ] Retain the justified accumulated function contribution once. Refolding adds no penalty and does not reset an analyzed contribution to an unanalyzed-call default. Valid structural penalties may increase the contribution; alternative routes, nested summaries, expanded containers, persistence, and equivalent repeated cycles must not duplicate it.
+- [ ] Keep top-bar, inspector, playback, public results, and export claims consistent with the validated scoring scope and Reduction Outcome contract from Ticket 73. Preserve the distinction between accumulated weight and verified final SM when analysis lacks completion evidence.
+- [ ] Capture the selected function's exact state before automatic reductions plus Call Refolding, including prior manual folds, boundary connections, names, call-result ownership, resolution/return metadata, hierarchy, weights, markings, and positions. Component-Local Unfold restores that state while preserving unrelated later edits and the current view.
+- [ ] Local restoration remains available for nested components after history eviction and save/open. Do not substitute a chronological whole-document Undo snapshot for retained component-local restoration data.
+- [ ] Treat automatic reductions plus Call Refolding as one Viewer Action History gesture. One Undo reverses the complete action; Redo restores its recorded result without choosing new reductions. Failed or unchanged actions preserve graph state, component allocation, and history, including Redo availability.
+- [ ] Save/open retains outcome interfaces, contribution accounting, score availability, metadata ownership, hierarchy, names, positions, and nested restoration. Reopening starts ordinary empty chronological history but permits continued local unfolding and editing. Reject malformed recognized metadata without changing the active document; explain insufficient legacy provenance rather than inventing routes or verified scores.
+- [ ] PNML and other supported exports agree with visible call behavior and weight meaning, preserving alternative outcomes through a semantically valid graph. Presentation containers do not become extra exported operations. Original historical artifacts remain unchanged.
+- [ ] Verify through existing production generated-viewer actions and public Python/CLI/export seams, including both expansion paths, prior manual folds, independent later edits, nested restoration, Undo/Redo, injected failure rollback, component allocation, save/open, history eviction, and repeated-cycle score stability.
+- [ ] Record actual regenerated Dots & Boxes browser acceptance for both expansion paths, refolding, outcome routing, score/status display, one-gesture history, save/reopen, continued editing, and exact pre-action local unfolding. Record source/artifact identities and distinguish browser acceptance from headless support and unperformed checks.
+
+## Context and limits
+
+Use the canonical Phase 2.8.2 specification, its confirmed question tree and research note, and ADRs 0005–0007. The product requirements are settled; the scoring construction is an engineering validation gate, not an approved formula. Tickets 72 and 73 are prerequisites for complete acceptance. Do not change Tickets 66 or 70, add new source-language concurrency recognition, infer new exception classes, or repair already-damaged historical sessions.
+
+Specification: [Phase 2.8.2 — Call Refolding and Exit Preservation](../specs/phase-2.8.2-call-refolding-and-exit-preservation.md). Design record: [Confirmed question tree](../specs/phase-2.8-ticket-71-question-tree.md).
+
+## Comments
+
+### 2026-11-03 — Approved publication
+
+Published after the user approved the three-ticket breakdown, scopes, and blocking edges. Tickets 72 and 73 can start independently; Ticket 71 is blocked by both. Publication does not claim implementation or browser acceptance.
