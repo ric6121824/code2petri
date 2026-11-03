@@ -1,6 +1,6 @@
 # Phase 2.8.2 — Call Refolding and Exit Preservation
 
-**Status:** needs-info
+**Status:** ready-for-agent
 
 **Published:** 2026-11-03
 
@@ -10,7 +10,7 @@
 
 **Research:** [Primary-source reading note](../research/phase-2.8.2-function-refolding-papers.md).
 
-**Readiness:** Implementation and focused review are integrated. Tickets 72 and 73 are ready for actual Dots & Boxes browser acceptance. Ticket 71 also requires a scoring-scope decision: the tested exit-place projection defines an outcome-erased metric and has not been approved as the unchanged SM of the visible multi-outcome net. No normalization or penalty formula is currently approved.
+**Readiness:** Implementation and focused review are integrated, with a reported Fold/Unfold accumulation regression under repair. Tickets 72 and 73 still need actual Dots & Boxes browser acceptance. The user directed that multi-outcome final SM remain unavailable while outcome-aware metric research continues; no quotient projection, normalization, or penalty formula is approved.
 
 ## Problem Statement
 
@@ -175,4 +175,6 @@ Implementation is integrated on `codex/phase-2.8.2-call-refolding`. The final tw
 
 Actual Dots & Boxes browser acceptance remains open for Tickets 71–73. Fresh browser-expanded and backend-inlined artifacts, source/generator identities, and hashes are recorded in Ticket 71. Ticket 73's historical retained standalone session is not available in this integration worktree as a browser artifact.
 
-The scoring projection evidence is recorded in [the validation note](../research/phase-2.8.2-scoring-projection-validation.md). It mechanically reproduces expected single-exit controls and derives representative conditional-return/error and nested-handler scores, but it collapses the normal/exception distinction in a disposable scoring copy. It therefore establishes a possible `SM(exit-quotiented function net)`, not invariance of the existing SM for the visible multi-outcome graph. The user has not approved that metric scope or an ADR amendment, so Ticket 71 remains incomplete and final SM is withheld for the multi-outcome case.
+The scoring projection evidence is recorded in [the validation note](../research/phase-2.8.2-scoring-projection-validation.md). It mechanically reproduces expected single-exit controls and derives representative conditional-return/error and nested-handler scores, but it collapses the normal/exception distinction in a disposable scoring copy. It therefore establishes a possible `SM(exit-quotiented function net)`, not invariance of the existing SM for the visible multi-outcome graph. The user directed that final SM remain unavailable while an outcome-aware metric is investigated; Ticket 71 remains incomplete.
+
+The ongoing literature investigation is recorded in [the outcome-aware metric research note](../research/phase-2.8.2-outcome-aware-metric-research.md). It identifies multi-final-marking profiles and multi-port components as research directions, without a justified scalarization rule.

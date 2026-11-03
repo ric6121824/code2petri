@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-11-03
 
-**State:** Product decisions and test seams are captured in the published Phase 2.8.2 spec. Tickets 72 and 73 have no remaining product questions. Ticket 71's scoring construction remains engineering validation work; implementation issues 72, 73, and 71 were published after user approval on 2026-11-03.
+**State:** Product decisions and test seams are captured in the published Phase 2.8.2 spec. Tickets 72 and 73 have no remaining product questions. Ticket 71's scoring construction remains engineering validation work; on 2026-11-03 the user directed that multi-outcome final SM remain unavailable while outcome-aware metric research continues. Implementation issues 72, 73, and 71 were published after user approval on 2026-11-03.
 
 **Ticket:** [71 — Fold expanded functions back to opaque calls](../issues/71-call-refolding.md).
 
@@ -81,7 +81,9 @@ The original metric assumes a WF-net with one source place and one sink place; e
 
 **Engineering completion condition:** Before claiming a final SM for the refolded call, document the analyzed representation and metric scope, and validate it on small examples: a sequence, a conditional return/error, nested exception handling, and an eligible genuinely unstructured component. Distinguish preservation of visible outcomes from preservation or derivation of a numeric score. Keep the exit-loss defect independently fixable.
 
-**Research pointer:** The [cited reading note](../research/phase-2.8.2-function-refolding-papers.md) surveys relevant papers from van der Aalst's publication list. It separates the original SM assumptions from richer normal/fault interfaces and substitution models with multiple final states. It supplies alternatives to investigate and does not establish a scoring method or approve outcome-merging.
+**Latest user direction — 2026-11-03:** “keep the score unavailable and continue investigating an outcome-aware metric.” Continue to set multi-outcome `finalSmAvailable=false`; the user has not approved the exit-place quotient or another scalar construction. The current research identifies outcome-indexed profiles and multi-port components as directions, not validated score formulas. See [the research note](../research/phase-2.8.2-outcome-aware-metric-research.md).
+
+**Research pointer:** The [cited reading note](../research/phase-2.8.2-function-refolding-papers.md) surveys relevant papers from van der Aalst's publication list. It separates the original SM assumptions from richer normal/fault interfaces and substitution models with multiple final states. The follow-up [outcome-aware metric research](../research/phase-2.8.2-outcome-aware-metric-research.md) evaluates candidate profiles and multi-port summaries; neither establishes a scalar formula or approves outcome-merging.
 
 ### Q4 — settled: restore the pre-action diagram
 
