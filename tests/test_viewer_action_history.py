@@ -677,9 +677,7 @@ if (!foldResult || !foldResult.success || reductionOutcome !== 'incomplete' ||
 const laterIncompleteReason = payload.incomplete_reason;
 const callNode = cy.getElementById('t_call');
 const restoration = JSON.parse(JSON.stringify(callNode.data('function_restoration')));
-if (Object.prototype.hasOwnProperty.call(restoration, 'analysis')) {
-  throw new Error('call-local restoration persisted document-wide analysis state');
-}
+const savedDocumentAnalysis = Object.prototype.hasOwnProperty.call(restoration, 'analysis');
 restoration.analysis = {
   reductionOutcome: 'completed_structured', incompleteReason: null, finalSm: 3, finalSmAvailable: true
 };
@@ -690,6 +688,7 @@ if (reductionOutcome !== 'incomplete' || payload.reduction_outcome !== 'incomple
     payload.incomplete_reason !== laterIncompleteReason) {
   throw new Error('local Unfold reverted the current document-wide incomplete analysis state');
 }
+if (savedDocumentAnalysis) throw new Error('call-local restoration persisted document-wide analysis state');
 """
         result = self.run_node(_setup_live_fold_test_harness(net_literal, logic))
         self.assertEqual(result.returncode, 0, result.stderr)
