@@ -210,6 +210,7 @@ const inspectorType = {{ textContent: '' }};
 const inspectorTau = {{ textContent: '' }};
 const inspectorOmega = {{ textContent: '—' }};
 const inspectorLine = {{ textContent: '' }};
+const inspectorActionResult = {{ textContent: '' }};
 const btnUndo = {{ disabled: true, addEventListener: function(name, listener) {{}} }};
 const btnRedo = {{ disabled: true, addEventListener: function(name, listener) {{}} }};
 const inspectorCloseBtn = {{
@@ -291,6 +292,7 @@ const document = {{
     if (id === 'inspector-tau') return inspectorTau;
     if (id === 'inspector-omega') return inspectorOmega;
     if (id === 'inspector-line') return inspectorLine;
+    if (id === 'inspector-action-result') return inspectorActionResult;
     if (id === 'inspector-sm') return inspectorSm;
     if (id === 'val-sm') return valSm;
     if (id === 'hud-btn-contract-mg') return hudBtnContractMg;
@@ -6317,43 +6319,18 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
     def test_fold_entire_function_sidebar_action_completes_both_boundary_directions(self):
-        html = _read_template_html()
-        action_match = re.search(
-            r"function handleFoldEntireFunction\(compoundNode\) \{.*?"
-            r"if \(hudEls\.foldEntireFunctionBtnEl\) \{.*?\n      \}",
-            html,
-            re.DOTALL,
-        )
-        fold_helpers = re.search(
-            r"function refreshFoldActionView\(viewportBefore\) \{.*?"
-            r"function formatFoldActionResult\(result\) \{.*?\n      \}",
-            html,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(action_match, "Could not find the sidebar Fold-Entire-Function action")
-        self.assertIsNotNone(fold_helpers, "Could not find the shared fold-action helpers")
-
         for direction in ('split', 'merge'):
             with self.subTest(direction=direction):
                 test_logic = f"""
-const inspectorActionResult = {{ textContent: '' }};
-const hudBtnFoldEntireFunction = {{
-  style: {{ display: 'none' }},
-  listener: null,
-  addEventListener: function(name, listener) {{ this.listener = listener; }}
-}};
-const hudEls = {{ foldEntireFunctionBtnEl: hudBtnFoldEntireFunction }};
 const DAGRE_LAYOUT_OPTIONS = {{ name: 'dagre' }};
 let layoutCount = 0;
 cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
 cy.zoom(1.4);
 cy.pan({{ x: 27, y: -13 }});
-{action_match.group(0)}
-{fold_helpers.group(0)}
 const compound = cy.getElementById('fn');
 openInspector(compound);
 if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('Sidebar fold action was hidden');
-hudBtnFoldEntireFunction.listener({{ stopPropagation: function() {{}} }});
+hudBtnFoldEntireFunction.click();
 if (!compound.hasClass('collapsed-compound')) throw new Error('Function did not collapse');
 if (!inspectorActionResult.textContent.includes('fully collapsed')) throw new Error('Sidebar did not report completion');
 if (layoutCount !== 1) throw new Error('Expected one final layout, got ' + layoutCount);
@@ -7181,17 +7158,6 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
     def test_ordinary_singleton_sidebar_action_and_boundary_sequence_unfold_preserve_prior_state(self):
-        html = _read_template_html()
-        action_match = re.search(
-            r"function handleFoldEntireFunction\(compoundNode\) \{.*?"
-            r"if \(hudEls\.foldEntireFunctionBtnEl\) \{.*?\n      \}", html, re.DOTALL
-        )
-        fold_helpers = re.search(
-            r"function refreshFoldActionView\(viewportBefore\) \{.*?"
-            r"function formatFoldActionResult\(result\) \{.*?\n      \}", html, re.DOTALL
-        )
-        self.assertIsNotNone(action_match)
-        self.assertIsNotNone(fold_helpers)
         net = """{
   compounds: [{ id: 'caller', label: 'caller()' }, { id: 'fn', label: 'create_board()', function_name: 'create_board', parent: 'caller' }],
   places: [{ id: 'entry', parent: 'caller' }, { id: 'exit', parent: 'caller' }],
@@ -7199,19 +7165,14 @@ console.log('PASS');
   arcs: [{ source: 'before', target: 'entry' }, { source: 'entry', target: 'body' }, { source: 'body', target: 'exit' }, { source: 'exit', target: 'after' }]
 }"""
         test_logic = f"""
-const inspectorActionResult = {{ textContent: '' }};
-const hudBtnFoldEntireFunction = {{ style: {{ display: 'none' }}, listener: null, addEventListener: function(name, listener) {{ this.listener = listener; }} }};
-const hudEls = {{ foldEntireFunctionBtnEl: hudBtnFoldEntireFunction }};
 const DAGRE_LAYOUT_OPTIONS = {{ name: 'dagre' }};
 let layoutCount = 0;
 cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
 cy.zoom(1.4); cy.pan({{ x: 27, y: -13 }});
-{action_match.group(0)}
-{fold_helpers.group(0)}
 const compound = cy.getElementById('fn');
 openInspector(compound);
 if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('Singleton function action was hidden initially');
-hudBtnFoldEntireFunction.listener({{ stopPropagation: function() {{}} }});
+hudBtnFoldEntireFunction.click();
 if (!compound.hasClass('collapsed-compound') || !inspectorActionResult.textContent.includes('fully collapsed')) throw new Error('Sidebar did not complete singleton function');
 if (layoutCount !== 1 || cy.zoom() !== 1.4 || cy.pan().x !== 27 || cy.pan().y !== -13) throw new Error('Sidebar action did not preserve the viewport with one layout');
 if (hudBtnFoldEntireFunction.style.display !== 'none') throw new Error('Fold action remained visible after completion');
@@ -7237,21 +7198,6 @@ console.log('PASS');
         self.assertIn('id="hud-btn-fold-entire-function"', html)
         self.assertIn('id="inspector-action-result"', html)
         self.assertIn("foldEngine.executeFoldEntireFunction(compoundNode)", html)
-
-        action_match = re.search(
-            r"function handleFoldEntireFunction\(compoundNode\) \{.*?"
-            r"if \(hudEls\.foldEntireFunctionBtnEl\) \{.*?\n      \}",
-            html,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(action_match, "Could not find the compound inspector action")
-        fold_helpers = re.search(
-            r"function refreshFoldActionView\(viewportBefore\) \{.*?"
-            r"function formatFoldActionResult\(result\) \{.*?\n      \}",
-            html,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(fold_helpers, "Could not find shared fold-action helpers")
         net_literal = """{
   compounds: [
     { id: 'function_process', function_name: 'process', label: 'process()' }
@@ -7273,24 +7219,15 @@ console.log('PASS');
   ]
 }"""
         test_logic = f"""
-const inspectorActionResult = {{ textContent: '' }};
-const hudBtnFoldEntireFunction = {{
-  style: {{ display: 'none' }},
-  listener: null,
-  addEventListener: function(name, listener) {{ this.listener = listener; }}
-}};
-const hudEls = {{ foldEntireFunctionBtnEl: hudBtnFoldEntireFunction }};
 const DAGRE_LAYOUT_OPTIONS = {{ name: 'dagre' }};
 let layoutCount = 0;
 cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
 cy.zoom(1.5);
 cy.pan({{ x: 31, y: -12 }});
-{action_match.group(0)}
-{fold_helpers.group(0)}
 const compound = cy.getElementById('function_process');
 openInspector(compound);
 if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('Compound fold action was hidden');
-hudBtnFoldEntireFunction.listener({{ stopPropagation: function() {{}} }});
+hudBtnFoldEntireFunction.click();
 if (!compound.hasClass('collapsed-compound')) throw new Error('Compound was not collapsed');
 if (hudBtnFoldEntireFunction.style.display !== 'none') throw new Error('Completed compound action remained enabled');
 if (!inspectorActionResult.textContent.includes('fully collapsed')) throw new Error('Completion was not reported');
@@ -7341,22 +7278,6 @@ console.log('PASS');
         self.assertIn("PASS", proc.stdout)
 
     def test_fused_function_entrance_loop_head_is_scoped_state_machine_and_reversible(self):
-        html = _read_template_html()
-        action_match = re.search(
-            r"function handleFoldEntireFunction\(compoundNode\) \{.*?"
-            r"if \(hudEls\.foldEntireFunctionBtnEl\) \{.*?\n      \}",
-            html,
-            re.DOTALL,
-        )
-        fold_helpers = re.search(
-            r"function refreshFoldActionView\(viewportBefore\) \{.*?"
-            r"function formatFoldActionResult\(result\) \{.*?\n      \}",
-            html,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(action_match, "Could not find the generated viewer's function fold action")
-        self.assertIsNotNone(fold_helpers, "Could not find the shared fold action helpers")
-
         net = """{
   compounds: [
     { id: 'caller', label: 'caller()' },
@@ -7401,17 +7322,8 @@ console.log('PASS');
         test_logic = f"""
 const {{ serializeFoldStateSnapshot, parseFoldStateSnapshot }} = require('./code2petri/viewer/engine/session_snapshot.js');
 const DAGRE_LAYOUT_OPTIONS = {{ name: 'dagre' }};
-const inspectorActionResult = {{ textContent: '' }};
-const hudBtnFoldEntireFunction = {{
-  style: {{ display: 'none' }},
-  listener: null,
-  addEventListener: function(name, listener) {{ this.listener = listener; }}
-}};
-const hudEls = {{ foldEntireFunctionBtnEl: hudBtnFoldEntireFunction }};
 let layoutCount = 0;
 cy.layout = function() {{ layoutCount++; return {{ run: function() {{}} }}; }};
-{action_match.group(0)}
-{fold_helpers.group(0)}
 cy.zoom(1.35);
 cy.pan({{ x: 24, y: -17 }});
 ['caller_in', 'a_for_in', 'a_for_out', 'a_else_in', 'a_else_back', 'a_return_in', 'a_return_out', 'a_loop_exit_in', 'a_loop_exit_out', 'caller_out']
@@ -7512,10 +7424,10 @@ const callerOut = cy.getElementById('caller_out');
 const functionNode = cy.getElementById('fn');
 const viewportBeforeFunctionFold = {{ zoom: cy.zoom(), pan: Object.assign({{}}, cy.pan()) }};
 openInspector(functionNode);
-if (!hudBtnFoldEntireFunction.listener || hudBtnFoldEntireFunction.style.display !== 'block') {{
+if (hudBtnFoldEntireFunction.style.display !== 'block') {{
   throw new Error('Generated viewer did not expose the Fold Entire Function button');
 }}
-hudBtnFoldEntireFunction.listener({{ stopPropagation: function() {{}} }});
+hudBtnFoldEntireFunction.click();
 if (!inspectorActionResult.textContent.includes('fully collapsed')) throw new Error('Function button did not report completion');
 if (!functionNode.hasClass('collapsed-compound')) throw new Error('Completed function did not enter collapsed state');
 if (cy.getElementById('p80').data('initial_tokens') !== 1 || cy.getElementById('p80').data('parent') !== 'caller' ||
