@@ -8,7 +8,7 @@
 
 **Implementation:** complete (`3d54cbb`; scoped-candidate/containment fix in `96b6fb5`; fused-boundary loop follow-up recorded below).
 
-**Verification:** full caller-context, browser/session, and invariance acceptance remains pending in the unchecked criteria below.
+**Verification:** The user-run fold, save/reopen, and Round 07 diagnostic scenarios passed. Automated checks for the broader criteria below are still pending.
 
 - [x] Apply elementary-before-structural priority within the selected Function Fold Scope, including eligible descendants. Unrelated elementary reductions elsewhere do not block a valid scoped structural fold; whole-net priority remains unchanged.
 - [x] Discover and select structural candidates within that scope so a larger candidate crossing caller/sibling ownership cannot hide an eligible contained component. Retain existing class precedence, maximal/minimal selection rules, SESE reachability, validators, penalties, and transition-weight calculations within the scope.
@@ -77,3 +77,15 @@ The user then reported a browser save-open comparison: the Tic Tac Toe 2026-10-1
 The user reports that `GameState._coerce_direction()` still cannot be folded in `dots_and_boxes_global_foldable_session_save copy.json`. The [Round 07 inspection](../reviews/phase-2.8-ticket-66-round-07.md) replays the copied snapshot through the current production JavaScript reduction engine. Both inlined occurrences—inside `_edge_for_move()` and `_adjacent_boxes()`—make no progress after the three existing Sequence folds in each occurrence. The full-graph diagnostic names out-of-scope `c_41`, owned by sibling `DotsAndBoxesGame.draw`; removing `c_41` merely changes the reported sibling node, and isolated scopes still have no eligible contained SESE. Both occurrences expose separate normal and exceptional continuations, with the exceptional place outside the direct caller compound. The exception outcomes remain distinct; this replay does not show a Ticket 70 routing defect.
 
 Reopened as `ready-for-agent` to investigate safe function-scoped reductions and accurate diagnostics for these residual multi-continuation shapes. All existing acceptance checklist items remain unchanged; no unchecked item was marked complete.
+
+### 2026-11-16 — Browser verification of the Round 07 fix
+
+The user reported completing the fold and save/reopen steps in the small `isBoardFull()` test viewer. These steps exercised the internal fold trigger, Fold Entire Function, Save Session, Open Session, Component-Local Unfold, and folding again. The viewer was generated from `45be92e` with the diagnostic fix from `010993f`. Its HTML SHA-256 is `c5309adb0da68f808326c590514e878b3b7e8d7ae50aee8f46c0246d9ba0de36`.
+
+The user then opened the original Round 07 snapshot in the same viewer and supplied the browser results for both `_coerce_direction()` occurrences. The occurrence in `_edge_for_move()` reported `p5` and `except_entry`. The occurrence in `_adjacent_boxes()` reported `p1` and `exception_end`. Both stopped at their two external continuations, as expected. The independent headless replay also verified unchanged graph elements and component counters for both occurrences.
+
+The focused `TestFoldEntireFunction` suite ran 13 tests. Ten passed, including the new Round 07 diagnostic regression. Three stopped at JavaScript parsing because the shared harness and the test body both declare `hudBtnFoldEntireFunction`. The automated suite still needs a passing run before closing the ticket.
+
+### 2026-11-16 — Round 08 test harness repair
+
+The [Round 08 review](../reviews/phase-2.8-ticket-66-round-08.md) identified duplicate button and action-result mocks in four Fold Entire Function tests. Commit `378c0de` moves those mocks into the shared generated-viewer harness and makes the tests click its registered production handler. The requested targeted command ran 57 tests across `TestFoldEntireFunction`, `TestCalledFunctionChoiceBoundary`, `TestBatchPlaceFold`, and `tests.test_viewer_action_history`; all passed. Python compilation and `git diff --check` passed. The full `make test` command could not start because `pytest` is unavailable. The broader unchecked acceptance criteria remain open.
