@@ -1392,20 +1392,28 @@ class _PythonControlFlowWalker:
         )
 
     def _walk_loop(self, stmt: Union[ast.While, ast.For, ast.AsyncFor], ctx: StatementContext) -> Optional[Place]:
+        literal_true_while = (
+            isinstance(stmt, ast.While)
+            and isinstance(stmt.test, ast.Constant)
+            and stmt.test.value is True
+        )
         loop_trans = self.builder.new_transition(
             label=_format_statement_label(stmt),
             line_number=stmt.lineno,
+            hook_exception=not literal_true_while,
         )
         test_expr = stmt.test if isinstance(stmt, ast.While) else getattr(stmt, "iter", None)
         self._record_calls_in_expr(test_expr, loop_trans.id, stmt.lineno)
 
         else_lineno = stmt.orelse[0].lineno if stmt.orelse and hasattr(stmt.orelse[0], "lineno") else stmt.lineno
-        exit_label = "else" if stmt.orelse else "exit"
-        exit_trans = self.builder.new_transition(
-            label=exit_label,
-            line_number=else_lineno,
-            hook_exception=False,
-        )
+        exit_trans = None
+        if not literal_true_while:
+            exit_label = "else" if stmt.orelse else "exit"
+            exit_trans = self.builder.new_transition(
+                label=exit_label,
+                line_number=else_lineno,
+                hook_exception=False,
+            )
 
         loop_exit = ctx.target_exit if ctx.is_last else self.builder.new_place(
             label=f"exit_{loop_trans.id}", line_number=stmt.lineno
@@ -1424,13 +1432,15 @@ class _PythonControlFlowWalker:
             lineno=stmt.lineno,
         )
 
-        else_exit = self.builder.walk_branch(
-            stmt.orelse,
-            source_transition=exit_trans,
-            target_exit=loop_exit,
-            walk_block_fn=self.walk_block,
-            line_number=else_lineno,
-        )
+        else_exit = None
+        if exit_trans is not None:
+            else_exit = self.builder.walk_branch(
+                stmt.orelse,
+                source_transition=exit_trans,
+                target_exit=loop_exit,
+                walk_block_fn=self.walk_block,
+                line_number=else_lineno,
+            )
 
         has_exit_inflow = self.builder.has_incoming_arcs(loop_exit)
         if else_exit is None and not has_exit_inflow:

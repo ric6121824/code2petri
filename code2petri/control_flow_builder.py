@@ -27,7 +27,7 @@ class LoopRouting(NamedTuple):
     """Routing endpoints and transitions for standard loop control flow."""
     head: Place
     loop_trans: Transition
-    exit_trans: Transition
+    exit_trans: Optional[Transition]
     exit_place: Place
 
 
@@ -216,9 +216,10 @@ class ControlFlowBuilder:
         walk_block_fn: Any,
         lineno: Optional[int] = None,
     ) -> None:
-        """Wires standard loop head, body branch with back-arc, and exit transition."""
+        """Wires a loop head, body branch with back-arc, and optional exit transition."""
         self.add_arc(source=routing.head, target=routing.loop_trans)
-        self.add_arc(source=routing.head, target=routing.exit_trans)
+        if routing.exit_trans is not None:
+            self.add_arc(source=routing.head, target=routing.exit_trans)
 
         self.loop_stack.append(LoopContext(head=routing.head, exit=routing.exit_place))
         self.walk_branch(body_stmts, routing.loop_trans, routing.head, walk_block_fn, lineno)
