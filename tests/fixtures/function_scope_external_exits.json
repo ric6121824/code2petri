@@ -1,0 +1,42 @@
+{
+  "compounds": [
+    { "id": "root", "label": "root" },
+    { "id": "caller", "label": "caller()", "parent": "root" },
+    { "id": "coerce_direct", "label": "coerce_direction()", "function_name": "coerce_direction", "parent": "caller" },
+    { "id": "coerce_outer_exception", "label": "coerce_direction()", "function_name": "coerce_direction", "parent": "caller" },
+    { "id": "sibling", "label": "draw()", "function_name": "draw", "parent": "root" }
+  ],
+  "places": [
+    { "id": "direct_entry", "label": "entry", "parent": "coerce_direct", "initial_tokens": 0 },
+    { "id": "direct_normal", "label": "try_exit", "parent": "caller", "initial_tokens": 0 },
+    { "id": "direct_exception", "label": "except_entry", "parent": "caller", "initial_tokens": 0 },
+    { "id": "outer_exception_entry", "label": "entry", "parent": "coerce_outer_exception", "initial_tokens": 0 },
+    { "id": "outer_normal", "label": "normal_return", "parent": "caller", "initial_tokens": 0 },
+    { "id": "outer_exception_end", "label": "exception_end", "parent": "root", "initial_tokens": 0 },
+    { "id": "sibling_entry", "label": "entry", "parent": "sibling", "initial_tokens": 0 },
+    { "id": "sibling_exit", "label": "exit", "parent": "sibling", "initial_tokens": 0 }
+  ],
+  "transitions": [
+    { "id": "direct_normal_body", "label": "normal body", "parent": "coerce_direct", "tau": 1 },
+    { "id": "direct_exception_body", "label": "exception body", "parent": "coerce_direct", "tau": 1 },
+    { "id": "outer_normal_body", "label": "normal body", "parent": "coerce_outer_exception", "tau": 1 },
+    { "id": "outer_exception_body", "label": "exception body", "parent": "coerce_outer_exception", "tau": 1 },
+    { "id": "sibling_source", "label": "before", "parent": "sibling", "tau": 1 },
+    { "id": "c_41", "label": "c_41", "parent": "sibling", "type": "Opaque Transition", "is_opaque": true, "opaque": true, "tau": 2 },
+    { "id": "sibling_sink", "label": "after", "parent": "sibling", "tau": 1 }
+  ],
+  "arcs": [
+    { "source": "direct_entry", "target": "direct_normal_body" },
+    { "source": "direct_entry", "target": "direct_exception_body" },
+    { "source": "direct_normal_body", "target": "direct_normal" },
+    { "source": "direct_exception_body", "target": "direct_exception" },
+    { "source": "outer_exception_entry", "target": "outer_normal_body" },
+    { "source": "outer_exception_entry", "target": "outer_exception_body" },
+    { "source": "outer_normal_body", "target": "outer_normal" },
+    { "source": "outer_exception_body", "target": "outer_exception_end" },
+    { "source": "sibling_source", "target": "sibling_entry" },
+    { "source": "sibling_entry", "target": "c_41" },
+    { "source": "c_41", "target": "sibling_exit" },
+    { "source": "sibling_exit", "target": "sibling_sink" }
+  ]
+}

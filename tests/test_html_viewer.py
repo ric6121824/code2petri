@@ -7637,6 +7637,49 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Multiple-exit function scope report failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+    def test_external_exit_diagnostic_outranks_unrelated_sibling_candidate(self):
+        fixture_path = os.path.join(
+            os.path.dirname(__file__),
+            "fixtures",
+            "function_scope_external_exits.json",
+        )
+        with open(fixture_path, "r", encoding="utf-8") as fixture_file:
+            fixture = json.load(fixture_file)
+        net = json.dumps(fixture)
+        test_logic = r"""
+function assertExternalExitReason(result, expectedPhrase, expectedLabels) {
+  if (result.success || result.complete) throw new Error('Unsupported multi-exit scope was folded: ' + JSON.stringify(result));
+  if (!result.message.includes(expectedPhrase)) {
+    throw new Error('Function result did not explain its external exits: ' + result.message);
+  }
+  for (const label of expectedLabels) {
+    if (!result.message.includes(label)) throw new Error('Function result omitted ' + label + ': ' + result.message);
+  }
+  if (result.message.includes('c_41') || result.message.includes('out-of-scope node')) {
+    throw new Error('An unrelated sibling candidate became the function explanation: ' + result.message);
+  }
+}
+
+assertExternalExitReason(
+  foldEngine.executeFoldEntireFunction('coerce_direct'),
+  'multiple caller continuations',
+  ['try_exit', 'except_entry']
+);
+
+const outerExceptionCy = cytoscape({ elements: netToElements(net) });
+const outerExceptionEngine = new LiveFoldReductionEngine(outerExceptionCy);
+assertExternalExitReason(
+  outerExceptionEngine.executeFoldEntireFunction('coerce_outer_exception'),
+  'multiple external continuations',
+  ['normal_return', 'exception_end']
+);
+outerExceptionCy.destroy();
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"External-exit scope report failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_fresh_export_preserves_exception_alternatives_and_reports_scope_exits(self):
         fixture_path = os.path.join(
             os.path.dirname(__file__),

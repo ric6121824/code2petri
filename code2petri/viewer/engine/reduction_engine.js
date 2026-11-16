@@ -2205,10 +2205,9 @@
           return allowed;
         }
 
-        _getFunctionScopeCallerExitPlaces(scopeId) {
+        _getFunctionScopeExternalExitPlaces(scopeId) {
           const scope = this.cy.getElementById(scopeId);
           if (!scope || scope.length === 0 || !scope.hasClass('compound')) return [];
-          const parentId = scope.data('parent') || null;
           const ownedIds = new Set(scope.descendants().filter(function(node) {
             return node.hasClass('place') || node.hasClass('transition');
           }).map(function(node) { return node.id(); }));
@@ -2216,8 +2215,7 @@
           this.cy.edges().forEach(function(edge) {
             const source = edge.source();
             const target = edge.target();
-            if (!ownedIds.has(source.id()) || !target.hasClass('place')) return;
-            if ((target.data('parent') || null) !== parentId) return;
+            if (!ownedIds.has(source.id()) || !target.hasClass('place') || ownedIds.has(target.id())) return;
             exits.set(target.id(), target);
           });
           return Array.from(exits.values()).sort(function(left, right) {
@@ -2226,14 +2224,18 @@
         }
 
         _getFunctionScopeMultipleExitReason(scope) {
-          const exits = this._getFunctionScopeCallerExitPlaces(scope.id());
+          const exits = this._getFunctionScopeExternalExitPlaces(scope.id());
           if (exits.length < 2) return null;
+          const parentId = scope.data('parent') || null;
+          const continuationKind = exits.every(function(place) {
+            return (place.data('parent') || null) === parentId;
+          }) ? 'caller' : 'external';
           const name = scope.data('function_name') || scope.data('label') || scope.id();
           const continuations = exits.map(function(place) {
             const label = place.data('label') || place.id();
             return `${label} (${place.id()})`;
           }).join(', ');
-          return `Function '${name}' has multiple caller continuations (${continuations}); no single-exit SESE region can safely consume this interface.`;
+          return `Function '${name}' has multiple ${continuationKind} continuations (${continuations}); no single-exit SESE region can safely consume this interface.`;
         }
 
         _getConsumedInteriorIssue(candidate) {
