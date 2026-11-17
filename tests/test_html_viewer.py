@@ -7249,6 +7249,80 @@ console.log('PASS');
         self.assertEqual(proc.returncode, 0, f"Node script failed: {proc.stderr}")
         self.assertIn("PASS", proc.stdout)
 
+    def test_unresolved_call_reappears_orange_after_saved_function_unfold(self):
+        net = """{
+  compounds: [
+    { id: 'caller', label: 'caller()' },
+    { id: 'fn', label: 'load_plugin()', function_name: 'load_plugin', parent: 'caller' }
+  ],
+  places: [
+    { id: 'p_entry', label: 'caller entry', parent: 'caller', initial_tokens: 1 },
+    { id: 'p_exit', label: 'caller exit', parent: 'caller' }
+  ],
+  transitions: [
+    { id: 't_unresolved', label: 'call: optional_plugin.run()', line_number: 42, parent: 'fn', resolved: false,
+      metadata: { resolved: false, resolution_reason: 'No project definition was indexed' } }
+  ],
+  arcs: [
+    { source: 'p_entry', target: 't_unresolved' },
+    { source: 't_unresolved', target: 'p_exit' }
+  ]
+}"""
+        test_logic = r"""
+const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
+const expectedReason = 'No project definition was indexed';
+function assertUnresolvedOrangeCall(graph, stage) {
+  const call = graph.getElementById('t_unresolved');
+  if (!call.length) throw new Error(stage + ': unresolved call node is missing');
+  if (call.data('label') !== 'call: optional_plugin.run() (line 42)' ||
+      call.data('raw_label') !== 'call: optional_plugin.run()' ||
+      call.data('line_number') !== 42) {
+    throw new Error(stage + ': unresolved call identity, label, or source location changed');
+  }
+  if (call.data('resolved') !== false || !call.hasClass('transition') || !call.hasClass('unresolved') ||
+      call.data('fillcolor') !== '#e65100') {
+    throw new Error(stage + ': unresolved call lost its unresolved orange presentation');
+  }
+  const metadata = call.data('metadata') || {};
+  if (metadata.resolved !== false || metadata.resolution_reason !== expectedReason) {
+    throw new Error(stage + ': unresolved call resolution metadata changed: ' + JSON.stringify(metadata));
+  }
+}
+
+assertUnresolvedOrangeCall(cy, 'before fold');
+const fn = cy.getElementById('fn');
+openInspector(fn);
+if (hudBtnFoldEntireFunction.style.display !== 'block') throw new Error('Function fold action was hidden');
+hudBtnFoldEntireFunction.click();
+if (!fn.hasClass('collapsed-compound') || cy.getElementById('t_unresolved').length) {
+  throw new Error('Function did not fold around the unresolved call: ' + inspectorActionResult.textContent +
+    '; function classes=' + fn.classes() + '; call exists=' + Boolean(cy.getElementById('t_unresolved').length));
+}
+
+const documentContext = {
+  title: 'load_plugin', sourceFile: '/src/plugins.py', filename: 'plugins.py', functionName: 'caller', mode: 'fold',
+  originalNet: net, compounds: net.compounds, foldSteps: [], calleeNets: {}, expandedNodes: [],
+  playback: { currentStep: 0, totalSteps: 0 }
+};
+const saved = parseFoldStateSnapshot(serializeFoldStateSnapshot({ cy, engine: foldEngine, document: documentContext }));
+const resumedCy = cytoscape({ elements: saved.elements });
+const resumedEngine = new LiveFoldReductionEngine(resumedCy);
+resumedEngine.cfg = saved.engine.cfg;
+resumedEngine.stepCounter = saved.engine.stepCounter;
+resumedEngine.rememberedCustomNames = new Map(saved.engine.rememberedCustomNames);
+const resumedFn = resumedCy.getElementById('fn');
+if (!resumedFn.hasClass('collapsed-compound')) throw new Error('Saved function did not reopen collapsed');
+const unfolded = resumedEngine.executeComponentLocalUnfold(resumedFn);
+if (!unfolded.success || resumedFn.hasClass('collapsed-compound')) {
+  throw new Error('Reopened function could not be locally unfolded: ' + JSON.stringify(unfolded));
+}
+assertUnresolvedOrangeCall(resumedCy, 'after save/open/unfold');
+console.log('PASS');
+"""
+        proc = _run_node_script(_setup_live_fold_test_harness(net, test_logic))
+        self.assertEqual(proc.returncode, 0, f"Unresolved-call fold/unfold restoration failed: {proc.stderr}")
+        self.assertIn("PASS", proc.stdout)
+
     def test_fold_entire_function_repeats_until_compound_is_collapsed(self):
         net_literal = """{
   compounds: [
