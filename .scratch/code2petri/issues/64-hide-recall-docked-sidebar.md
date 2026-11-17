@@ -42,3 +42,7 @@ Focused verification passed: `python3 -m unittest tests.test_sidebar_visibility`
 ### 2026-10-16 — Delivery documentation synchronized
 
 The user confirmed implementation completion. The [Phase 2.8 delivery record](../specs/phase-2.8-viewer-interactive-enhancements.md), README, and [grand plan](../grand_plan.md) now describe hide/recall and session visibility as implemented. No tests or browser checks were run for this documentation update; the remaining acceptance criterion stays unchecked.
+
+### 2026-11-17 — Checklist audit
+
+The snapshot visibility round-trip and toggle checks pass headlessly. The existing save-context unit test stops because its isolated harness does not define `reductionOutcome`, which the current viewer defines. The rendered geometry, pointer/keyboard interaction, and full browser session workflow remain open. [Sidebar tests](../../../tests/test_sidebar_visibility.py).

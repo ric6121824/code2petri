@@ -12,13 +12,13 @@
 
 - [x] Use the existing green, blue, and purple palette cyclically: depth zero green, one blue, two purple, three green, four blue, five purple, and repeat at arbitrary depth. Siblings at the same depth share a color.
 - [x] Derive presentation from the active compound parent hierarchy and use depth modulo three only for palette selection. Do not clamp or overwrite semantic depth, change ownership, or restart depth-dependent padding.
-- [ ] Apply coherent expanded background, border, and label/text-background styling in the existing light theme. Parent and child differ visually; deeper expanded compounds never use the orange palette slot.
-- [ ] Preserve ordinary unresolved-call transitions' orange styling and all type-specific reduction affordances. Fully collapsed compounds retain the existing brown/gold override independent of their depth.
+- [x] Apply coherent expanded background, border, and label/text-background styling in the existing light theme. Parent and child differ visually; deeper expanded compounds never use the orange palette slot.
+- [x] Preserve ordinary unresolved-call transitions' orange styling and all type-specific reduction affordances. Fully collapsed compounds retain the existing brown/gold override independent of their depth.
 - [ ] Apply the same convention at fresh generated-viewer boot, runtime expansion, Component-Local Unfold, Reset, playback, and Open Session.
 - [ ] On opening older compatible sessions, recompute active presentation from hierarchy rather than trusting legacy clamped color classes. Local unfolding must likewise normalize restored compounds. No source access or session schema migration is required.
 - [ ] Styling does not mutate unopened snapshot input, detached captures, or stored restoration history, and does not change graph topology, parent/depth metadata, nested padding, tokens, names, fold eligibility/actions, component weights/SM, or viewport.
 - [ ] Verify actual rendered colors and readable labels in the generated browser viewer at depths zero through at least eight, including equal-depth siblings, distinct parent/child pairs, collapsed overrides, and unresolved orange transitions. CSS string matching alone is insufficient.
-- [ ] Cover the Dots & Boxes shape where depth-four GameState._coerce_direction() and depth-three GameState._edge_for_move() formerly shared orange, using a self-contained fixture rather than the user's export path.
+- [x] Cover the Dots & Boxes shape where depth-four GameState._coerce_direction() and depth-three GameState._edge_for_move() formerly shared orange, using a self-contained fixture rather than the user's export path.
 - [ ] Cover an older snapshot with a legacy depth-three class on a deeper compound, local unfold restoring old classes, runtime expansion, Reset/playback, and save/open continuation; assert canonical active colors and preserved analysis/session state.
 
 ## Context and decisions
@@ -44,3 +44,7 @@ The final full suite ran 576 tests with 1 failure and 4 errors: the prototype ru
 The user confirmed implementation completion. Initial rendering and refreshed compound presentation share the depth-class helper after `96b6fb5`; `6c37849` includes it in the affected harnesses. The [Round 02 review](../reviews/phase-2.10-tickets-65-67-round-02.md) found no concrete palette mismatch. Its comment-placement finding was addressed in `1885e61`; implementation history now sits under Comments.
 
 The [Phase 2.7 delivery record](../specs/phase-2.7-live-fold-reduction.md), README, and [grand plan](../grand_plan.md) now show the palette as implemented. Unchecked rendered-color, label, legacy-session, runtime restoration, and invariance acceptance remains pending; this documentation update ran no tests or browser checks.
+
+### 2026-11-17 — Checklist audit
+
+The depth/class regressions pass. A temporary self-contained Dots & Boxes hierarchy used the generated viewer's `netToElements` and production stylesheet with Cytoscape styles enabled. It checked the computed background, border, label background, and label from depth zero to eight, including equal-depth siblings. `_edge_for_move()` at depth three is green and its `_coerce_direction()` child at depth four is blue. The collapsed gold override and unresolved orange transition also passed. The palette selectors target compounds and the existing type-specific reduction styling remains in place. Rendered browser readability and the full legacy-session/action lifecycle are still open. [Depth/class regressions](../../../tests/test_html_viewer.py#L1233).

@@ -6,7 +6,7 @@
 
 **Status:** ready-for-human
 
-- [ ] Reproduce the direction-coercion expansion defect using the retained standalone Dots & Boxes reference export. Verify successful return reaches the caller's next statement and uncaught raise reaches its exceptional boundary; neither outcome is disconnected or routed to the other destination.
+- [x] Reproduce the direction-coercion expansion defect using the retained standalone Dots & Boxes reference export. Verify successful return reaches the caller's next statement and uncaught raise reaches its exceptional boundary; neither outcome is disconnected or routed to the other destination.
 - [x] Identify normal and exceptional boundaries independently using semantic roles and validated provenance. Match the accepted backend Inline Expansion contract while testing independently expected reachable markings or execution traces, rather than relying only on implementation parity.
 - [x] Preserve exception routing with and without caller handlers, including nested handlers. Create or reuse an exceptional function boundary where the accepted contract requires it. Do not invent a reachable normal return for an exception-only callee merely because it contains an unused normal-end placeholder.
 - [x] Replace a paired opaque exception alternative only when an explicit callee exceptional outcome replaces it. Retain the existing bounded opaque-call exception behavior when the callee has no explicit exceptional exit. Do not add exception-type inference or unsupported finally-override semantics.
@@ -53,3 +53,7 @@ After integration commit `0d7eceea70795ad0ca3123adc44901644dcd593f`, regenerated
 The user checked normal and exceptional routing, caller-handler behavior, and the Fold/Unfold lifecycle in Safari 18.6 using the regenerated browser-expanded and backend-inlined artifacts from generator commit `0d7eceea70795ad0ca3123adc44901644dcd593f`. Backend-inlined PNML outcome preservation was marked checked; browser-expanded PNML export was skipped. The standalone reference-export reproduction was not separately recorded, and the checklist's overall result fields are partial. Keep the ticket `ready-for-human` pending complete acceptance.
 
 The user noted layout/position restoration problems during Undo/Redo and Unfold. This also affects current-graph/view preservation; the details are recorded under Ticket 71. For long inline node IDs, use the Search graph result row to capture the occurrence ID and owner path; the inspector did not show the full value.
+
+### 2026-11-17 — Standalone reference replay
+
+The [question tree](../specs/phase-2.8-ticket-71-question-tree.md#additional-confirmed-defect--browser-expansion-reverses-exit-routing) records the original failure on the retained standalone artifact. Replayed the same artifact's embedded caller and callee graphs through the current generated-viewer tap handler on `fdc198b`. Expanding `t7` sends all three returns (`t7__t3`, `t7__t6`, and `t7__t8`) to `p5`, and only the explicit raise (`t7__t11`) to the caller's `p_exception_end`. The expanded callee has no disconnected exit place. This headless replay verifies the reference case; the broader rendered browser checklist remains partial. Reference SHA-256 `1188bede41bb4e47e949c098f9991620461868011d1129023edfbf2f62f3ecff`. [Retained export](../exports/GameState__edge_for_move.html).
