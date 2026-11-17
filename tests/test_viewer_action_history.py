@@ -7,6 +7,56 @@ from code2petri.viewer import generate_html
 from tests.test_html_viewer import _make_sese_test_net, _setup_live_fold_test_harness
 
 
+def _generated_viewer_stylesheet_js():
+    generated_html = generate_html(PetriNet(), title="Call Refolding Style Fixture")
+    match = re.search(
+        r"style:\s*(\[.*?\]),\s*layout:\s*DAGRE_LAYOUT_OPTIONS",
+        generated_html,
+        re.DOTALL,
+    )
+    if not match:
+        raise AssertionError("Generated viewer did not contain a Cytoscape stylesheet")
+    return match.group(1)
+
+
+_CALL_REFOLD_STYLE_ASSERTIONS_JS = r"""
+function assertRefoldedCallPresentation(graph, callId) {
+  const callNode = graph.getElementById(callId);
+  if (!callNode.length || callNode.data('is_call_refolded') !== true) {
+    throw new Error('Expected a refolded call node: ' + callId);
+  }
+  if (callNode.style('border-color') !== 'rgb(210,153,34)') {
+    throw new Error('Refolded call did not use the gold completion border: ' + callNode.style('border-color'));
+  }
+  if (!callNode.data('label') || callNode.style('label') !== callNode.data('label')) {
+    throw new Error('Refolded call did not display its call label: ' + callNode.style('label'));
+  }
+}
+
+const styleControlsCy = cytoscape({
+  headless: true,
+  styleEnabled: true,
+  style: generatedViewerStyles,
+  elements: [
+    { group: 'nodes', data: { id: 'ordinary_opaque_control', label: 'ordinary opaque()' }, classes: 'transition opaque' },
+    { group: 'nodes', data: { id: 'structural_compound_control', label: 'structural()', collapsed_label: 'structural() (c_42)' }, classes: 'compound collapsed-compound' },
+    { group: 'nodes', data: { id: 'structural_child_control', parent: 'structural_compound_control', label: 'child()' }, classes: 'transition opaque collapsed-child' }
+  ]
+});
+const ordinaryOpaqueControl = styleControlsCy.getElementById('ordinary_opaque_control');
+if (ordinaryOpaqueControl.style('border-color') !== 'rgb(17,17,17)' ||
+    ordinaryOpaqueControl.style('label') !== ordinaryOpaqueControl.data('label')) {
+  throw new Error('The ordinary opaque transition style changed unexpectedly');
+}
+const structuralCompoundControl = styleControlsCy.getElementById('structural_compound_control');
+if (structuralCompoundControl.style('border-color') !== 'rgb(210,153,34)' ||
+    structuralCompoundControl.style('label') !== structuralCompoundControl.data('collapsed_label')) {
+  throw new Error('The structural collapsed-compound style or label changed unexpectedly');
+}
+styleControlsCy.destroy();
+"""
+
+
 class ViewerActionHistoryTests(unittest.TestCase):
     def run_node(self, script):
         return subprocess.run(["node", "-e", script], capture_output=True, text=True)
@@ -477,7 +527,7 @@ if (!viewerActionHistory.undo() || !viewerActionHistory.undo() || expandedNodes.
     { source: 'p_in', target: 't_call_error' }, { source: 't_call_error', target: 'p_error' }
   ]
 }"""
-        logic = r"""
+        logic = _CALL_REFOLD_STYLE_ASSERTIONS_JS + r"""
 global.trackScoreState = true;
 global.reductionOutcome = 'completed_structured';
 global.payload = { final_sm: 3, final_sm_available: true, incomplete_reason: null };
@@ -543,6 +593,7 @@ if (cy.getElementById('t_call').data('tau') !== 2 || cy.getElementById('t_call_e
 if (cy.getElementById('t_call__helper_return').length || cy.getElementById('t_call__helper_raise').length) {
   throw new Error('refold left callee outcome transitions exposed');
 }
+assertRefoldedCallPresentation(cy, 't_call');
 if (viewerActionHistory.undoStack.length !== 2) throw new Error('expansion and refolding were not each one history gesture');
 const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
 const serializedRefoldSession = serializeFoldStateSnapshot({
@@ -556,6 +607,14 @@ const serializedRefoldSession = serializeFoldStateSnapshot({
   }
 });
 const session = parseFoldStateSnapshot(serializedRefoldSession);
+const reopenedCy = cytoscape({
+  headless: true,
+  styleEnabled: true,
+  style: generatedViewerStyles,
+  elements: session.elements
+});
+assertRefoldedCallPresentation(reopenedCy, 't_call');
+reopenedCy.destroy();
 const savedCall = session.elements.find(element => element.group === 'nodes' && element.data.id === 't_call');
 if (!savedCall || !savedCall.data.function_restoration || !savedCall.data.function_restoration.elements.length) {
   throw new Error('save/open did not retain call-local restoration data');
@@ -625,7 +684,11 @@ if (componentLocalLayoutRuns !== 0) throw new Error('Component-Local Unfold ran 
 if (!viewerActionHistory.undo() || expandedNodes.has('t_call')) throw new Error('Undo did not restore the refolded call');
 if (!viewerActionHistory.redo() || !expandedNodes.has('t_call')) throw new Error('Redo did not restore local Unfold from the recorded state');
 """
-        script = _setup_live_fold_test_harness(net_literal, logic)
+        script = _setup_live_fold_test_harness(
+            net_literal,
+            logic,
+            cytoscape_style_js=_generated_viewer_stylesheet_js(),
+        )
         result = self.run_node(script)
         self.assertEqual(result.returncode, 0, result.stderr)
 
@@ -720,7 +783,7 @@ if (savedDocumentAnalysis) throw new Error('call-local restoration persisted doc
     { source: 'p_in', target: 't_helper_raise' }, { source: 't_helper_raise', target: 'p_error' }
   ]
 }"""
-        logic = r"""
+        logic = _CALL_REFOLD_STYLE_ASSERTIONS_JS + r"""
 function normalizedGraph() {
   return JSON.stringify(cy.elements().jsons().map(element => {
     const copy = JSON.parse(JSON.stringify(element));
@@ -760,6 +823,7 @@ if (!cy.edges().some(edge => edge.source().id() === 't_call' && edge.target().id
 if (reductionOutcome !== 'incomplete' || payload.final_sm !== null || payload.final_sm_available !== false) {
   throw new Error('backend multi-outcome call claimed an unvalidated final SM');
 }
+assertRefoldedCallPresentation(cy, 't_call');
 const { serializeFoldStateSnapshot, parseFoldStateSnapshot } = require('./code2petri/viewer/engine/session_snapshot.js');
 const backendSession = parseFoldStateSnapshot(serializeFoldStateSnapshot({
   cy, engine: foldEngine,
@@ -775,10 +839,22 @@ if (backendSession.elements.find(element => element.data.id === 't_call').data.f
     .find(element => element.data.id === 'compound_helper').data.call_refolding.version !== 1) {
   throw new Error('backend call provenance did not survive a session snapshot');
 }
+const reopenedCy = cytoscape({
+  headless: true,
+  styleEnabled: true,
+  style: generatedViewerStyles,
+  elements: backendSession.elements
+});
+assertRefoldedCallPresentation(reopenedCy, 't_call');
+reopenedCy.destroy();
 if (!handleRightClickUnfold(cy.getElementById('t_call'))) throw new Error('backend refold could not be locally unfolded');
 if (normalizedGraph() !== beforeRefold) throw new Error('backend local Unfold did not restore the exact inlined graph');
 """
-        script = _setup_live_fold_test_harness(net_literal, logic)
+        script = _setup_live_fold_test_harness(
+            net_literal,
+            logic,
+            cytoscape_style_js=_generated_viewer_stylesheet_js(),
+        )
         result = self.run_node(script)
         self.assertEqual(result.returncode, 0, result.stderr)
 

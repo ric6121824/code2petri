@@ -69,7 +69,7 @@ def _extract_template_net_to_elements() -> str:
     return depth_match.group(0) + "\n" + match.group(0)
 
 
-def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> str:
+def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str, cytoscape_style_js=None) -> str:
     """Helper to construct a self-contained Node.js harness containing Cytoscape, LiveFoldReductionEngine, and inspector mocks."""
     html = _read_template_html()
     net_to_elements_js = _extract_template_net_to_elements()
@@ -138,6 +138,14 @@ def _setup_live_fold_test_harness(net_json_literal: str, test_logic_js: str) -> 
     m_pnml = re.search(r'function escapeXml\(unsafe\) \{.*?\n\s*const triggerClientSideExport = exportClientSidePnml;', html, re.DOTALL)
     assert m_pnml is not None, "Could not extract PNML export functions from template.html"
     pnml_js = m_pnml.group(0)
+
+    viewer_style_setup_js = ""
+    viewer_style_options_js = ""
+    viewer_style_cleanup_js = ""
+    if cytoscape_style_js is not None:
+        viewer_style_setup_js = f"const generatedViewerStyles = {cytoscape_style_js};"
+        viewer_style_options_js = ",\n  headless: true,\n  styleEnabled: true,\n  style: generatedViewerStyles"
+        viewer_style_cleanup_js = "cy.destroy();"
 
     return f"""
 const cytoscape = require('./code2petri/viewer/vendor/cytoscape.min.js');
@@ -357,6 +365,7 @@ if (btnExportPnml) {{
 }}
 
 const net = {net_json_literal};
+{viewer_style_setup_js}
 
 const expandedNodes = new Map();
 const calleeNetsMap = {{}};
@@ -365,7 +374,7 @@ function renderStep() {{}}
 
 const cy = cytoscape({{
   elements: netToElements(net),
-  userPanningEnabled: false
+  userPanningEnabled: false{viewer_style_options_js}
 }});
 
 cy.on('tap', function(evt) {{
@@ -470,6 +479,7 @@ if (hudBtnUnfold) {{
 {cxttap_handler_js}
 
 {test_logic_js}
+{viewer_style_cleanup_js}
 """
 
 
